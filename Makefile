@@ -1,0 +1,77 @@
+SHELL := /bin/bash
+
+# ---- Paths ----
+PY_DIR := backend
+
+# ---- Help ----
+.PHONY: help
+help:
+	@echo "Targets:"
+	@echo "  setup         Install Python deps (uv) and pre-commit hooks"
+	@echo "  hooks         Install pre-commit hooks"
+	@echo "  verify        Run lint, typecheck, tests, coverage (all)"
+	@echo "  lint          Ruff lint"
+	@echo "  format        Apply Ruff format + Black"
+	@echo "  fmt-check     Check formatting without changing files"
+	@echo "  typecheck     Mypy type checking"
+	@echo "  test          Pytest"
+	@echo "  coverage      Pytest with coverage and gate"
+	@echo "  precommit     Run pre-commit on all files"
+	@echo "  clean         Remove caches and build artifacts"
+
+# ---- Setup / Hooks ----
+.PHONY: setup
+setup:
+	cd $(PY_DIR) && uv sync --all-extras
+	pre-commit install
+
+.PHONY: hooks
+hooks:
+	pre-commit install
+
+# ---- Quality gates ----
+.PHONY: verify
+verify: lint typecheck test coverage
+
+.PHONY: preflight
+preflight: format lint typecheck coverage precommit
+	@echo "✅ Preflight complete."
+
+.PHONY: lint
+lint:
+	cd $(PY_DIR) && uv run ruff check .
+
+.PHONY: format
+format:
+	cd $(PY_DIR) && uv run ruff check --fix .
+	cd $(PY_DIR) && uv run ruff format .
+	cd $(PY_DIR) && uv run black .
+
+.PHONY: fmt-check
+fmt-check:
+	cd $(PY_DIR) && uv run ruff format --check .
+	cd $(PY_DIR) && uv run black --check .
+
+.PHONY: typecheck
+typecheck:
+	cd $(PY_DIR) && uv run mypy .
+
+.PHONY: test
+test:
+	cd $(PY_DIR) && uv run pytest -q
+
+.PHONY: coverage
+coverage:
+	cd $(PY_DIR) && uv run pytest --cov=src --cov-report=term-missing
+
+# ---- Pre-commit runner ----
+.PHONY: precommit
+precommit:
+	pre-commit run --all-files
+
+# ---- Clean ----
+.PHONY: clean
+clean:
+	find . -name "__pycache__" -type d -prune -exec rm -rf {} +
+	find . -name "*.pyc" -delete
+	rm -rf $(PY_DIR)/.pytest_cache $(PY_DIR)/.mypy_cache

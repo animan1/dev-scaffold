@@ -1,0 +1,57 @@
+[project]
+name = "app"
+version = "0.1.0"
+description = "Backend service scaffold"
+authors = [{ name = "Daniel Boeve", email = "djboeve@gmail.com" }]
+requires-python = ">=3.12"
+readme = "README.md"
+dependencies = [
+  "django>=5.1,<6",
+  "django-environ>=0.11.2,<1",
+  "psycopg[binary]>=3.2.1,<4",
+  "redis>=5,<6",
+  "celery>=5.4,<6",
+]
+
+[tool.uv]
+# uv manages dependencies + virtualenv
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+  "pytest-django>=4.8",
+  "pytest-cov>=5.0",
+  "ruff>=0.6.9",
+  "black>=24.8.0",
+  "mypy>=1.11.1",
+  "types-redis",
+  "types-requests",
+]
+
+[tool.ruff]
+line-length = 100
+lint.select = ["E","F","I","N","UP","B","C90"]
+lint.ignore = ["E203","E266","E501"]
+
+[tool.black]
+line-length = 100
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 85
+
+[tool.mypy]
+python_version = "3.12"
+plugins = []
+strict = true
+warn_unused_configs = true
+warn_return_any = true
+warn_unused_ignores = true
+exclude = ["migrations"]
