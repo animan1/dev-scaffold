@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv/
+
+# Node
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Env
+.env
+.env.*
+!.env.example
+
+# VS Code
+.vscode/.history/
+
+# Docker
+*.log
+.tmp/
+
+# OS
+.DS_Store
+Thumbs.db
