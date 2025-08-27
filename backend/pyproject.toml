@@ -24,8 +24,11 @@ dev = [
   "ruff>=0.6.9",
   "black>=24.8.0",
   "mypy>=1.11.1",
+  "django-stubs>=5.0.2",
+  "django-stubs-ext>=5.0.2",
   "types-redis",
   "types-requests",
+  "pre-commit>=3.8.0"
 ]
 
 [tool.ruff]
@@ -37,11 +40,19 @@ lint.ignore = ["E203","E266","E501"]
 line-length = 100
 
 [tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "app.project.settings.dev"
+pythonpath = ["src"]
 addopts = "-ra --strict-markers"
 
 [tool.coverage.run]
 branch = true
-source = ["src"]
+source = ["src/app"]
+omit = [
+  "src/app/manage.py",
+  "src/app/project/asgi.py",
+  "src/app/project/wsgi.py",
+  "src/app/project/settings/*.py",
+]
 
 [tool.coverage.report]
 show_missing = true
@@ -55,3 +66,10 @@ warn_unused_configs = true
 warn_return_any = true
 warn_unused_ignores = true
 exclude = ["migrations"]
+
+[[tool.mypy.overrides]]
+module = ["environ", "environ.*"]
+ignore_missing_imports = true
+
+[tool.django-stubs]
+django_settings_module = "app.project.settings.dev"

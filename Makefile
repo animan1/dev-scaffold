@@ -4,30 +4,46 @@ SHELL := /bin/bash
 PY_DIR := backend
 
 # ---- Help ----
-.PHONY: help
 help:
 	@echo "Targets:"
-	@echo "  setup         Install Python deps (uv) and pre-commit hooks"
-	@echo "  hooks         Install pre-commit hooks"
-	@echo "  verify        Run lint, typecheck, tests, coverage (all)"
-	@echo "  lint          Ruff lint"
-	@echo "  format        Apply Ruff format + Black"
-	@echo "  fmt-check     Check formatting without changing files"
-	@echo "  typecheck     Mypy type checking"
-	@echo "  test          Pytest"
-	@echo "  coverage      Pytest with coverage and gate"
-	@echo "  precommit     Run pre-commit on all files"
-	@echo "  clean         Remove caches and build artifacts"
+	@echo "  setup           Install Python deps (uv) and pre-commit hooks"
+	@echo "  hooks           Install pre-commit hooks"
+	@echo "  verify          Run lint, typecheck, tests, coverage (all)"
+	@echo "  preflight       Pre-commit all-in-one (format, lint, typecheck, tests, coverage, hooks)"
+	@echo "  backend.run     Run Django dev server (app.settings.dev)"
+	@echo "  migrate         Run Django migrations"
+	@echo "  superuser       Create Django superuser"
+	@echo "  lint            Ruff lint"
+	@echo "  format          Apply Ruff format + Black"
+	@echo "  fmt-check       Check formatting without changing files"
+	@echo "  typecheck       Mypy type checking"
+	@echo "  test            Pytest"
+	@echo "  coverage        Pytest with coverage and gate"
+	@echo "  precommit       Run pre-commit on all files"
+	@echo "  clean           Remove caches and build artifacts"
+
+# ---- Django dev helpers ----
+.PHONY: backend.run
+backend.run:
+	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage runserver 0.0.0.0:8000
+
+.PHONY: migrate
+migrate:
+	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage migrate
+
+.PHONY: superuser
+superuser:
+	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage createsuperuser
 
 # ---- Setup / Hooks ----
 .PHONY: setup
 setup:
 	cd $(PY_DIR) && uv sync --all-extras
-	pre-commit install
+	uv run pre-commit install
 
 .PHONY: hooks
 hooks:
-	pre-commit install
+	uv run pre-commit install
 
 # ---- Quality gates ----
 .PHONY: verify
@@ -67,7 +83,7 @@ coverage:
 # ---- Pre-commit runner ----
 .PHONY: precommit
 precommit:
-	pre-commit run --all-files
+	uv run pre-commit run --all-files
 
 # ---- Clean ----
 .PHONY: clean
