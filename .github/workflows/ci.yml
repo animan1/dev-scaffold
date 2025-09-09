@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compose up (detached) via Make
+        run: make up-detached
+
+      - name: Wait for backend
+        run: make wait-backend
+
+      - name: Verify (inside container) via Make
+        run: make ci-backend
+
+      - name: Smoke test via Nginx
+        run: make smoke
+
+      - name: Tear down
+        if: always()
+        run: make ci-clean

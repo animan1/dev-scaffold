@@ -16,9 +16,11 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --all-extras
 
 # ---- runtime image ----
-FROM python:3.12-slim AS runtime
+FROM base AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
+# Install tools needed by CI targets that invoke bash and make
+RUN apt-get update && apt-get install -y --no-install-recommends bash make && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 COPY --from=base /app/.venv /app/.venv

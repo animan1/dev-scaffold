@@ -44,10 +44,44 @@ ps:
 bash-backend:
 	$(COMPOSE_DEV) exec backend bash
 
+.PHONY: up-detached
+up-detached:
+	$(COMPOSE_DEV) up -d --build
+
+.PHONY: down-detached
+down-detached:
+	$(COMPOSE_DEV) down -v
+
+.PHONY: wait-backend
+wait-backend:
+	@echo "Waiting for backend on http://localhost:8000/healthz ..."
+	@for i in $$(seq 1 60); do \
+		if curl -fsS http://localhost:8000/healthz >/dev/null; then \
+			echo "Backend is up"; exit 0; \
+		fi; \
+		sleep 1; \
+	done; \
+	echo "Backend did not become ready in time"; \
+	$(COMPOSE_DEV) logs backend || true; \
+	exit 1
+
 # CI helper: run backend verify inside container (once frontend is added, we can add an FE target too)
 .PHONY: ci-backend
 ci-backend:
-	$(COMPOSE_DEV) run --rm backend bash -lc "cd /app && uv run ruff check . && uv run mypy . && uv run pytest --cov=src --cov-report=term-missing"
+	$(COMPOSE_DEV) run --rm backend bash -lc 'make -f /workspace/Makefile PY_DIR=/app verify'
+
+.PHONY: smoke
+smoke:
+	curl -fsS http://localhost:8080/api/healthz >/dev/null
+
+# One-shot CI recipe
+.PHONY: ci
+ci: up-detached wait-backend ci-backend smoke
+	@echo "CI checks passed"
+
+.PHONY: ci-clean
+ci-clean:
+	-$(COMPOSE_DEV) down -v
 
 # ---- Django dev helpers ----
 .PHONY: backend.run

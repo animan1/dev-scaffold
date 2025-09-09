@@ -11,6 +11,7 @@ services:
       <<: *env_common
     volumes:
       - ../backend:/app
+      - ..:/workspace:ro
       - /app/.venv
     working_dir: /app/src
     command: [ "python", "-m", "app.manage", "runserver", "0.0.0.0:8000" ]
