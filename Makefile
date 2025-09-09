@@ -1,4 +1,5 @@
 SHELL := /bin/bash
+COMPOSE_DEV := docker compose -f deploy/docker-compose.dev.yml
 
 # ---- Paths ----
 PY_DIR := backend
@@ -21,6 +22,32 @@ help:
 	@echo "  coverage        Pytest with coverage and gate"
 	@echo "  precommit       Run pre-commit on all files"
 	@echo "  clean           Remove caches and build artifacts"
+
+# ---- Docker / Compose ----
+.PHONY: up
+up:
+	$(COMPOSE_DEV) up --build -d
+
+.PHONY: down
+down:
+	$(COMPOSE_DEV) down -v
+
+.PHONY: logs
+logs:
+	$(COMPOSE_DEV) logs -f --tail=200
+
+.PHONY: ps
+ps:
+	$(COMPOSE_DEV) ps
+
+.PHONY: bash-backend
+bash-backend:
+	$(COMPOSE_DEV) exec backend bash
+
+# CI helper: run backend verify inside container (once frontend is added, we can add an FE target too)
+.PHONY: ci-backend
+ci-backend:
+	$(COMPOSE_DEV) run --rm backend bash -lc "cd /app && uv run ruff check . && uv run mypy . && uv run pytest --cov=src --cov-report=term-missing"
 
 # ---- Django dev helpers ----
 .PHONY: backend.run

@@ -1,0 +1,26 @@
+x-env-common: &env_common
+  DJANGO_DEBUG: "True"
+  DJANGO_ALLOWED_HOSTS: "*"
+  DJANGO_SECRET_KEY: dev-only-change-me
+
+services:
+  backend:
+    build:
+      context: ../backend
+    environment:
+      <<: *env_common
+    volumes:
+      - ../backend:/app
+      - /app/.venv
+    working_dir: /app/src
+    command: [ "python", "-m", "app.manage", "runserver", "0.0.0.0:8000" ]
+    ports:
+      - "8000:8000" # direct access (useful for debugging)
+
+  nginx:
+    build:
+      context: ./nginx
+    ports:
+      - "8080:80" # stable entrypoint for CI/staging-like flows
+    depends_on:
+      - backend
