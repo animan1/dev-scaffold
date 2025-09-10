@@ -238,3 +238,7 @@ fe.format:
 .PHONY: fe.fmt-check
 fe.fmt-check:
 	cd $(FRONTEND_DIR) && pnpm fmt-check
+
+.PHONY: fe.test
+fe.test:
+	cd $(FRONTEND_DIR) && pnpm test
