@@ -246,3 +246,7 @@ fe.test:
 .PHONY: fe.typecheck
 fe.typecheck:
 	cd $(FRONTEND_DIR) && pnpm typecheck
+
+.PHONY: fe.verify
+fe.verify:
+	cd $(FRONTEND_DIR) && pnpm verify
