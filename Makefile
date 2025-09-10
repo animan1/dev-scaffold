@@ -218,3 +218,7 @@ clean:
 fe.setup:
 	@corepack enable || true
 	cd $(FRONTEND_DIR) && pnpm install
+
+.PHONY: fe.run
+fe.run:
+	cd $(FRONTEND_DIR) && pnpm dev
