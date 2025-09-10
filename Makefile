@@ -230,3 +230,7 @@ fe.build:
 .PHONY: fe.lint
 fe.lint:
 	cd $(FRONTEND_DIR) && pnpm lint
+
+.PHONY: fe.format
+fe.format:
+	cd $(FRONTEND_DIR) && pnpm format
