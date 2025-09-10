@@ -1,10 +1,11 @@
 SHELL := /bin/bash
 COMPOSE_DEV := docker compose -f deploy/docker-compose.dev.yml
 COMPOSE_PROD := docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod
+FRONTEND_DIR := frontend
 
 # ---- Paths ----
 PY_DIR := backend
-URL_ROOT ?= http://localhost:8080
+URL_ROOT ?= http://localhost:8000
 SMOKE_FLAGS ?=
 
 # ---- Help ----
@@ -89,8 +90,8 @@ ci-clean:
 	-$(COMPOSE_DEV) down -v
 
 # Prod
-.PHONY: prod-bootstrap
-prod-bootstrap:
+.PHONY: bootstrap-prod
+bootstrap-prod:
 	@echo "🔧 Bootstrapping prod-local (env + certs + compose up + migrate + smoke)..."
 	# Ensure env file exists (generate if missing)
 	@if [ ! -f deploy/.env.prod ]; then \
@@ -211,3 +212,9 @@ clean:
 	find . -name "__pycache__" -type d -prune -exec rm -rf {} +
 	find . -name "*.pyc" -delete
 	rm -rf $(PY_DIR)/.pytest_cache $(PY_DIR)/.mypy_cache
+
+# ---- Frontend (Vite/React/TS) ----
+.PHONY: fe.setup
+fe.setup:
+	@corepack enable || true
+	cd $(FRONTEND_DIR) && pnpm install
