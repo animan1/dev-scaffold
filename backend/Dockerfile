@@ -27,8 +27,11 @@ CMD ["python", "-m", "app.manage", "runserver", "0.0.0.0:8000"]
 
 # ---- prod target ----
 FROM base AS prod
+ENV DJANGO_SETTINGS_MODULE=app.project.settings.prod
 # reproducible install; no dev extras
 RUN uv sync --frozen
 COPY src ./src
+RUN mkdir -p /static
+RUN python -m app.manage collectstatic --noinput
 # Gunicorn default for prod
 CMD ["gunicorn", "app.project.wsgi:application", "-b", "0.0.0.0:8000", "--workers", "2", "--threads", "4", "--timeout", "60"]

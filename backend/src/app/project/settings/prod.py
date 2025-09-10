@@ -38,12 +38,7 @@ SECURE_HSTS_SECONDS = env.int("DJANGO_SECURE_HSTS_SECONDS", default=0)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool("DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", default=False)
 SECURE_HSTS_PRELOAD = env.bool("DJANGO_SECURE_HSTS_PRELOAD", default=False)
 
-# --- Static files ---
-# nginx will serve collected static from this directory (ensure collectstatic in build/deploy)
-# STATIC_URL should be defined in base.py
-# Example default here if not already set in base:
-# from pathlib import Path
-# STATIC_ROOT = Path(BASE_DIR) / "staticfiles"
+STATIC_ROOT = "/static/"
 
 # --- Logging ---
 # Ship useful logs to stdout/stderr (picked up by Docker)

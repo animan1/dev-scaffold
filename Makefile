@@ -4,6 +4,8 @@ COMPOSE_PROD := docker compose -f deploy/docker-compose.prod.yml --env-file depl
 
 # ---- Paths ----
 PY_DIR := backend
+URL_ROOT ?= http://localhost:8080
+SMOKE_FLAGS ?=
 
 # ---- Help ----
 help:
@@ -72,8 +74,10 @@ ci-backend:
 	$(COMPOSE_DEV) run --rm backend bash -lc 'make -f /workspace/Makefile PY_DIR=/app verify'
 
 .PHONY: smoke
+smoke: CURL_CMD = curl $(SMOKE_FLAGS) -fsS
 smoke:
-	curl -fsS http://localhost:8080/api/healthz >/dev/null
+	$(CURL_CMD) "$(URL_ROOT)/api/healthz" >/dev/null
+	$(CURL_CMD) "$(URL_ROOT)/static/smoketest.txt" >/dev/null
 
 # One-shot CI recipe
 .PHONY: ci
@@ -133,8 +137,10 @@ migrate-prod:
 bash-prod:
 	$(COMPOSE_PROD) exec backend bash
 
-smoke-prod:
-	curl -kfsS https://localhost/api/healthz >/dev/null
+.PHONY: smoke-prod
+smoke-prod: URL_ROOT := https://localhost
+smoke-prod: SMOKE_FLAGS := -k
+smoke-prod: smoke
 
 # ---- Django dev helpers ----
 .PHONY: backend.run

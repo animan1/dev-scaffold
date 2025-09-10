@@ -20,6 +20,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - staticfiles:/static
 
   nginx:
     build:
@@ -30,8 +32,10 @@ services:
     volumes:
       - ./nginx/certs:/etc/nginx/certs:ro
       - ./nginx/default.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - staticfiles:/static:ro
     depends_on:
       - backend
 
 volumes:
   pgdata:
+  staticfiles:
