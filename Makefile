@@ -222,3 +222,7 @@ fe.setup:
 .PHONY: fe.run
 fe.run:
 	cd $(FRONTEND_DIR) && pnpm dev
+
+.PHONY: fe.build
+fe.build:
+	cd $(FRONTEND_DIR) && pnpm build
