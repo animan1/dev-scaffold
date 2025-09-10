@@ -18,3 +18,12 @@ repos:
       - id: check-merge-conflict
       - id: end-of-file-fixer
       - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      - id: fe-eslint
+        name: Frontend ESLint
+        language: system
+        pass_filenames: true
+        files: ^frontend/.*\.(ts|tsx|js|jsx)$
+        entry: bash -lc 'cd frontend && pnpm eslint --max-warnings 0 "$@"'

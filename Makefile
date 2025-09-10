@@ -226,3 +226,7 @@ fe.run:
 .PHONY: fe.build
 fe.build:
 	cd $(FRONTEND_DIR) && pnpm build
+
+.PHONY: fe.lint
+fe.lint:
+	cd $(FRONTEND_DIR) && pnpm lint
