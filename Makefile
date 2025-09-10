@@ -242,3 +242,7 @@ fe.fmt-check:
 .PHONY: fe.test
 fe.test:
 	cd $(FRONTEND_DIR) && pnpm test
+
+.PHONY: fe.typecheck
+fe.typecheck:
+	cd $(FRONTEND_DIR) && pnpm typecheck

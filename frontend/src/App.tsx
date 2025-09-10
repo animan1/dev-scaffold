@@ -1,11 +1,14 @@
 import React from "react";
 
+interface Health {
+  status?: string;
+}
 export function App(): JSX.Element {
   const [status, setStatus] = React.useState<string>("…");
 
   React.useEffect(() => {
     fetch("/api/healthz")
-      .then((r) => r.json())
+      .then((r) => r.json() as Promise<Health>)
       .then((j) => setStatus(j.status ?? "unknown"))
       .catch(() => setStatus("error"));
   }, []);
