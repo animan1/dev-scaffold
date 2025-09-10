@@ -9,5 +9,5 @@ def health(_request: HttpRequest) -> JsonResponse:
 
 
 urlpatterns = [
-    path("healthz", health, name="health"),
+    path("api/healthz", health, name="health"),
 ]
