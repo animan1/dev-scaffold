@@ -1,5 +1,6 @@
 SHELL := /bin/bash
 COMPOSE_DEV := docker compose -f deploy/docker-compose.dev.yml
+COMPOSE_PROD := docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod
 
 # ---- Paths ----
 PY_DIR := backend
@@ -82,6 +83,58 @@ ci: up-detached wait-backend ci-backend smoke
 .PHONY: ci-clean
 ci-clean:
 	-$(COMPOSE_DEV) down -v
+
+# Prod
+.PHONY: prod-bootstrap
+prod-bootstrap:
+	@echo "🔧 Bootstrapping prod-local (env + certs + compose up + migrate + smoke)..."
+	# Ensure env file exists (generate if missing)
+	@if [ ! -f deploy/.env.prod ]; then \
+		echo "→ Generating deploy/.env.prod"; \
+		chmod +x deploy/setup-env.sh || true; \
+		./deploy/setup-env.sh; \
+	else \
+		echo "✓ deploy/.env.prod exists"; \
+	fi
+	# Ensure TLS certs exist (generate if missing)
+	@if [ ! -f deploy/nginx/certs/server.crt ] || [ ! -f deploy/nginx/certs/server.key ]; then \
+		echo "→ Generating self-signed TLS certs under deploy/nginx/certs"; \
+		mkdir -p deploy/nginx/certs; \
+		openssl req -x509 -nodes -newkey rsa:2048 \
+		  -keyout deploy/nginx/certs/server.key \
+		  -out deploy/nginx/certs/server.crt \
+		  -days 365 \
+		  -subj "/CN=localhost"; \
+	else \
+		echo "✓ TLS certs exist in deploy/nginx/certs"; \
+	fi
+	# Bring up stack, run migrations, and smoke test
+	$(COMPOSE_PROD) up -d --build
+	$(COMPOSE_PROD) run --rm backend bash -lc "cd /app && python -m app.manage migrate"
+	curl -kfsS https://localhost/api/healthz >/dev/null && echo "✅ Smoke OK: https://localhost/api/healthz"
+
+.PHONY: up-prod
+up-prod:
+	$(COMPOSE_PROD) up -d --build
+
+.PHONY: down-prod
+down-prod:
+	$(COMPOSE_PROD) down -v
+
+.PHONY: logs-prod
+logs-prod:
+	$(COMPOSE_PROD) logs -f --tail=200
+
+.PHONY: migrate-prod
+migrate-prod:
+	$(COMPOSE_PROD) run --rm backend bash -lc "cd /app && python -m app.manage migrate"
+
+.PHONY: bash-prod
+bash-prod:
+	$(COMPOSE_PROD) exec backend bash
+
+smoke-prod:
+	curl -kfsS https://localhost/api/healthz >/dev/null
 
 # ---- Django dev helpers ----
 .PHONY: backend.run

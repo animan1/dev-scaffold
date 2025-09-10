@@ -12,23 +12,23 @@ ENV PATH="/root/.local/bin:${PATH}"
 WORKDIR /app
 # Only copy files that influence deps first for caching
 COPY pyproject.toml uv.lock ./
+ENV PATH="/app/.venv/bin:${PATH}"
+ENV PYTHONPATH="/app/src:${PYTHONPATH}"
+
+# ---- dev image ----
+FROM base AS dev
 # For dev, allow lock to drift; for prod we'll use --frozen in the image build stage
 RUN uv sync --all-extras
-
-# ---- runtime image ----
-FROM base AS runtime
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+# COPY src ./src
 # Install tools needed by CI targets that invoke bash and make
 RUN apt-get update && apt-get install -y --no-install-recommends bash make && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-
-COPY --from=base /app/.venv /app/.venv
-ENV PATH="/app/.venv/bin:${PATH}"
-
-# App source
-COPY src ./src
-COPY pyproject.toml uv.lock ./
-
 # Default command is the dev server (overridden in compose as needed)
 CMD ["python", "-m", "app.manage", "runserver", "0.0.0.0:8000"]
+
+# ---- prod target ----
+FROM base AS prod
+# reproducible install; no dev extras
+RUN uv sync --frozen
+COPY src ./src
+# Gunicorn default for prod
+CMD ["gunicorn", "app.project.wsgi:application", "-b", "0.0.0.0:8000", "--workers", "2", "--threads", "4", "--timeout", "60"]

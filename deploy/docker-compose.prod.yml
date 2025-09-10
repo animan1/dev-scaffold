@@ -1,29 +1,35 @@
 services:
   db:
     image: postgres:16
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+    env_file:
+      - .env.prod
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     volumes:
       - pgdata:/var/lib/postgresql/data
 
   backend:
     build:
       context: ../backend
-    environment:
-      DJANGO_DEBUG: "False"
-      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS}
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
-      DATABASE_URL: ${DATABASE_URL}
+      target: prod
+    env_file:
+      - .env.prod
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   nginx:
     build:
       context: ./nginx
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/default.prod.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - backend
 

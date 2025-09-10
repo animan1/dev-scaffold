@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 .venv/
 .uv/
+.coverage
 
 # Node
 node_modules/
@@ -26,3 +27,6 @@ coverage/
 # OS
 .DS_Store
 Thumbs.db
+
+# Certs
+deploy/nginx/certs/
