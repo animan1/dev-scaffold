@@ -4,5 +4,23 @@
     "python.testing.pytestEnabled": true,
     "python.testing.pytestArgs": [
         "backend"
-    ]
+    ],
+    // ---------- Frontend (React/TS) ----------
+    // Use Prettier for formatting; ESLint for lint
+    "[typescript]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[typescriptreact]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[javascript]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[json]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[jsonc]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "prettier.requireConfig": true,
 }

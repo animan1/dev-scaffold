@@ -2,20 +2,20 @@ import react from "@vitejs/plugin-react-swc";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-    plugins: [react()],
-    server: {
-        port: 5173,
-        strictPort: true,
-        proxy: {
-            // Proxy API to backend dev server when running locally
-            "/api": {
-                target: "http://localhost:8000",
-                changeOrigin: true
-            }
-        }
+  plugins: [react()],
+  server: {
+    port: 5173,
+    strictPort: true,
+    proxy: {
+      // Proxy API to backend dev server when running locally
+      "/api": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+      },
     },
-    preview: {
-        port: 5173,
-        strictPort: true
-    }
+  },
+  preview: {
+    port: 5173,
+    strictPort: true,
+  },
 });
