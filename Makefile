@@ -53,9 +53,9 @@ bash-backend:
 
 .PHONY: wait-backend
 wait-backend:
-	@echo "Waiting for backend on http://localhost:8000/healthz ..."
+	@echo "Waiting for backend on http://localhost:8080/api/healthz ..."
 	@for i in $$(seq 1 60); do \
-		if curl -fsS http://localhost:8000/healthz >/dev/null; then \
+		if curl -fsS http://localhost:8080/api/healthz >/dev/null; then \
 			echo "Backend is up"; exit 0; \
 		fi; \
 		sleep 1; \
