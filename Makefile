@@ -36,6 +36,9 @@ up:
 down:
 	$(COMPOSE_DEV) down -v
 
+.PHONY: restart
+restart: down up
+
 .PHONY: logs
 logs:
 	$(COMPOSE_DEV) logs -f --tail=200
@@ -47,14 +50,6 @@ ps:
 .PHONY: bash-backend
 bash-backend:
 	$(COMPOSE_DEV) exec backend bash
-
-.PHONY: up-detached
-up-detached:
-	$(COMPOSE_DEV) up -d --build
-
-.PHONY: down-detached
-down-detached:
-	$(COMPOSE_DEV) down -v
 
 .PHONY: wait-backend
 wait-backend:
@@ -82,7 +77,7 @@ smoke:
 
 # One-shot CI recipe
 .PHONY: ci
-ci: up-detached wait-backend ci-backend smoke
+ci: up wait-backend ci-backend smoke
 	@echo "CI checks passed"
 
 .PHONY: ci-clean
