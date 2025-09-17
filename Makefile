@@ -5,7 +5,7 @@ FRONTEND_DIR := frontend
 
 # ---- Paths ----
 PY_DIR := backend
-URL_ROOT ?= http://localhost:8000
+URL_ROOT ?= http://localhost:8080
 SMOKE_FLAGS ?=
 
 # ---- Help ----
@@ -80,10 +80,11 @@ smoke: CURL_CMD = curl $(SMOKE_FLAGS) -fsS
 smoke:
 	$(CURL_CMD) "$(URL_ROOT)/api/healthz" >/dev/null
 	$(CURL_CMD) "$(URL_ROOT)/static/smoketest.txt" >/dev/null
+	$(CURL_CMD) "$(URL_ROOT)/" | grep -qi 'dev-scaffold\|id="root"'
 
 # One-shot CI recipe
 .PHONY: ci
-ci: up wait-backend ci-backend smoke
+ci: up wait-backend be.ci fe.ci smoke
 	@echo "CI checks passed"
 
 .PHONY: ci-clean
