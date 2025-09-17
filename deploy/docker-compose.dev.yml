@@ -19,7 +19,7 @@ services:
     ports:
       - "8000:8000" # direct access (useful for debugging)
   frontend:
-    image: node:20-alpine
+    image: node:20
     working_dir: /app
     command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm dev --host 0.0.0.0"
     ports:
@@ -27,6 +27,7 @@ services:
     volumes:
       - ../frontend:/app:cached
       - /app/node_modules
+      - ../:/workspace:ro
     environment:
       # Vite defaults; no /api prefix change needed since nginx proxies /api → backend
       NODE_ENV: development

@@ -13,7 +13,7 @@ help:
 	@echo "Targets:"
 	@echo "  setup           Install Python deps (uv) and pre-commit hooks"
 	@echo "  hooks           Install pre-commit hooks"
-	@echo "  verify          Run lint, typecheck, tests, coverage (all)"
+	@echo "  be.verify          Run lint, typecheck, tests, coverage (all)"
 	@echo "  preflight       Pre-commit all-in-one (format, lint, typecheck, tests, coverage, hooks)"
 	@echo "  backend.run     Run Django dev server (app.settings.dev)"
 	@echo "  migrate         Run Django migrations"
@@ -64,10 +64,16 @@ wait-backend:
 	$(COMPOSE_DEV) logs backend || true; \
 	exit 1
 
-# CI helper: run backend verify inside container (once frontend is added, we can add an FE target too)
-.PHONY: ci-backend
-ci-backend:
-	$(COMPOSE_DEV) run --rm backend bash -lc 'make -f /workspace/Makefile PY_DIR=/app verify'
+# CI helper: run backend verify inside container
+.PHONY: be.ci
+be.ci:
+	$(COMPOSE_DEV) run --rm backend bash -lc 'make -f /workspace/Makefile PY_DIR=/app be.verify'
+
+# CI helper: run frontend verify inside container
+.PHONY: fe.ci
+fe.ci:
+	$(COMPOSE_DEV) run --rm frontend sh -lc 'apt-get install make'
+	$(COMPOSE_DEV) run --rm frontend sh -lc 'make -f /workspace/Makefile FRONTEND_DIR=/app fe.setup fe.verify'
 
 .PHONY: smoke
 smoke: CURL_CMD = curl $(SMOKE_FLAGS) -fsS
@@ -162,8 +168,8 @@ hooks:
 	uv run pre-commit install
 
 # ---- Quality gates ----
-.PHONY: verify
-verify: lint typecheck test coverage
+.PHONY: be.verify
+be.verify: lint typecheck test coverage
 
 .PHONY: preflight
 preflight: format lint typecheck coverage precommit

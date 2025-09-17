@@ -19,7 +19,7 @@ jobs:
         run: make wait-backend
 
       - name: Verify (inside container) via Make
-        run: make ci-backend
+        run: make be.ci fe.ci
 
       - name: Smoke test via Nginx
         run: make smoke
