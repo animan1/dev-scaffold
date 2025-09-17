@@ -16,7 +16,7 @@ jobs:
         run: make up
 
       - name: Wait for backend
-        run: make wait-backend
+        run: make be.wait
 
       - name: Verify (inside container) via Make
         run: make be.ci fe.ci
@@ -26,4 +26,4 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: make ci-clean
+        run: make down
