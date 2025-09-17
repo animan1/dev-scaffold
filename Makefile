@@ -174,6 +174,10 @@ migrate: ## Run Django migrations (dev)
 superuser: ## Create Django superuser (dev)
 	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage createsuperuser
 
+.PHONY: shell
+shell: ## Run Django shell (dev)
+	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage shell
+
 # ---- Setup / Hooks ----
 .PHONY: setup
 setup: ## Install Python/FE deps and pre-commit hooks

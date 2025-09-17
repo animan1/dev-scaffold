@@ -29,7 +29,8 @@ dev = [
   "django-stubs-ext>=5.0.2",
   "types-redis",
   "types-requests",
-  "pre-commit>=3.8.0"
+  "pre-commit>=3.8.0",
+  "ipython>=9.5,<10"
 ]
 
 [tool.ruff]
