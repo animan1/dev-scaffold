@@ -6,7 +6,7 @@ FRONTEND_DIR := frontend
 # ---- Paths ----
 PY_DIR := backend
 URL_ROOT ?= http://localhost:8080
-SMOKE_FLAGS ?=
+CURL_FLAGS ?=
 
 # ---- Help ----
 help:
@@ -53,9 +53,9 @@ bash-backend:
 
 .PHONY: wait-backend
 wait-backend:
-	@echo "Waiting for backend on http://localhost:8080/api/healthz ..."
+	@echo "Waiting for backend on $(URL_ROOT)/api/healthz ..."
 	@for i in $$(seq 1 60); do \
-		if curl -fsS http://localhost:8080/api/healthz >/dev/null; then \
+		if curl -fsS $(CURL_FLAGS) $(URL_ROOT)/api/healthz >/dev/null; then \
 			echo "Backend is up"; exit 0; \
 		fi; \
 		sleep 1; \
@@ -76,7 +76,7 @@ fe.ci:
 	$(COMPOSE_DEV) run --rm frontend sh -lc 'make -f /workspace/Makefile FRONTEND_DIR=/app fe.setup fe.verify'
 
 .PHONY: smoke
-smoke: CURL_CMD = curl $(SMOKE_FLAGS) -fsS
+smoke: CURL_CMD = curl $(CURL_FLAGS) -fsS
 smoke:
 	$(CURL_CMD) "$(URL_ROOT)/api/healthz" >/dev/null
 	$(CURL_CMD) "$(URL_ROOT)/static/smoketest.txt" >/dev/null
@@ -120,6 +120,9 @@ bootstrap-prod:
 	$(COMPOSE_PROD) run --rm backend bash -lc "cd /app && python -m app.manage migrate"
 	curl -kfsS https://localhost/api/healthz >/dev/null && echo "✅ Smoke OK: https://localhost/api/healthz"
 
+.PHONY: restart-prod
+restart-prod: down-prod up-prod
+
 .PHONY: up-prod
 up-prod:
 	$(COMPOSE_PROD) up -d --build
@@ -142,8 +145,13 @@ bash-prod:
 
 .PHONY: smoke-prod
 smoke-prod: URL_ROOT := https://localhost
-smoke-prod: SMOKE_FLAGS := -k
+smoke-prod: CURL_FLAGS := -k
 smoke-prod: smoke
+
+.PHONY: wait-backend-prod
+wait-backend-prod: URL_ROOT := https://localhost
+wait-backend-prod: CURL_FLAGS := -k
+wait-backend-prod: wait-backend
 
 # ---- Django dev helpers ----
 .PHONY: backend.run
