@@ -48,7 +48,7 @@ down: ## (Docker) Stop dev stack and remove volumes
 
 .PHONY: restart
 restart: ## (Docker) Restart dev stack
-	down up
+restart: down up
 
 .PHONY: logs
 logs: ## (Docker) Tail dev logs
@@ -85,14 +85,15 @@ fe.ci: ## (Docker) Run frontend verify inside dev container
 
 .PHONY: smoke
 smoke: ## Dev smoketest (API + static + FE root)
-	CURL_CMD = curl $(CURL_FLAGS) -fsS
+smoke: CURL_CMD = curl $(CURL_FLAGS) -fsS
+smoke:
 	$(CURL_CMD) "$(URL_ROOT)/api/healthz" >/dev/null
 	$(CURL_CMD) "$(URL_ROOT)/static/smoketest.txt" >/dev/null
 	$(CURL_CMD) "$(URL_ROOT)/" | grep -qi 'dev-scaffold\|id="root"'
 
 .PHONY: ci
 ci: ## (Docker) One-shot CI recipe (dev stack + FE/BE verify + smoke)
-	up be.wait be.ci fe.ci smoke
+ci: up be.wait be.ci fe.ci smoke
 	@echo "CI checks passed"
 
 # Prod
@@ -126,7 +127,7 @@ bootstrap-prod: ## Generate prod env/certs and start prod stack
 
 .PHONY: restart-prod
 restart-prod: ## Restart prod stack
-	down-prod up-prod
+restart-prod: down-prod up-prod
 
 .PHONY: up-prod
 up-prod: ## Start prod stack
@@ -150,15 +151,15 @@ bash-prod: ## Shell into backend container (prod)
 
 .PHONY: smoke-prod
 smoke-prod: ## Prod smoketest (API + static + FE root)
-	URL_ROOT := https://localhost
-	CURL_FLAGS := -k
-	smoke
+smoke-prod: URL_ROOT := https://localhost
+smoke-prod: CURL_FLAGS := -k
+smoke-prod: smoke
 
 .PHONY: be.wait-prod
 be.wait-prod: ## Wait for backend health (prod)
-	URL_ROOT := https://localhost
-	CURL_FLAGS := -k
-	be.wait
+be.wait-prod: URL_ROOT := https://localhost
+be.wait-prod: CURL_FLAGS := -k
+be.wait-prod: be.wait
 
 # ---- Django dev helpers ----
 .PHONY: be.run
@@ -176,29 +177,32 @@ superuser: ## Create Django superuser (dev)
 # ---- Setup / Hooks ----
 .PHONY: setup
 setup: ## Install Python/FE deps and pre-commit hooks
-	be.setup fe.setup
+setup: be.setup fe.setup
 
 .PHONY: be.setup
 be.setup: ## Sync backend deps (uv) and install hooks
+be.setup: be.sync hooks
+
+.PHONY: be.sync
+be.sync:
 	cd $(PY_DIR) && uv sync --all-extras
-	uv run pre-commit install
 
 .PHONY: hooks
 hooks: ## Install pre-commit hooks
-	uv run pre-commit install
+	cd $(PY_DIR) && uv run pre-commit install
 
 # ---- Quality gates ----
 .PHONY: verify
 verify: ## Run both backend and frontend verification
-	be.verify fe.verify
+verify: be.verify fe.verify
 
 .PHONY: be.verify
 be.verify: ## Backend lint + typecheck + tests + coverage
-	lint typecheck test coverage
+be.verify: lint typecheck test coverage
 
 .PHONY: preflight
 preflight: ## Format + lint + typecheck + coverage + precommit
-	format lint typecheck coverage precommit
+preflight: format lint typecheck coverage precommit
 	@echo "✅ Preflight complete."
 
 .PHONY: lint
@@ -231,7 +235,7 @@ coverage: ## Pytest coverage gate (backend)
 # ---- Pre-commit runner ----
 .PHONY: precommit
 precommit: ## Run pre-commit on all files
-	uv run pre-commit run --all-files
+precommit: uv run pre-commit run --all-files
 
 # ---- Clean ----
 .PHONY: clean

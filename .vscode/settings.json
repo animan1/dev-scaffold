@@ -25,7 +25,7 @@
   "files.trimTrailingWhitespace": true,
   "files.eol": "\n",
   "editor.codeActionsOnSave": {
-    "source.fixAll": true,
-    "source.organizeImports": true
+    "source.fixAll": "explicit",
+    "source.organizeImports": "explicit"
   }
 }
