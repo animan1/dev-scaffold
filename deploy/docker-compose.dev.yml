@@ -18,7 +18,22 @@ services:
     command: [ "python", "-m", "app.manage", "runserver", "0.0.0.0:8000" ]
     ports:
       - "8000:8000" # direct access (useful for debugging)
-
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm dev --host 0.0.0.0"
+    ports:
+      - "5173:5173"    # optional (useful to visit Vite directly)
+    volumes:
+      - ../frontend:/app:cached
+      - /app/node_modules
+    environment:
+      # Vite defaults; no /api prefix change needed since nginx proxies /api → backend
+      NODE_ENV: development
+      CI: "true"                    # ← avoid any interactive prompts
+      VITE_PROXY_TARGET: http://backend:8000
+    depends_on:
+      - backend
   nginx:
     build:
       context: ./nginx
