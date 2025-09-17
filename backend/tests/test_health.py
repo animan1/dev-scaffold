@@ -5,6 +5,6 @@ from django.test import Client
 
 def test_health_endpoint() -> None:
     c = Client()
-    resp = c.get("/healthz")
+    resp = c.get("/api/healthz")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
