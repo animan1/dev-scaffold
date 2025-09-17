@@ -25,7 +25,8 @@ services:
 
   nginx:
     build:
-      context: ./nginx
+      context: ..
+      dockerfile: deploy/nginx/Dockerfile
     ports:
       - "80:80"
       - "443:443"

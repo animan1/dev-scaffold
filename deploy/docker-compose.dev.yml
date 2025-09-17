@@ -37,7 +37,8 @@ services:
       - backend
   nginx:
     build:
-      context: ./nginx
+      context: ..
+      dockerfile: deploy/nginx/Dockerfile
     ports:
       - "8080:80" # stable entrypoint for CI/staging-like flows
     volumes:
