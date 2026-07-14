@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import environ
 from django.core.exceptions import ImproperlyConfigured
@@ -47,7 +46,7 @@ WSGI_APPLICATION = "app.project.wsgi.application"
 ASGI_APPLICATION = "app.project.asgi.application"
 
 # Templates (required for admin)
-TEMPLATES: list[dict[str, Any]] = [
+TEMPLATES: list[dict[str, object]] = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
         "DIRS": [str(BASE_DIR / "templates")],  # optional project-level templates directory

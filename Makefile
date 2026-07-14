@@ -209,8 +209,13 @@ preflight: ## Format + lint + typecheck + coverage + precommit
 preflight: format lint typecheck coverage precommit
 	@echo "✅ Preflight complete."
 
+.PHONY: no-any
+no-any: ## Reject explicit typing.Any in backend Python
+	cd $(PY_DIR) && uv run python scripts/check_no_any.py
+
 .PHONY: lint
 lint: ## Ruff lint (backend)
+lint: no-any
 	cd $(PY_DIR) && uv run ruff check .
 
 .PHONY: format
