@@ -202,7 +202,7 @@ verify: be.verify fe.verify
 
 .PHONY: be.verify
 be.verify: ## Backend format check + lint + typecheck + tests + coverage
-be.verify: fmt-check lint typecheck test coverage
+be.verify: fmt-check lint typecheck coverage
 
 .PHONY: preflight
 preflight: ## Format + lint + typecheck + coverage + precommit
