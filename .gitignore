@@ -21,6 +21,9 @@ coverage/
 # VS Code
 .vscode/.history/
 
+# Editor backups
+*.un~
+
 # Docker
 *.log
 .tmp/
@@ -31,3 +34,6 @@ Thumbs.db
 
 # Certs
 deploy/nginx/certs/
+
+# Disposable development database
+/backend/src/app/db.sqlite3
