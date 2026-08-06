@@ -2,6 +2,22 @@ SHELL := /bin/bash
 COMPOSE_DEV := docker compose -f deploy/docker-compose.dev.yml
 COMPOSE_PROD := docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod
 FRONTEND_DIR := frontend
+PROJECT_NAME ?= $(notdir $(CURDIR))
+RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
+RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)
+RELEASE_REVISION ?= $(shell git rev-parse HEAD)
+RELEASE_BACKEND_TAG = $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
+RELEASE_WEB_TAG = $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
+RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
+RELEASE_HTTP_PORT ?= 18080
+RELEASE_HTTPS_PORT ?= 18443
+COMPOSE_RELEASE = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) docker compose \
+	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
+	--env-file deploy/.env.prod --env-file $(RELEASE_FILE)
+COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
+	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
+	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
+	-f deploy/docker-compose.release-ci.yml
 
 # ---- Paths ----
 PY_DIR := backend
@@ -154,6 +170,91 @@ smoke-prod: ## Prod smoketest (API + static + FE root)
 smoke-prod: URL_ROOT := https://localhost
 smoke-prod: CURL_FLAGS := -k
 smoke-prod: smoke
+
+# Optional immutable-release profile
+.PHONY: build-release-images
+build-release-images: ## Build SHA-tagged production images once
+	docker build --target prod -t $(RELEASE_BACKEND_TAG) backend
+	docker build -f deploy/nginx/Dockerfile -t $(RELEASE_WEB_TAG) .
+
+.PHONY: prepare-release-ci
+prepare-release-ci: ## Prepare isolated, non-secret release smoke-test configuration
+	@mkdir -p .tmp deploy/nginx/certs
+	@printf '%s\n' \
+		'DJANGO_SECRET_KEY=release-ci-only' \
+		'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1' \
+		'POSTGRES_USER=app' \
+		'POSTGRES_PASSWORD=release-ci-only' \
+		'POSTGRES_DB=app' \
+		'DATABASE_URL=postgresql://app:release-ci-only@db:5432/app' \
+		> .tmp/release-ci.env
+	@if [ ! -f deploy/nginx/certs/server.crt ] || [ ! -f deploy/nginx/certs/server.key ]; then \
+		openssl req -x509 -nodes -newkey rsa:2048 \
+			-keyout deploy/nginx/certs/server.key \
+			-out deploy/nginx/certs/server.crt \
+			-days 1 -subj '/CN=localhost' \
+			-addext 'subjectAltName=DNS:localhost'; \
+	fi
+
+.PHONY: verify-release-images
+verify-release-images: prepare-release-ci ## Verify and smoke-test the exact SHA-tagged images
+	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
+		$(COMPOSE_RELEASE_CI) config --quiet
+	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
+		$(COMPOSE_RELEASE_CI) up -d --no-build db backend
+	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+		$(COMPOSE_RELEASE_CI) exec -T backend python -m app.manage check
+	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+		$(COMPOSE_RELEASE_CI) exec -T backend python -m app.manage migrate
+	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+		$(COMPOSE_RELEASE_CI) exec -T backend python -m app.manage collectstatic --noinput
+	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
+		$(COMPOSE_RELEASE_CI) up -d --no-build
+	@for i in $$(seq 1 60); do \
+		if curl -kfsS https://localhost:$(RELEASE_HTTPS_PORT)/api/healthz >/dev/null; then \
+			curl -kfsS https://localhost:$(RELEASE_HTTPS_PORT)/ >/dev/null; \
+			echo 'Release images passed smoke tests'; exit 0; \
+		fi; \
+		sleep 1; \
+	done; \
+	echo 'Release images did not become ready'; exit 1
+
+.PHONY: down-release-ci
+down-release-ci: ## Stop the isolated immutable-release test stack
+	@if [ -f .tmp/release-ci.env ]; then \
+		RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
+		$(COMPOSE_RELEASE_CI) down -v --remove-orphans; \
+	fi
+
+.PHONY: push-release-images
+push-release-images: ## Push verified images and record their immutable digests
+	docker push $(RELEASE_BACKEND_TAG)
+	docker push $(RELEASE_WEB_TAG)
+	@mkdir -p $(dir $(RELEASE_FILE))
+	@backend="$$(docker image inspect --format='{{index .RepoDigests 0}}' $(RELEASE_BACKEND_TAG))"; \
+	web="$$(docker image inspect --format='{{index .RepoDigests 0}}' $(RELEASE_WEB_TAG))"; \
+	test -n "$$backend"; test -n "$$web"; \
+	printf 'RELEASE_REVISION=%s\nRELEASE_BACKEND_IMAGE=%s\nRELEASE_WEB_IMAGE=%s\n' \
+		'$(RELEASE_REVISION)' "$$backend" "$$web" > $(RELEASE_FILE); \
+	echo "Recorded $(RELEASE_FILE)"
+
+.PHONY: deploy-release
+deploy-release: ## Pull and deploy the digest-pinned images in RELEASE_FILE
+	@test -f $(RELEASE_FILE) || { echo 'Set RELEASE_FILE to a recorded release manifest'; exit 1; }
+	$(COMPOSE_RELEASE) config --quiet
+	$(COMPOSE_RELEASE) pull backend nginx
+	$(COMPOSE_RELEASE) up -d --no-build db backend
+	$(COMPOSE_RELEASE) exec -T backend python -m app.manage migrate
+	$(COMPOSE_RELEASE) exec -T backend python -m app.manage collectstatic --noinput
+	$(COMPOSE_RELEASE) up -d --no-build
+
+.PHONY: rollback-release
+rollback-release: ## Deploy a previously recorded RELEASE_FILE
+rollback-release: deploy-release
 
 .PHONY: be.wait-prod
 be.wait-prod: ## Wait for backend health (prod)

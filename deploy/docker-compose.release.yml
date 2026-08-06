@@ -1,0 +1,6 @@
+services:
+  backend:
+    image: "${RELEASE_BACKEND_IMAGE:?Set RELEASE_BACKEND_IMAGE in the release manifest}"
+
+  nginx:
+    image: "${RELEASE_WEB_IMAGE:?Set RELEASE_WEB_IMAGE in the release manifest}"

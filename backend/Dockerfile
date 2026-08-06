@@ -13,7 +13,7 @@ WORKDIR /app
 # Only copy files that influence deps first for caching
 COPY pyproject.toml uv.lock ./
 ENV PATH="/app/.venv/bin:${PATH}"
-ENV PYTHONPATH="/app/src:${PYTHONPATH}"
+ENV PYTHONPATH="/app/src"
 
 # ---- dev image ----
 FROM base AS dev
