@@ -4,11 +4,11 @@ General-purpose Django + React + Docker + VS Code scaffold. Fork to start new pr
 
 ## Features
 
-- **Backend**: Django with type hints, Black formatting, Ruff linting, MyPy type checking, pytest, and coverage enforcement.
+- **Backend**: Django with type hints, Ruff formatting and linting, MyPy type checking, pytest, and coverage enforcement.
 - **Frontend**: React (Vite + pnpm) with ESLint, Prettier, and TypeScript.
 - **Dev Experience**:
   - Unified `Makefile` with common targets (`verify`, `check`, `test`, `smoke`, `up`, `down`, etc.)
-  - Pre-commit hooks (Black, Ruff, ESLint, Prettier, end-of-file fixes).
+  - Pre-commit hooks (Ruff, ESLint, Prettier, end-of-file fixes).
   - VS Code integration via workspace settings.
   - `.editorconfig` for consistent formatting across tools/editors.
 - **Deployment**:
