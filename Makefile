@@ -201,8 +201,8 @@ verify: ## Run both backend and frontend verification
 verify: be.verify fe.verify
 
 .PHONY: be.verify
-be.verify: ## Backend lint + typecheck + tests + coverage
-be.verify: lint typecheck test coverage
+be.verify: ## Backend format check + lint + typecheck + tests + coverage
+be.verify: fmt-check lint typecheck test coverage
 
 .PHONY: preflight
 preflight: ## Format + lint + typecheck + coverage + precommit
@@ -219,15 +219,13 @@ lint: no-any
 	cd $(PY_DIR) && uv run ruff check .
 
 .PHONY: format
-format: ## Apply Ruff fixes + format + Black (backend)
+format: ## Apply Ruff fixes and formatting (backend)
 	cd $(PY_DIR) && uv run ruff check --fix .
 	cd $(PY_DIR) && uv run ruff format .
-	cd $(PY_DIR) && uv run black .
 
 .PHONY: fmt-check
 fmt-check: ## Check formatting (backend)
 	cd $(PY_DIR) && uv run ruff format --check .
-	cd $(PY_DIR) && uv run black --check .
 
 .PHONY: typecheck
 typecheck: ## MyPy type checking (backend)
