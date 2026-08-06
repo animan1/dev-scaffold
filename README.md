@@ -48,6 +48,40 @@ make smoke-prod      # run API, static, and FE smokes
 make down-prod       # stop stack
 ```
 
+### Optional immutable releases
+
+The default local-production workflow remains intentionally simple and builds
+from the checkout. Projects that need a pull-only host can opt into the
+immutable-release profile.
+
+CI derives two packages from the repository name (`-backend` and `-web`), tags
+them with the full commit SHA, verifies and smoke-tests those exact local
+images, and only then pushes them to this repository's GHCR namespace. A
+successful `main` run publishes a release artifact containing digest-pinned
+image references.
+
+Download that run's `release-<sha>` artifact onto the host. Keep the project's
+production configuration in `deploy/.env.prod`, then deploy without building:
+
+```bash
+make deploy-release RELEASE_FILE=/path/to/release-<sha>.env
+```
+
+The release path pulls the recorded digests, runs migrations and static-file
+collection with the recorded backend image, and starts Compose with
+`--no-build`. Registry login is host- and project-specific; authenticate the
+host only to the GHCR packages belonging to that project.
+
+Rollback is selection of an older retained manifest, not a rebuild:
+
+```bash
+make rollback-release RELEASE_FILE=/path/to/previous-release.env
+```
+
+Set `RELEASE_COMPOSE_PROJECT` when a host runs multiple projects. Its default is
+derived from the current repository directory so unrelated projects do not
+share Compose resources.
+
 ## Make Targets
 ```bash
 make help
