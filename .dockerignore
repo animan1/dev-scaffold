@@ -1,0 +1,16 @@
+.git
+.github
+.tmp
+backend/.coverage
+backend/.mypy_cache
+backend/.pytest_cache
+backend/.ruff_cache
+backend/.venv
+backend/coverage.xml
+backend/src/app/db.sqlite3
+deploy/.env*
+deploy/nginx/certs
+deploy/releases
+frontend/coverage
+frontend/dist
+frontend/node_modules

@@ -1,0 +1,7 @@
+.coverage
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.venv
+coverage.xml
+src/app/db.sqlite3

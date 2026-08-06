@@ -2,7 +2,7 @@ services:
   db:
     image: postgres:16
     env_file:
-      - .env.prod
+      - "${PROD_ENV_FILE:-.env.prod}"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
@@ -16,7 +16,7 @@ services:
       context: ../backend
       target: prod
     env_file:
-      - .env.prod
+      - "${PROD_ENV_FILE:-.env.prod}"
     depends_on:
       db:
         condition: service_healthy
