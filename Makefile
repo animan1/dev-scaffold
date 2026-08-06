@@ -134,8 +134,8 @@ up-prod: ## Start prod stack
 	$(COMPOSE_PROD) up -d --build
 
 .PHONY: down-prod
-down-prod: ## Stop prod stack
-	$(COMPOSE_PROD) down -v
+down-prod: ## Stop prod stack while preserving persistent volumes
+	$(COMPOSE_PROD) down
 
 .PHONY: logs-prod
 logs-prod: ## Tail prod logs
