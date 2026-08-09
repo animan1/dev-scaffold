@@ -126,6 +126,69 @@ the trust boundary, so do not republish the origin port on a public interface.
 The smoke target supplies synthetic routing headers and does not require or
 prescribe a particular ingress product.
 
+### Optional external dead-man monitoring
+
+The dead-man profile sends content-free HTTPS POSTs to an external monitoring
+provider. It does not send alerts itself or use application SMTP. Create three
+Healthchecks-compatible checks at the provider: one each for operational
+availability, successful backups, and successful isolated restore
+verification. Enable failure and recovery notifications at the provider.
+
+Store each secret ping URL in its own project-local file; never put a ping URL
+in `.env.prod` or a Compose environment value:
+
+```bash
+install -d -m 0700 deploy/secrets
+printf '%s\n' 'https://provider.example/ping/operational-id' \
+  > deploy/secrets/deadman-operational-url
+printf '%s\n' 'https://provider.example/ping/backup-id' \
+  > deploy/secrets/deadman-backup-url
+printf '%s\n' 'https://provider.example/ping/restore-id' \
+  > deploy/secrets/deadman-restore-url
+chmod 0600 deploy/secrets/deadman-*-url
+make check-deadman-prod
+```
+
+The files are ignored by Git and mounted read-only under `/run/secrets`. For
+secrets stored elsewhere, set `DEADMAN_OPERATIONAL_URL_PATH`,
+`DEADMAN_BACKUP_URL_PATH`, and `DEADMAN_RESTORE_URL_PATH` to host file paths.
+
+Configure the provider schedules to match these bounded defaults:
+
+| Check | Expected period | Grace period |
+| --- | ---: | ---: |
+| Operational | 5 minutes | 10 minutes |
+| Backup | 24 hours | 6 hours |
+| Restore verification | 7 days | 24 hours |
+
+Intervals are constrained to 60 seconds through 7 days; grace periods are
+constrained to 60 seconds through 24 hours. Override a value in `.env.prod`
+with `DEADMAN_<CHANNEL>_INTERVAL_SECONDS` or
+`DEADMAN_<CHANNEL>_GRACE_SECONDS`, update the provider to the same values, then
+run `make check-deadman-prod` again.
+
+Start the restartable operational watcher explicitly:
+
+```bash
+make up-prod DEADMAN=1
+make down-prod DEADMAN=1
+```
+
+Backup and restore-verification jobs should wrap their real command so the
+provider receives `start`, `fail`, and success events while the command's exit
+status is preserved:
+
+```bash
+python -m app.deadman run backup -- ./backup-command
+python -m app.deadman run restore -- ./isolated-restore-verification
+```
+
+Those job containers need only their channel's URL file mounted read-only and
+the matching `DEADMAN_<CHANNEL>_URL_FILE` environment variable pointing to it.
+A success after a failure or missed deadline is the provider's recovery signal.
+Manual content-free success probes are also available as
+`make ping-deadman-{operational,backup,restore}-prod`.
+
 ## Make Targets
 
 ```bash

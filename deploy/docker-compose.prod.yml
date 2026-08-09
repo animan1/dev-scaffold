@@ -23,6 +23,45 @@ services:
     volumes:
       - staticfiles:/static
 
+  deadman:
+    profiles: ["deadman"]
+    build:
+      context: ../backend
+      target: prod
+    env_file:
+      - "${PROD_ENV_FILE:-.env.prod}"
+    environment:
+      DEADMAN_OPERATIONAL_URL_FILE: /run/secrets/deadman-operational-url
+      DEADMAN_BACKUP_URL_FILE: /run/secrets/deadman-backup-url
+      DEADMAN_RESTORE_URL_FILE: /run/secrets/deadman-restore-url
+      DEADMAN_OPERATIONAL_INTERVAL_SECONDS: "${DEADMAN_OPERATIONAL_INTERVAL_SECONDS:-300}"
+      DEADMAN_OPERATIONAL_GRACE_SECONDS: "${DEADMAN_OPERATIONAL_GRACE_SECONDS:-600}"
+      DEADMAN_BACKUP_INTERVAL_SECONDS: "${DEADMAN_BACKUP_INTERVAL_SECONDS:-86400}"
+      DEADMAN_BACKUP_GRACE_SECONDS: "${DEADMAN_BACKUP_GRACE_SECONDS:-21600}"
+      DEADMAN_RESTORE_INTERVAL_SECONDS: "${DEADMAN_RESTORE_INTERVAL_SECONDS:-604800}"
+      DEADMAN_RESTORE_GRACE_SECONDS: "${DEADMAN_RESTORE_GRACE_SECONDS:-86400}"
+    command: ["python", "-m", "app.deadman", "watch", "operational"]
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "${DEADMAN_OPERATIONAL_URL_PATH:-./secrets/deadman-operational-url}"
+        target: /run/secrets/deadman-operational-url
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${DEADMAN_BACKUP_URL_PATH:-./secrets/deadman-backup-url}"
+        target: /run/secrets/deadman-backup-url
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${DEADMAN_RESTORE_URL_PATH:-./secrets/deadman-restore-url}"
+        target: /run/secrets/deadman-restore-url
+        read_only: true
+        bind:
+          create_host_path: false
+
   nginx:
     build:
       context: ..

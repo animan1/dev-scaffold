@@ -57,13 +57,13 @@ investigation.
   - Status: Tracked in
     [dev-scaffold#9](https://github.com/animan1/dev-scaffold/pull/9).
 
-- [ ] Add optional external dead-man monitoring.
+- [x] Add optional external dead-man monitoring.
   - Support content-free operational, backup, and restore heartbeats.
   - Alerts must use an external provider instead of application SMTP.
   - Include secret URL handling, bounded grace periods, and recovery notices.
-  - Destination: Cuplr now; `dev-scaffold` after implementation proves the
-    pattern.
-  - Status: New request.
+  - Destination: `dev-scaffold`
+  - Status: Backported from the Cuplr operational-monitoring pattern; pull
+    request link pending.
 
 ## Track now, implement upstream after website proof
 

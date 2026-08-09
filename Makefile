@@ -3,16 +3,22 @@ COMPOSE_DEV := docker compose -f deploy/docker-compose.dev.yml
 FRONTEND_DIR := frontend
 PROJECT_NAME ?= $(notdir $(CURDIR))
 HOST_INGRESS ?= 0
+DEADMAN ?= 0
 HOST_INGRESS_HOST ?= app.example.test
 HOST_INGRESS_PORT ?= 18080
 export HOST_INGRESS_PORT
 PROD_COMPOSE_FILES := -f deploy/docker-compose.prod.yml
 RELEASE_COMPOSE_FILES := -f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml
+PROD_COMPOSE_PROFILES :=
 ifeq ($(HOST_INGRESS),1)
 PROD_COMPOSE_FILES += -f deploy/docker-compose.host-ingress.yml
 RELEASE_COMPOSE_FILES += -f deploy/docker-compose.host-ingress.yml
 endif
-COMPOSE_PROD = docker compose $(PROD_COMPOSE_FILES) --env-file deploy/.env.prod
+ifeq ($(DEADMAN),1)
+PROD_COMPOSE_PROFILES += --profile deadman
+endif
+COMPOSE_PROD = docker compose $(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file deploy/.env.prod
+COMPOSE_DEADMAN = docker compose $(PROD_COMPOSE_FILES) --profile deadman --env-file deploy/.env.prod
 RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
 RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)
 RELEASE_REVISION ?= $(shell git rev-parse HEAD)
@@ -22,7 +28,7 @@ RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
 RELEASE_HTTP_PORT ?= 18080
 RELEASE_HTTPS_PORT ?= 18443
 COMPOSE_RELEASE = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) docker compose \
-	$(RELEASE_COMPOSE_FILES) \
+	$(RELEASE_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) \
 	--env-file deploy/.env.prod --env-file $(RELEASE_FILE)
 COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
@@ -192,6 +198,25 @@ smoke-prod: CURL_FLAGS := -k
 smoke-prod: smoke
 endif
 
+.PHONY: check-deadman-prod
+check-deadman-prod: ## Validate file-mounted heartbeat URLs and bounded provider policies
+	$(COMPOSE_DEADMAN) run --rm --no-deps deadman python -m app.deadman check
+
+.PHONY: ping-deadman-operational-prod
+ping-deadman-operational-prod: ## Send one content-free operational success heartbeat
+	$(COMPOSE_DEADMAN) run --rm --no-deps deadman \
+		python -m app.deadman ping operational success
+
+.PHONY: ping-deadman-backup-prod
+ping-deadman-backup-prod: ## Send one content-free backup success heartbeat
+	$(COMPOSE_DEADMAN) run --rm --no-deps deadman \
+		python -m app.deadman ping backup success
+
+.PHONY: ping-deadman-restore-prod
+ping-deadman-restore-prod: ## Send one content-free restore success heartbeat
+	$(COMPOSE_DEADMAN) run --rm --no-deps deadman \
+		python -m app.deadman ping restore success
+
 .PHONY: smoke-host-ingress
 smoke-host-ingress: ## Smoke-test the loopback origin as routed by a host ingress
 smoke-host-ingress:
@@ -288,6 +313,11 @@ verify-host-ingress: prepare-release-ci ## Verify exact images through the loopb
 	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
 		$(COMPOSE_RELEASE_INGRESS_CI) up -d --no-build
 	$(MAKE) smoke-host-ingress
+
+.PHONY: verify-deadman-config
+verify-deadman-config: prepare-release-ci ## Validate the optional dead-man Compose profile
+	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
+		-f deploy/docker-compose.prod.yml --profile deadman config --quiet
 
 .PHONY: down-release-ci
 down-release-ci: ## Stop the isolated immutable-release test stack
