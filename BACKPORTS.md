@@ -35,7 +35,7 @@ investigation.
   - Status: Landed in
     [dev-scaffold#4](https://github.com/animan1/dev-scaffold/pull/4).
 
-- [ ] Add an optional immutable-release profile.
+- [x] Add an optional immutable-release profile.
   - Build once in CI.
   - Test the exact image.
   - Publish a commit-addressed GHCR image with digest and SBOM.
@@ -43,8 +43,10 @@ investigation.
   - Destination: `dev-scaffold`; Cuplr should evaluate the same convention.
   - Status: Base profile landed in
     [dev-scaffold#5](https://github.com/animan1/dev-scaffold/pull/5);
+    digest publication landed in
+    [dev-scaffold#6](https://github.com/animan1/dev-scaffold/pull/6); SBOM
     publication is tracked in
-    [dev-scaffold#6](https://github.com/animan1/dev-scaffold/pull/6).
+    [dev-scaffold#8](https://github.com/animan1/dev-scaffold/pull/8).
 
 - [ ] Support deployment behind separately owned host ingress.
   - Bind application origins to configurable loopback ports.
