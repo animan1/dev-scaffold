@@ -27,3 +27,53 @@ jobs:
       - name: Tear down
         if: always()
         run: make down
+
+  immutable-release:
+    needs: backend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      RELEASE_REVISION: ${{ github.sha }}
+      RELEASE_FILE: deploy/releases/${{ github.sha }}.env
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure project-owned release packages
+        shell: bash
+        run: |
+          echo "RELEASE_IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          project="${GITHUB_REPOSITORY//\//-}"
+          echo "RELEASE_COMPOSE_PROJECT=${project,,}-release-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+
+      - name: Build production images once
+        run: make build-release-images
+
+      - name: Verify and smoke-test exact images
+        run: make verify-release-images
+
+      - name: Tear down release verification
+        if: always()
+        run: make down-release-ci
+
+      - name: Log in to this repository's GHCR packages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push verified images and record digests
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: make push-release-images
+
+      - name: Publish digest-pinned release manifest
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ github.sha }}
+          path: ${{ env.RELEASE_FILE }}
+          if-no-files-found: error
+          retention-days: 90
