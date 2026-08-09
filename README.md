@@ -24,16 +24,19 @@ General-purpose Django + React + Docker + VS Code scaffold. Fork to start new pr
 ## Quickstart
 
 ### Local Dev (no Docker)
+
 ```bash
 make setup verify # bootstrap the environment
 make setup be.run # run Django
 ```
+
 ```bash
 # run React
 make fe.run
 ```
 
 ### Docker Dev
+
 ```bash
 make up        # start backend + nginx (proxying API, static, and frontend)
 make smoke     # run API, static, and FE smokes
@@ -41,6 +44,7 @@ make down      # stop stack
 ```
 
 ### Docker Prod (local)
+
 ```bash
 make bootstrap-prod  # once
 make up-prod         # build & start prod stack with nginx + Django + Postgres
@@ -58,7 +62,9 @@ CI derives two packages from the repository name (`-backend` and `-web`), tags
 them with the full commit SHA, verifies and smoke-tests those exact local
 images, and only then pushes them to this repository's GHCR namespace. A
 successful `main` run publishes a release artifact containing digest-pinned
-image references.
+image references and an SPDX JSON SBOM for each image. The workflow also signs
+each SBOM as a GitHub artifact attestation and attaches it to the corresponding
+image digest in GHCR.
 
 Download that run's `release-<sha>` artifact onto the host. Keep the project's
 production configuration in `deploy/.env.prod`, then deploy without building:
@@ -78,11 +84,20 @@ Rollback is selection of an older retained manifest, not a rebuild:
 make rollback-release RELEASE_FILE=/path/to/previous-release.env
 ```
 
+Verify a published image's signed SBOM attestation against the repository that
+built it:
+
+```bash
+gh attestation verify oci://ghcr.io/<owner>/<repo>-backend@<digest> \
+  --repo <owner>/<repo>
+```
+
 Set `RELEASE_COMPOSE_PROJECT` when a host runs multiple projects. Its default is
 derived from the current repository directory so unrelated projects do not
 share Compose resources.
 
 ## Make Targets
+
 ```bash
 make help
 ```

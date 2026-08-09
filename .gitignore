@@ -40,3 +40,4 @@ deploy/nginx/certs/
 
 # Immutable release manifests are CI artifacts, not source files
 /deploy/releases/*.env
+/deploy/releases/*.spdx.json

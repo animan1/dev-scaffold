@@ -32,18 +32,25 @@ jobs:
     needs: backend
     runs-on: ubuntu-latest
     permissions:
+      attestations: write
       contents: read
+      id-token: write
       packages: write
     env:
+      RELEASE_BACKEND_SBOM: deploy/releases/${{ github.sha }}-backend.spdx.json
       RELEASE_REVISION: ${{ github.sha }}
       RELEASE_FILE: deploy/releases/${{ github.sha }}.env
+      RELEASE_WEB_SBOM: deploy/releases/${{ github.sha }}-web.spdx.json
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure project-owned release packages
         shell: bash
         run: |
-          echo "RELEASE_IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "RELEASE_IMAGE_PREFIX=${prefix}" >> "$GITHUB_ENV"
+          echo "RELEASE_BACKEND_TAG=${prefix}-backend:${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "RELEASE_WEB_TAG=${prefix}-web:${GITHUB_SHA}" >> "$GITHUB_ENV"
           project="${GITHUB_REPOSITORY//\//-}"
           echo "RELEASE_COMPOSE_PROJECT=${project,,}-release-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
 
@@ -52,6 +59,24 @@ jobs:
 
       - name: Verify and smoke-test exact images
         run: make verify-release-images
+
+      - name: Generate backend SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.RELEASE_BACKEND_TAG }}
+          format: spdx-json
+          output-file: ${{ env.RELEASE_BACKEND_SBOM }}
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate web SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.RELEASE_WEB_TAG }}
+          format: spdx-json
+          output-file: ${{ env.RELEASE_WEB_SBOM }}
+          upload-artifact: false
+          upload-release-assets: false
 
       - name: Tear down release verification
         if: always()
@@ -66,14 +91,47 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push verified images and record digests
+        id: release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: make push-release-images
+        shell: bash
+        run: |
+          make push-release-images
+          backend="$(sed -n 's/^RELEASE_BACKEND_IMAGE=//p' "$RELEASE_FILE")"
+          web="$(sed -n 's/^RELEASE_WEB_IMAGE=//p' "$RELEASE_FILE")"
+          test -n "$backend" && test -n "$web"
+          echo "backend_name=${backend%@*}" >> "$GITHUB_OUTPUT"
+          echo "backend_digest=${backend#*@}" >> "$GITHUB_OUTPUT"
+          echo "web_name=${web%@*}" >> "$GITHUB_OUTPUT"
+          echo "web_digest=${web#*@}" >> "$GITHUB_OUTPUT"
+
+      - name: Attest backend SBOM
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ steps.release.outputs.backend_name }}
+          subject-digest: ${{ steps.release.outputs.backend_digest }}
+          sbom-path: ${{ env.RELEASE_BACKEND_SBOM }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Attest web SBOM
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ steps.release.outputs.web_name }}
+          subject-digest: ${{ steps.release.outputs.web_digest }}
+          sbom-path: ${{ env.RELEASE_WEB_SBOM }}
+          push-to-registry: true
+          create-storage-record: false
 
       - name: Publish digest-pinned release manifest
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ github.sha }}
-          path: ${{ env.RELEASE_FILE }}
+          path: |
+            ${{ env.RELEASE_FILE }}
+            ${{ env.RELEASE_BACKEND_SBOM }}
+            ${{ env.RELEASE_WEB_SBOM }}
           if-no-files-found: error
           retention-days: 90
