@@ -25,7 +25,7 @@ class OperationalCheckTransition:
 def validate_monitoring_configuration() -> None:
     if not settings.SITE_ADMIN_EMAIL:
         raise ImproperlyConfigured(
-            "Set CUPLR_SITE_ADMIN_EMAIL in deploy/.env.prod "
+            "Set SITE_ADMIN_EMAIL in deploy/.env.prod "
             "(or the production process environment) for operational monitoring."
         )
     uses_console_backend = settings.EMAIL_BACKEND.endswith(".console.EmailBackend")
@@ -45,7 +45,8 @@ def email_operational_transition(transition: OperationalCheckTransition) -> None
     environment = settings.DEPLOYMENT_ENVIRONMENT
     send_mail(
         subject=(
-            f"[Cuplr {environment}] Operational check {transition.kind}: {transition.result.label}"
+            f"[{settings.MONITOR_SITE_NAME} {environment}] Operational check "
+            f"{transition.kind}: {transition.result.label}"
         ),
         message=(
             f"Environment: {environment}\n"

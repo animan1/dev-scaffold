@@ -126,6 +126,32 @@ the trust boundary, so do not republish the origin port on a public interface.
 The smoke target supplies synthetic routing headers and does not require or
 prescribe a particular ingress product.
 
+### Optional operational monitoring
+
+The scaffold backports Cuplr's Django `app.monitoring` architecture: persisted
+check state, failure/recovery transitions, the
+`monitor_operational_integrity` management command, backup/restore freshness
+checks, and a restartable Compose `monitor` service. Projects add their own
+domain checks to `operational_checks()` without replacing that infrastructure.
+
+Failure and recovery transitions are sent through Django's email backend.
+Configure `SITE_ADMIN_EMAIL`, `DJANGO_DEFAULT_FROM_EMAIL`, and the
+`DJANGO_EMAIL_*` SMTP settings in `deploy/.env.prod` before enabling the
+production monitor.
+
+Start the restartable operational watcher explicitly:
+
+```bash
+make up-prod MONITORING=1
+make ops.monitor-prod
+make down-prod MONITORING=1
+```
+
+The backup freshness checks read Unix timestamps from `last-backup` and
+`last-restore-verification` files in the shared `backup_status` volume. The
+default maximum age and initialization grace period are 48 hours; projects can
+override `BACKUP_MAX_AGE_SECONDS` when their backup schedule differs.
+
 ## Make Targets
 
 ```bash

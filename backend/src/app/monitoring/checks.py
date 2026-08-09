@@ -5,20 +5,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from django.conf import settings
-from django.contrib.auth.models import User
+from django.db import connection
 from django.utils import timezone
-from organizations.models import Organization
 
-from app.integrations.models import GoogleCalendarConnection
-from app.integrations.services import (
-    GoogleCalendarConfigurationError,
-    duplicate_cuplr_google_calendars,
-    google_calendar_readiness,
-)
-
-ACTIVE_USER_ORGANIZATION_CHECK = "active-user-organization-count"
-GOOGLE_CALENDAR_READINESS_CHECK = "google-calendar-installation-readiness"
-GOOGLE_CALENDAR_DUPLICATE_CHECK = "google-calendar-duplicates"
+DATABASE_CONNECTIVITY_CHECK = "database-connectivity"
 DATABASE_BACKUP_FRESHNESS_CHECK = "database-backup-freshness"
 DATABASE_BACKUP_VERIFICATION_FRESHNESS_CHECK = "database-backup-verification-freshness"
 
@@ -31,79 +21,17 @@ class OperationalCheckResult:
     message: str
 
 
-def active_user_organization_check() -> OperationalCheckResult:
-    invalid_users: list[str] = []
-    for user in User.objects.filter(is_active=True).order_by("username"):
-        organization_count = Organization.active.get_for_user(user).count()
-        if organization_count != 1:
-            invalid_users.append(f"{user.username} ({organization_count})")
-
-    if invalid_users:
-        return OperationalCheckResult(
-            key=ACTIVE_USER_ORGANIZATION_CHECK,
-            label="Active user organization count",
-            healthy=False,
-            message=(
-                "Active users must belong to exactly one active organization. "
-                f"Unsupported users: {', '.join(invalid_users)}."
-            ),
-        )
+def database_connectivity_check() -> OperationalCheckResult:
+    try:
+        connection.ensure_connection()
+        healthy = connection.is_usable()
+    except Exception:  # noqa: BLE001 - a health check must turn database errors into a result
+        healthy = False
     return OperationalCheckResult(
-        key=ACTIVE_USER_ORGANIZATION_CHECK,
-        label="Active user organization count",
-        healthy=True,
-        message="Every active user belongs to exactly one active organization.",
-    )
-
-
-def google_calendar_installation_readiness_check() -> OperationalCheckResult:
-    readiness = google_calendar_readiness()
-    return OperationalCheckResult(
-        key=GOOGLE_CALENDAR_READINESS_CHECK,
-        label="Google Calendar installation readiness",
-        healthy=readiness.ready,
-        message=readiness.operator_message,
-    )
-
-
-def google_calendar_duplicate_check() -> OperationalCheckResult:
-    if not google_calendar_readiness().ready:
-        return OperationalCheckResult(
-            key=GOOGLE_CALENDAR_DUPLICATE_CHECK,
-            label="Google Calendar duplicates",
-            healthy=True,
-            message="Duplicate inspection is waiting for Google Calendar configuration.",
-        )
-
-    issues: list[str] = []
-    connections = (
-        GoogleCalendarConnection.objects.exclude(refresh_token__isnull=True)
-        .select_related("organization")
-        .order_by("organization__name")
-    )
-    for connection in connections:
-        try:
-            duplicates = duplicate_cuplr_google_calendars(connection)
-        except GoogleCalendarConfigurationError as error:
-            issue = f"{connection.organization.name}: inspection failed ({error})"
-            issues.append(issue)
-            continue
-        if duplicates:
-            calendar_ids = ", ".join(calendar.id for calendar in duplicates)
-            issues.append(f"{connection.organization.name}: {calendar_ids}")
-
-    if issues:
-        return OperationalCheckResult(
-            key=GOOGLE_CALENDAR_DUPLICATE_CHECK,
-            label="Google Calendar duplicates",
-            healthy=False,
-            message=f"Google Calendar needs reconciliation. {'; '.join(issues)}.",
-        )
-    return OperationalCheckResult(
-        key=GOOGLE_CALENDAR_DUPLICATE_CHECK,
-        label="Google Calendar duplicates",
-        healthy=True,
-        message="No organizations have duplicate Cuplr-managed Google calendars.",
+        key=DATABASE_CONNECTIVITY_CHECK,
+        label="Database connectivity",
+        healthy=healthy,
+        message="The database is reachable." if healthy else "The database is unavailable.",
     )
 
 
@@ -139,20 +67,11 @@ def _backup_marker_check(
 
     now = timezone.now()
     max_age_seconds = int(settings.BACKUP_MAX_AGE_SECONDS)
-    marker_path = Path(status_directory) / marker_name
     try:
-        marker = marker_path.read_text().strip()
+        marker = (Path(status_directory) / marker_name).read_text().strip()
     except OSError:
         if _deployment_is_within_backup_grace(now, max_age_seconds):
-            return OperationalCheckResult(
-                key=key,
-                label=label,
-                healthy=True,
-                message=(
-                    f"No successful {success_description} has been recorded yet; "
-                    "the deployment is within its initialization grace period."
-                ),
-            )
+            return _initialization_grace_result(key, label, success_description)
         return OperationalCheckResult(
             key=key,
             label=label,
@@ -161,10 +80,11 @@ def _backup_marker_check(
         )
 
     try:
-        timestamp = int(marker)
         current_timezone = timezone.get_current_timezone()
-        succeeded_at = datetime.fromtimestamp(timestamp, tz=current_timezone)
+        succeeded_at = datetime.fromtimestamp(int(marker), tz=current_timezone)
     except (ValueError, OverflowError):
+        if _deployment_is_within_backup_grace(now, max_age_seconds):
+            return _initialization_grace_result(key, label, success_description)
         return OperationalCheckResult(
             key=key,
             label=label,
@@ -191,6 +111,20 @@ def _backup_marker_check(
     )
 
 
+def _initialization_grace_result(
+    key: str, label: str, success_description: str
+) -> OperationalCheckResult:
+    return OperationalCheckResult(
+        key=key,
+        label=label,
+        healthy=True,
+        message=(
+            f"No successful {success_description} has been recorded yet; "
+            "the deployment is within its initialization grace period."
+        ),
+    )
+
+
 def _deployment_is_within_backup_grace(now: datetime, max_age_seconds: int) -> bool:
     try:
         deployed_at = datetime.fromisoformat(str(settings.RELEASE_DEPLOYED_AT))
@@ -204,9 +138,7 @@ def _deployment_is_within_backup_grace(now: datetime, max_age_seconds: int) -> b
 
 def operational_checks() -> tuple[OperationalCheckResult, ...]:
     return (
-        active_user_organization_check(),
-        google_calendar_installation_readiness_check(),
-        google_calendar_duplicate_check(),
+        database_connectivity_check(),
         database_backup_freshness_check(),
         database_backup_verification_freshness_check(),
     )

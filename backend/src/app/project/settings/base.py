@@ -21,6 +21,24 @@ except ImproperlyConfigured:
     pass
 DEBUG = env("DJANGO_DEBUG")
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["*"])
+DEPLOYMENT_ENVIRONMENT = env("DEPLOYMENT_ENVIRONMENT", default="development")
+RELEASE_REVISION = env("RELEASE_REVISION", default="unknown")
+RELEASE_DEPLOYED_AT = env("RELEASE_DEPLOYED_AT", default="")
+MONITOR_SITE_NAME = env("MONITOR_SITE_NAME", default="Application")
+SITE_ADMIN_EMAIL = env("SITE_ADMIN_EMAIL", default="")
+DEFAULT_FROM_EMAIL = env("DJANGO_DEFAULT_FROM_EMAIL", default="app@localhost")
+EMAIL_BACKEND = env(
+    "DJANGO_EMAIL_BACKEND",
+    default="django.core.mail.backends.console.EmailBackend",
+)
+EMAIL_HOST = env("DJANGO_EMAIL_HOST", default="")
+EMAIL_PORT = env.int("DJANGO_EMAIL_PORT", default=587)
+EMAIL_HOST_USER = env("DJANGO_EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env("DJANGO_EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = env.bool("DJANGO_EMAIL_USE_TLS", default=True)
+EMAIL_TIMEOUT = env.int("DJANGO_EMAIL_TIMEOUT", default=10)
+BACKUP_STATUS_DIR = env("BACKUP_STATUS_DIR", default="")
+BACKUP_MAX_AGE_SECONDS = env.int("BACKUP_MAX_AGE_SECONDS", default=172_800)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -29,6 +47,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "app.monitoring.apps.MonitoringConfig",
 ]
 
 MIDDLEWARE = [

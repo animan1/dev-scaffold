@@ -61,9 +61,10 @@ investigation.
   - Support content-free operational, backup, and restore heartbeats.
   - Alerts must use an external provider instead of application SMTP.
   - Include secret URL handling, bounded grace periods, and recovery notices.
-  - Destination: Cuplr now; `dev-scaffold` after implementation proves the
-    pattern.
-  - Status: New request.
+  - Destination: `dev-scaffold`
+  - Status: Cuplr monitoring foundation backported in
+    [dev-scaffold#11](https://github.com/animan1/dev-scaffold/pull/11);
+    external heartbeat adapter pending.
 
 ## Track now, implement upstream after website proof
 
