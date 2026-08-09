@@ -96,6 +96,36 @@ Set `RELEASE_COMPOSE_PROJECT` when a host runs multiple projects. Its default is
 derived from the current repository directory so unrelated projects do not
 share Compose resources.
 
+### Optional separately owned host ingress
+
+Production can expose an HTTP-only origin on a configurable loopback port for a
+separately managed host ingress. The external proxy owns public TLS and routes a
+hostname to that origin; the application does not bind a public port or mount a
+certificate in this profile.
+
+```bash
+make up-prod HOST_INGRESS=1 HOST_INGRESS_PORT=18080
+make smoke-host-ingress HOST_INGRESS_PORT=18080 \
+  HOST_INGRESS_HOST=app.example.com
+make down-prod HOST_INGRESS=1 HOST_INGRESS_PORT=18080
+```
+
+Digest-pinned deployments use the same opt-in flag:
+
+```bash
+make deploy-release HOST_INGRESS=1 HOST_INGRESS_PORT=18080 \
+  RELEASE_FILE=/path/to/release-<sha>.env
+```
+
+Configure the host ingress to route `app.example.com` to
+`http://127.0.0.1:18080` and to replace the `Host`, `X-Forwarded-Proto`, and
+`X-Forwarded-For` headers. Do not append client-supplied forwarding headers.
+Add the public hostname to `DJANGO_ALLOWED_HOSTS`; HTTPS origins used for unsafe
+requests must also be in `DJANGO_CSRF_TRUSTED_ORIGINS`. The loopback binding is
+the trust boundary, so do not republish the origin port on a public interface.
+The smoke target supplies synthetic routing headers and does not require or
+prescribe a particular ingress product.
+
 ## Make Targets
 
 ```bash
