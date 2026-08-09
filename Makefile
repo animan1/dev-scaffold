@@ -1,8 +1,18 @@
 SHELL := /bin/bash
 COMPOSE_DEV := docker compose -f deploy/docker-compose.dev.yml
-COMPOSE_PROD := docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod
 FRONTEND_DIR := frontend
 PROJECT_NAME ?= $(notdir $(CURDIR))
+HOST_INGRESS ?= 0
+HOST_INGRESS_HOST ?= app.example.test
+HOST_INGRESS_PORT ?= 18080
+export HOST_INGRESS_PORT
+PROD_COMPOSE_FILES := -f deploy/docker-compose.prod.yml
+RELEASE_COMPOSE_FILES := -f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml
+ifeq ($(HOST_INGRESS),1)
+PROD_COMPOSE_FILES += -f deploy/docker-compose.host-ingress.yml
+RELEASE_COMPOSE_FILES += -f deploy/docker-compose.host-ingress.yml
+endif
+COMPOSE_PROD = docker compose $(PROD_COMPOSE_FILES) --env-file deploy/.env.prod
 RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
 RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)
 RELEASE_REVISION ?= $(shell git rev-parse HEAD)
@@ -12,12 +22,16 @@ RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
 RELEASE_HTTP_PORT ?= 18080
 RELEASE_HTTPS_PORT ?= 18443
 COMPOSE_RELEASE = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) docker compose \
-	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
+	$(RELEASE_COMPOSE_FILES) \
 	--env-file deploy/.env.prod --env-file $(RELEASE_FILE)
 COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
 	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
 	-f deploy/docker-compose.release-ci.yml
+COMPOSE_RELEASE_INGRESS_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
+	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
+	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
+	-f deploy/docker-compose.host-ingress.yml
 
 # ---- Paths ----
 PY_DIR := backend
@@ -125,7 +139,9 @@ bootstrap-prod: ## Generate prod env/certs and start prod stack
 		echo "✓ deploy/.env.prod exists"; \
 	fi
 	# Ensure TLS certs exist (generate if missing)
-	@if [ ! -f deploy/nginx/certs/server.crt ] || [ ! -f deploy/nginx/certs/server.key ]; then \
+	@if [ "$(HOST_INGRESS)" = "1" ]; then \
+		echo "Host ingress owns TLS; skipping application certificate generation"; \
+	elif [ ! -f deploy/nginx/certs/server.crt ] || [ ! -f deploy/nginx/certs/server.key ]; then \
 		echo "→ Generating self-signed TLS certs under deploy/nginx/certs"; \
 		mkdir -p deploy/nginx/certs; \
 		openssl req -x509 -nodes -newkey rsa:2048 \
@@ -139,7 +155,8 @@ bootstrap-prod: ## Generate prod env/certs and start prod stack
 	# Bring up stack, run migrations, and smoke test
 	$(COMPOSE_PROD) up -d --build
 	$(COMPOSE_PROD) run --rm backend bash -lc "cd /app && python -m app.manage migrate"
-	curl -kfsS https://localhost/api/healthz >/dev/null && echo "✅ Smoke OK: https://localhost/api/healthz"
+	$(MAKE) smoke-prod HOST_INGRESS=$(HOST_INGRESS) \
+		HOST_INGRESS_HOST=$(HOST_INGRESS_HOST) HOST_INGRESS_PORT=$(HOST_INGRESS_PORT)
 
 .PHONY: restart-prod
 restart-prod: ## Restart prod stack
@@ -167,9 +184,42 @@ bash-prod: ## Shell into backend container (prod)
 
 .PHONY: smoke-prod
 smoke-prod: ## Prod smoketest (API + static + FE root)
+ifeq ($(HOST_INGRESS),1)
+smoke-prod: smoke-host-ingress
+else
 smoke-prod: URL_ROOT := https://localhost
 smoke-prod: CURL_FLAGS := -k
 smoke-prod: smoke
+endif
+
+.PHONY: smoke-host-ingress
+smoke-host-ingress: ## Smoke-test the loopback origin as routed by a host ingress
+smoke-host-ingress:
+	@echo "Waiting for routed backend on http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz ..."
+	@for i in $$(seq 1 60); do \
+		if curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' \
+			-H 'X-Forwarded-Proto: https' \
+			'http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz' >/dev/null; then \
+			echo "Routed backend is up"; break; \
+		fi; \
+		if [ "$$i" = "60" ]; then \
+			echo "Routed backend did not become ready in time"; exit 1; \
+		fi; \
+		sleep 1; \
+	done
+	curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
+		'http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz' >/dev/null
+	curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
+		'http://127.0.0.1:$(HOST_INGRESS_PORT)/static/smoketest.txt' >/dev/null
+	curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
+		'http://127.0.0.1:$(HOST_INGRESS_PORT)/' | grep -qi 'dev-scaffold\|id="root"'
+	@code="$$(curl -sS -o /dev/null -w '%{http_code}' \
+		-H 'Host: $(HOST_INGRESS_HOST)' \
+		'http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz')"; \
+	test "$$code" = "301" || { \
+		echo "Origin must require the trusted ingress scheme header (got $$code)"; \
+		exit 1; \
+	}
 
 # Optional immutable-release profile
 .PHONY: build-release-images
@@ -182,7 +232,8 @@ prepare-release-ci: ## Prepare isolated, non-secret release smoke-test configura
 	@mkdir -p .tmp deploy/nginx/certs
 	@printf '%s\n' \
 		'DJANGO_SECRET_KEY=release-ci-only' \
-		'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1' \
+		'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,$(HOST_INGRESS_HOST)' \
+		'DJANGO_CSRF_TRUSTED_ORIGINS=https://$(HOST_INGRESS_HOST)' \
 		'POSTGRES_USER=app' \
 		'POSTGRES_PASSWORD=release-ci-only' \
 		'POSTGRES_DB=app' \
@@ -221,6 +272,22 @@ verify-release-images: prepare-release-ci ## Verify and smoke-test the exact SHA
 		sleep 1; \
 	done; \
 	echo 'Release images did not become ready'; exit 1
+
+.PHONY: verify-host-ingress
+verify-host-ingress: prepare-release-ci ## Verify exact images through the loopback ingress boundary
+	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+		$(COMPOSE_RELEASE_INGRESS_CI) config --quiet
+	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+		$(COMPOSE_RELEASE_INGRESS_CI) up -d --no-build db backend
+	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+		$(COMPOSE_RELEASE_INGRESS_CI) exec -T backend python -m app.manage check
+	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+		$(COMPOSE_RELEASE_INGRESS_CI) exec -T backend python -m app.manage migrate
+	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+		$(COMPOSE_RELEASE_INGRESS_CI) exec -T backend python -m app.manage collectstatic --noinput
+	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+		$(COMPOSE_RELEASE_INGRESS_CI) up -d --no-build
+	$(MAKE) smoke-host-ingress
 
 .PHONY: down-release-ci
 down-release-ci: ## Stop the isolated immutable-release test stack

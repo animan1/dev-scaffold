@@ -1,0 +1,7 @@
+services:
+  nginx:
+    ports: !override
+      - "127.0.0.1:${HOST_INGRESS_PORT:-18080}:80"
+    volumes: !override
+      - ./nginx/default.host-ingress.conf:/etc/nginx/conf.d/default.conf:ro
+      - staticfiles:/static:ro

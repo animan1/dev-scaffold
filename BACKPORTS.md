@@ -48,13 +48,14 @@ investigation.
     publication is tracked in
     [dev-scaffold#8](https://github.com/animan1/dev-scaffold/pull/8).
 
-- [ ] Support deployment behind separately owned host ingress.
+- [x] Support deployment behind separately owned host ingress.
   - Bind application origins to configurable loopback ports.
   - Trust forwarded headers only across the documented proxy boundary.
   - Do not make the application own public TLS.
   - Include routed smoke checks without prescribing Caddy.
   - Destination: `dev-scaffold` and Cuplr.
-  - Status: New request; links needed.
+  - Status: Tracked in
+    [dev-scaffold#9](https://github.com/animan1/dev-scaffold/pull/9).
 
 - [ ] Add optional external dead-man monitoring.
   - Support content-free operational, backup, and restore heartbeats.
