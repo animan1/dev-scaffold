@@ -62,8 +62,8 @@ investigation.
   - Alerts must use an external provider instead of application SMTP.
   - Include secret URL handling, bounded grace periods, and recovery notices.
   - Destination: `dev-scaffold`
-  - Status: Backported from the Cuplr operational-monitoring pattern; pull
-    request link pending.
+  - Status: Backported from the Cuplr operational-monitoring pattern in
+    [dev-scaffold#10](https://github.com/animan1/dev-scaffold/pull/10).
 
 ## Track now, implement upstream after website proof
 
