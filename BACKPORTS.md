@@ -45,7 +45,8 @@ investigation.
     [dev-scaffold#5](https://github.com/animan1/dev-scaffold/pull/5);
     digest publication landed in
     [dev-scaffold#6](https://github.com/animan1/dev-scaffold/pull/6); SBOM
-    publication is completed by this change.
+    publication is tracked in
+    [dev-scaffold#8](https://github.com/animan1/dev-scaffold/pull/8).
 
 - [ ] Support deployment behind separately owned host ingress.
   - Bind application origins to configurable loopback ports.
