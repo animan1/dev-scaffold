@@ -37,3 +37,13 @@ def test_production_monitor_target_follows_service_logs() -> None:
 def test_backup_status_volume_is_shared_with_operational_monitor() -> None:
     compose = (_repository_root() / "deploy/docker-compose.prod.yml").read_text()
     assert compose.count("backup_status:/backup-status:ro") == 2
+
+
+def test_external_adapter_does_not_replace_monitor_service() -> None:
+    root = _repository_root()
+    compose = (root / "deploy/docker-compose.prod.yml").read_text()
+    adapter = (root / "deploy/docker-compose.external-monitoring.yml").read_text()
+    assert "  monitor:" in compose
+    assert "monitor_operational_integrity" in compose
+    assert "MONITOR_NOTIFICATION_BACKEND: external" in adapter
+    assert not (root / "backend/src/app/deadman.py").exists()

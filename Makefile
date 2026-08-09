@@ -15,11 +15,14 @@ PROD_COMPOSE_FILES += -f deploy/docker-compose.host-ingress.yml
 RELEASE_COMPOSE_FILES += -f deploy/docker-compose.host-ingress.yml
 endif
 ifeq ($(MONITORING),1)
+PROD_COMPOSE_FILES += -f deploy/docker-compose.external-monitoring.yml
+RELEASE_COMPOSE_FILES += -f deploy/docker-compose.external-monitoring.yml
 PROD_COMPOSE_PROFILES += --profile monitoring
 endif
 COMPOSE_PROD = docker compose $(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file deploy/.env.prod
 COMPOSE_MONITOR = docker compose -f deploy/docker-compose.prod.yml \
-	--profile monitoring --env-file deploy/.env.prod
+	-f deploy/docker-compose.external-monitoring.yml --profile monitoring \
+	--env-file deploy/.env.prod
 RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
 RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)
 RELEASE_REVISION ?= $(shell git rev-parse HEAD)
@@ -203,6 +206,10 @@ endif
 ops.check-prod: ## Run operational checks once and report their state
 	$(COMPOSE_PROD) run --rm backend python -m app.manage monitor_operational_integrity
 
+.PHONY: ops.check-external-prod
+ops.check-external-prod: ## Run checks once through the external monitoring profile
+	$(COMPOSE_MONITOR) run --rm monitor python -m app.manage monitor_operational_integrity
+
 .PHONY: ops.monitor-prod
 ops.monitor-prod: ## Follow the unattended production monitor
 	$(COMPOSE_MONITOR) logs -f monitor
@@ -307,7 +314,9 @@ verify-host-ingress: prepare-release-ci ## Verify exact images through the loopb
 .PHONY: verify-monitoring-config
 verify-monitoring-config: prepare-release-ci ## Validate the optional monitoring Compose profile
 	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
-		-f deploy/docker-compose.prod.yml --profile monitoring config --quiet
+		-f deploy/docker-compose.prod.yml \
+		-f deploy/docker-compose.external-monitoring.yml \
+		--profile monitoring config --quiet
 
 .PHONY: down-release-ci
 down-release-ci: ## Stop the isolated immutable-release test stack

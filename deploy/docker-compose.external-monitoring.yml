@@ -1,0 +1,42 @@
+services:
+  monitor:
+    environment:
+      MONITOR_NOTIFICATION_BACKEND: external
+      MONITOR_OPERATIONAL_URL_FILE: /run/secrets/monitor-operational-url
+      MONITOR_BACKUP_URL_FILE: /run/secrets/monitor-backup-url
+      MONITOR_RESTORE_URL_FILE: /run/secrets/monitor-restore-url
+      MONITOR_OPERATIONAL_INTERVAL_SECONDS: "${MONITOR_OPERATIONAL_INTERVAL_SECONDS:-300}"
+      MONITOR_OPERATIONAL_GRACE_SECONDS: "${MONITOR_OPERATIONAL_GRACE_SECONDS:-600}"
+      MONITOR_BACKUP_INTERVAL_SECONDS: "${MONITOR_BACKUP_INTERVAL_SECONDS:-86400}"
+      MONITOR_BACKUP_GRACE_SECONDS: "${MONITOR_BACKUP_GRACE_SECONDS:-21600}"
+      MONITOR_RESTORE_INTERVAL_SECONDS: "${MONITOR_RESTORE_INTERVAL_SECONDS:-604800}"
+      MONITOR_RESTORE_GRACE_SECONDS: "${MONITOR_RESTORE_GRACE_SECONDS:-86400}"
+    command:
+      [
+        "python",
+        "-m",
+        "app.manage",
+        "monitor_operational_integrity",
+        "--watch",
+        "--interval-seconds",
+        "${MONITOR_OPERATIONAL_INTERVAL_SECONDS:-300}",
+      ]
+    volumes:
+      - type: bind
+        source: "${MONITOR_OPERATIONAL_URL_PATH:-./secrets/monitor-operational-url}"
+        target: /run/secrets/monitor-operational-url
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${MONITOR_BACKUP_URL_PATH:-./secrets/monitor-backup-url}"
+        target: /run/secrets/monitor-backup-url
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${MONITOR_RESTORE_URL_PATH:-./secrets/monitor-restore-url}"
+        target: /run/secrets/monitor-restore-url
+        read_only: true
+        bind:
+          create_host_path: false

@@ -57,14 +57,15 @@ investigation.
   - Status: Tracked in
     [dev-scaffold#9](https://github.com/animan1/dev-scaffold/pull/9).
 
-- [ ] Add optional external dead-man monitoring.
+- [x] Add optional external dead-man monitoring.
   - Support content-free operational, backup, and restore heartbeats.
   - Alerts must use an external provider instead of application SMTP.
   - Include secret URL handling, bounded grace periods, and recovery notices.
   - Destination: `dev-scaffold`
   - Status: Monitoring foundation backported in
     [dev-scaffold#11](https://github.com/animan1/dev-scaffold/pull/11);
-    external heartbeat adapter pending.
+    compatible greenfield extension tracked separately in
+    [dev-scaffold#12](https://github.com/animan1/dev-scaffold/pull/12).
 
 ## Track now, implement upstream after website proof
 

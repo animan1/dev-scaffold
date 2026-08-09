@@ -126,7 +126,7 @@ the trust boundary, so do not republish the origin port on a public interface.
 The smoke target supplies synthetic routing headers and does not require or
 prescribe a particular ingress product.
 
-### Optional operational monitoring
+### Optional operational and dead-man monitoring
 
 The scaffold's Django `app.monitoring` architecture provides persisted check
 state, failure/recovery transitions, the
@@ -134,10 +134,47 @@ state, failure/recovery transitions, the
 checks, and a restartable Compose `monitor` service. Projects add their own
 domain checks to `operational_checks()` without replacing that infrastructure.
 
-Failure and recovery transitions are sent through Django's email backend.
-Configure `SITE_ADMIN_EMAIL`, `DJANGO_DEFAULT_FROM_EMAIL`, and the
-`DJANGO_EMAIL_*` SMTP settings in `deploy/.env.prod` before enabling the
-production monitor.
+The optional production profile reports aggregate operational health to an
+external monitoring provider with content-free HTTPS POSTs. Create three
+Healthchecks-compatible checks at the provider: one each for operational
+availability, successful backups, and successful isolated restore
+verification. Enable failure and recovery notifications at the provider. The
+same transition service also retains a generic email backend for projects that
+select `MONITOR_NOTIFICATION_BACKEND=email`; the external production profile
+does not use application SMTP.
+
+Store each secret ping URL in its own project-local file; never put a ping URL
+in `.env.prod` or a Compose environment value:
+
+```bash
+install -d -m 0700 deploy/secrets
+printf '%s\n' 'https://provider.example/ping/operational-id' \
+  > deploy/secrets/monitor-operational-url
+printf '%s\n' 'https://provider.example/ping/backup-id' \
+  > deploy/secrets/monitor-backup-url
+printf '%s\n' 'https://provider.example/ping/restore-id' \
+  > deploy/secrets/monitor-restore-url
+chmod 0600 deploy/secrets/monitor-*-url
+make ops.check-external-prod
+```
+
+The files are ignored by Git and mounted read-only under `/run/secrets`. For
+secrets stored elsewhere, set `MONITOR_OPERATIONAL_URL_PATH`,
+`MONITOR_BACKUP_URL_PATH`, and `MONITOR_RESTORE_URL_PATH` to host file paths.
+
+Configure the provider schedules to match these bounded defaults:
+
+| Check | Expected period | Grace period |
+| --- | ---: | ---: |
+| Operational | 5 minutes | 10 minutes |
+| Backup | 24 hours | 6 hours |
+| Restore verification | 7 days | 24 hours |
+
+Intervals are constrained to 60 seconds through 7 days; grace periods are
+constrained to 60 seconds through 24 hours. Override a value in `.env.prod`
+with `MONITOR_<CHANNEL>_INTERVAL_SECONDS` or
+`MONITOR_<CHANNEL>_GRACE_SECONDS`, update the provider to the same values, then
+run `make ops.check-external-prod` again.
 
 Start the restartable operational watcher explicitly:
 
@@ -147,10 +184,20 @@ make ops.monitor-prod
 make down-prod MONITORING=1
 ```
 
-The backup freshness checks read Unix timestamps from `last-backup` and
-`last-restore-verification` files in the shared `backup_status` volume. The
-default maximum age and initialization grace period are 48 hours; projects can
-override `BACKUP_MAX_AGE_SECONDS` when their backup schedule differs.
+Backup and restore-verification jobs should wrap their real command so the
+provider receives `start`, `fail`, and success events while the command's exit
+status is preserved:
+
+```bash
+python -m app.manage monitor_job backup -- ./backup-command
+python -m app.manage monitor_job restore -- ./isolated-restore-verification
+```
+
+Those job containers need only their channel's URL file mounted read-only and
+the matching `MONITOR_<CHANNEL>_URL_FILE` environment variable pointing to it.
+A success after a failure or missed deadline is the provider's recovery
+signal. The wrapper preserves the underlying job's exit status even if the
+monitoring provider is unavailable.
 
 ## Make Targets
 

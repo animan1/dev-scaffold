@@ -10,6 +10,14 @@ from django.core.mail import send_mail
 from django.utils import timezone
 
 from .checks import OperationalCheckResult, operational_checks
+from .heartbeats import (
+    HeartbeatChannel,
+    HeartbeatConfigurationError,
+    HeartbeatEvent,
+    load_heartbeat_policy,
+    load_heartbeat_url,
+    send_heartbeat,
+)
 from .models import OperationalCheckState
 
 FAILED_TRANSITION: Final = "failed"
@@ -23,6 +31,16 @@ class OperationalCheckTransition:
 
 
 def validate_monitoring_configuration() -> None:
+    if settings.MONITOR_NOTIFICATION_BACKEND == "external":
+        try:
+            for channel in HeartbeatChannel:
+                load_heartbeat_url(channel)
+                load_heartbeat_policy(channel)
+        except HeartbeatConfigurationError as error:
+            raise ImproperlyConfigured(str(error)) from error
+        return
+    if settings.MONITOR_NOTIFICATION_BACKEND != "email":
+        raise ImproperlyConfigured("MONITOR_NOTIFICATION_BACKEND must be email or external.")
     if not settings.SITE_ADMIN_EMAIL:
         raise ImproperlyConfigured(
             "Set SITE_ADMIN_EMAIL in deploy/.env.prod "
@@ -60,12 +78,24 @@ def email_operational_transition(transition: OperationalCheckTransition) -> None
     )
 
 
+def configured_transition_notifier(transition: OperationalCheckTransition) -> None:
+    if settings.MONITOR_NOTIFICATION_BACKEND == "email":
+        email_operational_transition(transition)
+
+
 def run_operational_checks(
-    notify: Callable[[OperationalCheckTransition], None] = email_operational_transition,
+    notify: Callable[[OperationalCheckTransition], None] = configured_transition_notifier,
 ) -> tuple[OperationalCheckResult, ...]:
     results = operational_checks()
     for result in results:
         _record_result(result, notify)
+    if settings.MONITOR_NOTIFICATION_BACKEND == "external":
+        send_heartbeat(
+            HeartbeatChannel.OPERATIONAL,
+            HeartbeatEvent.SUCCESS
+            if all(result.healthy for result in results)
+            else HeartbeatEvent.FAILURE,
+        )
     return results
 
 
