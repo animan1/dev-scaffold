@@ -67,6 +67,14 @@ investigation.
     compatible greenfield extension tracked separately in
     [dev-scaffold#12](https://github.com/animan1/dev-scaffold/pull/12).
 
+## Consider on next major release
+
+- [ ] Reconsider a standalone external dead-man implementation.
+  - Evaluate whether a separate `app.deadman` module offers material benefits
+    over the integrated monitoring and heartbeat architecture.
+  - Reference implementation preserved in the closed draft
+    [dev-scaffold#10](https://github.com/animan1/dev-scaffold/pull/10).
+
 ## Track now, implement upstream after website proof
 
 - [ ] Reduce development/production database drift.
