@@ -13,9 +13,7 @@ def healthy_result() -> OperationalCheckResult:
     return OperationalCheckResult("generic", "Generic", True, "healthy")
 
 
-def test_monitor_command_runs_cuplr_interface_once(
-    settings: object, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_monitor_command_runs_once(settings: object, capsys: pytest.CaptureFixture[str]) -> None:
     settings.SITE_ADMIN_EMAIL = "operator@example.com"  # type: ignore[attr-defined]
     with patch(
         "app.monitoring.management.commands.monitor_operational_integrity.run_operational_checks",

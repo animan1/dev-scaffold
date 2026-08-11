@@ -23,14 +23,14 @@ def _make(*arguments: str) -> str:
     return result.stdout
 
 
-def test_production_operational_check_preserves_cuplr_interface() -> None:
+def test_production_operational_check_runs_once() -> None:
     output = _make("ops.check-prod")
     assert "docker compose -f deploy/docker-compose.prod.yml" in output
     assert "run --rm backend python -m app.manage monitor_operational_integrity" in output
     assert "--watch" not in output
 
 
-def test_production_monitor_target_follows_cuplr_service_logs() -> None:
+def test_production_monitor_target_follows_service_logs() -> None:
     assert "logs -f monitor" in _make("ops.monitor-prod")
 
 

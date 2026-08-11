@@ -128,8 +128,8 @@ prescribe a particular ingress product.
 
 ### Optional operational monitoring
 
-The scaffold backports Cuplr's Django `app.monitoring` architecture: persisted
-check state, failure/recovery transitions, the
+The scaffold's Django `app.monitoring` architecture provides persisted check
+state, failure/recovery transitions, the
 `monitor_operational_integrity` management command, backup/restore freshness
 checks, and a restartable Compose `monitor` service. Projects add their own
 domain checks to `operational_checks()` without replacing that infrastructure.

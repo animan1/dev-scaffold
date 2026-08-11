@@ -62,7 +62,7 @@ investigation.
   - Alerts must use an external provider instead of application SMTP.
   - Include secret URL handling, bounded grace periods, and recovery notices.
   - Destination: `dev-scaffold`
-  - Status: Cuplr monitoring foundation backported in
+  - Status: Monitoring foundation backported in
     [dev-scaffold#11](https://github.com/animan1/dev-scaffold/pull/11);
     external heartbeat adapter pending.
 

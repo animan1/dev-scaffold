@@ -58,7 +58,7 @@ DATABASE_URL=postgresql://\${POSTGRES_USER}:\${POSTGRES_PASSWORD}@db:5432/\${POS
 # Redis (if enabled)
 REDIS_URL=${REDIS_URL_DEFAULT}
 
-# Cuplr-style operational monitoring.
+# Operational monitoring.
 DEPLOYMENT_ENVIRONMENT=production
 RELEASE_REVISION=local
 RELEASE_DEPLOYED_AT=${RELEASE_DEPLOYED_AT}

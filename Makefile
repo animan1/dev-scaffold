@@ -200,7 +200,7 @@ smoke-prod: smoke
 endif
 
 .PHONY: ops.check-prod
-ops.check-prod: ## Run Cuplr-style operational checks once and report their state
+ops.check-prod: ## Run operational checks once and report their state
 	$(COMPOSE_PROD) run --rm backend python -m app.manage monitor_operational_integrity
 
 .PHONY: ops.monitor-prod
