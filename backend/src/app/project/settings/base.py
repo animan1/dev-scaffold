@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import django_stubs_ext
 import environ
 from django.core.exceptions import ImproperlyConfigured
+
+django_stubs_ext.monkeypatch()
 
 # /backend/src/app/project/settings/base.py
 BASE_DIR = Path(__file__).resolve().parent.parent.parent  # /backend/src/app

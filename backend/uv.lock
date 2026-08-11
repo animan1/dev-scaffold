@@ -22,6 +22,7 @@ dependencies = [
     { name = "celery" },
     { name = "django" },
     { name = "django-environ" },
+    { name = "django-stubs-ext" },
     { name = "gunicorn" },
     { name = "psycopg", extra = ["binary"] },
     { name = "redis" },
@@ -30,7 +31,6 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "django-stubs" },
-    { name = "django-stubs-ext" },
     { name = "ipython" },
     { name = "mypy" },
     { name = "pre-commit" },
@@ -48,7 +48,7 @@ requires-dist = [
     { name = "django", specifier = ">=5.1,<6" },
     { name = "django-environ", specifier = ">=0.11.2,<1" },
     { name = "django-stubs", marker = "extra == 'dev'", specifier = ">=5.0.2" },
-    { name = "django-stubs-ext", marker = "extra == 'dev'", specifier = ">=5.0.2" },
+    { name = "django-stubs-ext", specifier = ">=5.0.2" },
     { name = "gunicorn", specifier = ">=21.2,<22" },
     { name = "ipython", marker = "extra == 'dev'", specifier = ">=9.5,<10" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.1" },
