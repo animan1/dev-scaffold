@@ -63,6 +63,9 @@ jobs:
       - name: Verify host-ingress routing
         run: make verify-host-ingress
 
+      - name: Verify optional monitoring profile
+        run: make verify-monitoring-config
+
       - name: Generate backend SPDX SBOM
         uses: anchore/sbom-action@v0
         with:

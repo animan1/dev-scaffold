@@ -17,11 +17,45 @@ services:
       target: prod
     env_file:
       - "${PROD_ENV_FILE:-.env.prod}"
+    environment:
+      DEPLOYMENT_ENVIRONMENT: production
+      RELEASE_REVISION: "${RELEASE_REVISION:-unknown}"
+      RELEASE_DEPLOYED_AT: "${RELEASE_DEPLOYED_AT:-}"
     depends_on:
       db:
         condition: service_healthy
     volumes:
       - staticfiles:/static
+      - backup_status:/backup-status:ro
+
+  monitor:
+    profiles: ["monitoring"]
+    build:
+      context: ../backend
+      target: prod
+    env_file:
+      - "${PROD_ENV_FILE:-.env.prod}"
+    environment:
+      BACKUP_STATUS_DIR: /backup-status
+      DEPLOYMENT_ENVIRONMENT: production
+      RELEASE_REVISION: "${RELEASE_REVISION:-unknown}"
+      RELEASE_DEPLOYED_AT: "${RELEASE_DEPLOYED_AT:-}"
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      [
+        "python",
+        "-m",
+        "app.manage",
+        "monitor_operational_integrity",
+        "--watch",
+        "--interval-seconds",
+        "${MONITOR_INTERVAL_SECONDS:-900}",
+      ]
+    restart: unless-stopped
+    volumes:
+      - backup_status:/backup-status:ro
 
   nginx:
     build:
@@ -40,3 +74,4 @@ services:
 volumes:
   pgdata:
   staticfiles:
+  backup_status:

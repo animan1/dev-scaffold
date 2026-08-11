@@ -3,16 +3,23 @@ COMPOSE_DEV := docker compose -f deploy/docker-compose.dev.yml
 FRONTEND_DIR := frontend
 PROJECT_NAME ?= $(notdir $(CURDIR))
 HOST_INGRESS ?= 0
+MONITORING ?= 0
 HOST_INGRESS_HOST ?= app.example.test
 HOST_INGRESS_PORT ?= 18080
 export HOST_INGRESS_PORT
 PROD_COMPOSE_FILES := -f deploy/docker-compose.prod.yml
 RELEASE_COMPOSE_FILES := -f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml
+PROD_COMPOSE_PROFILES :=
 ifeq ($(HOST_INGRESS),1)
 PROD_COMPOSE_FILES += -f deploy/docker-compose.host-ingress.yml
 RELEASE_COMPOSE_FILES += -f deploy/docker-compose.host-ingress.yml
 endif
-COMPOSE_PROD = docker compose $(PROD_COMPOSE_FILES) --env-file deploy/.env.prod
+ifeq ($(MONITORING),1)
+PROD_COMPOSE_PROFILES += --profile monitoring
+endif
+COMPOSE_PROD = docker compose $(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file deploy/.env.prod
+COMPOSE_MONITOR = docker compose -f deploy/docker-compose.prod.yml \
+	--profile monitoring --env-file deploy/.env.prod
 RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
 RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)
 RELEASE_REVISION ?= $(shell git rev-parse HEAD)
@@ -22,7 +29,7 @@ RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
 RELEASE_HTTP_PORT ?= 18080
 RELEASE_HTTPS_PORT ?= 18443
 COMPOSE_RELEASE = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) docker compose \
-	$(RELEASE_COMPOSE_FILES) \
+	$(RELEASE_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) \
 	--env-file deploy/.env.prod --env-file $(RELEASE_FILE)
 COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
@@ -107,7 +114,7 @@ be.wait: ## Wait for backend health (dev)
 
 .PHONY: be.ci
 be.ci: ## (Docker) Run backend verify inside dev container
-	$(COMPOSE_DEV) run --rm backend bash -lc 'make -f /workspace/Makefile PY_DIR=/app be.verify'
+	$(COMPOSE_DEV) run --rm backend bash -lc 'REPO_DIR=/workspace make -f /workspace/Makefile PY_DIR=/app be.verify'
 
 .PHONY: fe.ci
 fe.ci: ## (Docker) Run frontend verify inside dev container
@@ -191,6 +198,14 @@ smoke-prod: URL_ROOT := https://localhost
 smoke-prod: CURL_FLAGS := -k
 smoke-prod: smoke
 endif
+
+.PHONY: ops.check-prod
+ops.check-prod: ## Run operational checks once and report their state
+	$(COMPOSE_PROD) run --rm backend python -m app.manage monitor_operational_integrity
+
+.PHONY: ops.monitor-prod
+ops.monitor-prod: ## Follow the unattended production monitor
+	$(COMPOSE_MONITOR) logs -f monitor
 
 .PHONY: smoke-host-ingress
 smoke-host-ingress: ## Smoke-test the loopback origin as routed by a host ingress
@@ -288,6 +303,11 @@ verify-host-ingress: prepare-release-ci ## Verify exact images through the loopb
 	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
 		$(COMPOSE_RELEASE_INGRESS_CI) up -d --no-build
 	$(MAKE) smoke-host-ingress
+
+.PHONY: verify-monitoring-config
+verify-monitoring-config: prepare-release-ci ## Validate the optional monitoring Compose profile
+	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
+		-f deploy/docker-compose.prod.yml --profile monitoring config --quiet
 
 .PHONY: down-release-ci
 down-release-ci: ## Stop the isolated immutable-release test stack

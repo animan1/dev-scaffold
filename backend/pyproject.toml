@@ -12,6 +12,7 @@ dependencies = [
   "redis>=5,<6",
   "celery>=5.4,<6",
   "gunicorn>=21.2,<22",
+  "django-stubs-ext>=5.0.2",
 ]
 
 [tool.uv]
@@ -25,7 +26,6 @@ dev = [
   "ruff>=0.6.9",
   "mypy>=1.11.1",
   "django-stubs>=5.0.2",
-  "django-stubs-ext>=5.0.2",
   "types-redis",
   "types-requests",
   "pre-commit>=3.8.0",
@@ -58,12 +58,13 @@ fail_under = 85
 
 [tool.mypy]
 python_version = "3.12"
-plugins = []
+plugins = ["mypy_django_plugin.main"]
 strict = true
 warn_unused_configs = true
 warn_return_any = true
 warn_unused_ignores = true
 exclude = ["migrations"]
+mypy_path = ["src"]
 
 [[tool.mypy.overrides]]
 module = ["environ", "environ.*"]
