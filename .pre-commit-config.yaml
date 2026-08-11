@@ -21,7 +21,7 @@ repos:
         language: system
         pass_filenames: true
         files: ^frontend/.*\.(ts|tsx|js|jsx)$
-        entry: bash -lc 'cd frontend && pnpm eslint --max-warnings 0 "../$@"'
+        entry: bash -c 'files=(); for file do files+=("$PWD/$file"); done; cd frontend && pnpm eslint --max-warnings 0 "${files[@]}"' --
   # --- Frontend: Prettier (format) ---
   - repo: local
     hooks:
@@ -30,4 +30,4 @@ repos:
         language: system
         pass_filenames: true
         files: ^frontend/.*\.(ts|tsx|js|jsx|json|css|scss|md|html|yml|yaml)$
-        entry: bash -lc 'cd frontend && pnpm prettier --write "../$@"'
+        entry: bash -c 'files=(); for file do files+=("$PWD/$file"); done; cd frontend && pnpm prettier --write "${files[@]}"' --

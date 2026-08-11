@@ -40,8 +40,12 @@ make fe.run
 ```bash
 make up        # start backend + nginx (proxying API, static, and frontend)
 make smoke     # run API, static, and FE smokes
-make down      # stop stack
+make down      # stop stack while preserving development volumes
 ```
+
+To deliberately remove development volumes and reset local state, run
+`make reset CONFIRM_RESET=1`. The confirmation is required because this cannot
+be undone.
 
 ### Docker Prod (local)
 
