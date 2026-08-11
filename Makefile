@@ -83,7 +83,16 @@ up: ## (Docker) Start dev stack (backend + nginx + frontend proxy)
 	$(COMPOSE_DEV) up --build -d
 
 .PHONY: down
-down: ## (Docker) Stop dev stack and remove volumes
+down: ## (Docker) Stop dev stack while preserving persistent volumes
+	$(COMPOSE_DEV) down
+
+.PHONY: reset
+reset: ## (Docker, destructive) Stop dev stack and remove volumes; requires CONFIRM_RESET=1
+	@if [ "$(CONFIRM_RESET)" != "1" ]; then \
+		echo "Refusing to remove development volumes."; \
+		echo "Re-run with: make reset CONFIRM_RESET=1"; \
+		exit 1; \
+	fi
 	$(COMPOSE_DEV) down -v
 
 .PHONY: restart
@@ -439,7 +448,8 @@ coverage: ## Pytest coverage gate (backend)
 # ---- Pre-commit runner ----
 .PHONY: precommit
 precommit: ## Run pre-commit on all files
-precommit: uv run pre-commit run --all-files
+precommit: fe.setup
+	cd $(PY_DIR) && uv run --extra dev pre-commit run --all-files
 
 # ---- Clean ----
 .PHONY: clean
