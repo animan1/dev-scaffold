@@ -20,6 +20,7 @@ services:
     environment:
       DEPLOYMENT_ENVIRONMENT: production
       RELEASE_REVISION: "${RELEASE_REVISION:-unknown}"
+      RELEASE_IMAGE_PREFIX: "${RELEASE_IMAGE_PREFIX:-unconfigured}"
       RELEASE_DEPLOYED_AT: "${RELEASE_DEPLOYED_AT:-}"
     depends_on:
       db:
@@ -39,6 +40,7 @@ services:
       BACKUP_STATUS_DIR: /backup-status
       DEPLOYMENT_ENVIRONMENT: production
       RELEASE_REVISION: "${RELEASE_REVISION:-unknown}"
+      RELEASE_IMAGE_PREFIX: "${RELEASE_IMAGE_PREFIX:-unconfigured}"
       RELEASE_DEPLOYED_AT: "${RELEASE_DEPLOYED_AT:-}"
     depends_on:
       db:

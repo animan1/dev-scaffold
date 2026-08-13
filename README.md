@@ -66,9 +66,11 @@ CI derives two packages from the repository name (`-backend` and `-web`), tags
 them with the full commit SHA, verifies and smoke-tests those exact local
 images, and only then pushes them to this repository's GHCR namespace. A
 successful `main` run publishes a release artifact containing digest-pinned
-image references and an SPDX JSON SBOM for each image. The workflow also signs
-each SBOM as a GitHub artifact attestation and attaches it to the corresponding
-image digest in GHCR.
+image references, release identity metadata, and an SPDX JSON SBOM for each
+image. The workflow also signs each SBOM as a GitHub artifact attestation and
+attaches it to the corresponding image digest in GHCR. The public health
+endpoint reports that release identity so deployment automation can compare
+environments without access to application data.
 
 Download that run's `release-<sha>` artifact onto the host. Keep the project's
 production configuration in `deploy/.env.prod`, then deploy without building:
