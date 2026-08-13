@@ -2,6 +2,10 @@
 
 General-purpose Django + React + Docker + VS Code scaffold. Fork to start new projects.
 
+The committed `.scaffold-profile` switch selects a project's active profile
+without copying or deleting files. Keeping inactive profile implementations
+tracked allows derived projects to merge later scaffold improvements normally.
+
 ## Features
 
 - **Backend**: Django with type hints, Ruff formatting and linting, MyPy type checking, pytest, and coverage enforcement.

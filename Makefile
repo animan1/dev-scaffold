@@ -1,3 +1,12 @@
+SCAFFOLD_ROOT := $(dir $(abspath $(firstword $(MAKEFILE_LIST))))
+include $(SCAFFOLD_ROOT).scaffold-profile
+
+.PHONY: ci-profiles
+ci-profiles:
+	@printf '%s\n' "$(CI_PROFILES)"
+
+ifeq ($(SCAFFOLD_PROFILE),react-vite)
+
 SHELL := /bin/bash
 COMPOSE_DEV := docker compose -f deploy/docker-compose.dev.yml
 FRONTEND_DIR := frontend
@@ -495,3 +504,7 @@ fe.typecheck: ## TypeScript typecheck (frontend)
 .PHONY: fe.verify
 fe.verify: ## Frontend lint + typecheck + tests + fmt-check
 	cd $(FRONTEND_DIR) && pnpm verify
+
+else
+include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
+endif
