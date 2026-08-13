@@ -16,6 +16,25 @@ jobs:
       - id: profiles
         run: echo "value=$(make --no-print-directory ci-profiles)" >> "$GITHUB_OUTPUT"
 
+  server-rendered-profile:
+    needs: profile-selection
+    if: contains(needs.profile-selection.outputs.ci-profiles, 'server-rendered-django')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify the profile through its shared Make contract
+        env:
+          DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
+          SCAFFOLD_PROFILE: server-rendered-django
+        run: make verify
+
+      - name: Stop profile services without deleting volumes
+        if: always()
+        run: make down SCAFFOLD_PROFILE=server-rendered-django
+
   backend:
     needs: profile-selection
     if: contains(needs.profile-selection.outputs.ci-profiles, 'react-vite')

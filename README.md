@@ -5,6 +5,10 @@ General-purpose Django + React + Docker + VS Code scaffold. Fork to start new pr
 The committed `.scaffold-profile` switch selects a project's active profile
 without copying or deleting files. Keeping inactive profile implementations
 tracked allows derived projects to merge later scaffold improvements normally.
+Projects that render HTML in Django can select the optional
+[server-rendered Django profile](profiles/server-rendered-django/README.md),
+which uses PostgreSQL and the same full-Docker Make contract in development and
+CI without activating the React/Vite toolchain.
 
 ## Features
 

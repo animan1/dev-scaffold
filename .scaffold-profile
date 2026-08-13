@@ -1,2 +1,2 @@
 SCAFFOLD_PROFILE ?= react-vite
-CI_PROFILES ?= react-vite
+CI_PROFILES ?= react-vite server-rendered-django

@@ -67,6 +67,20 @@ investigation.
     compatible greenfield extension tracked separately in
     [dev-scaffold#12](https://github.com/animan1/dev-scaffold/pull/12).
 
+- [ ] Add an optional server-rendered Django application profile.
+  - Keep the React/Vite profile intact and select behavior with one committed
+    switch rather than copying or deleting scaffold files.
+  - Use full-Docker Django and PostgreSQL development, the same aggregate Make
+    verification contract in CI, safe state-preserving teardown, a non-root
+    production image, and routed smoke tests.
+  - Keep React, Vite, pnpm, frontend services, and frontend quality gates
+    inactive under this profile.
+  - Destination: `dev-scaffold`
+  - Status: Implemented across
+    [dev-scaffold#19](https://github.com/animan1/dev-scaffold/pull/19) through
+    [dev-scaffold#23](https://github.com/animan1/dev-scaffold/pull/23); keep
+    unchecked until the complete stack lands.
+
 - [x] Make operational notifications identify their deployment context.
   - Include the environment, release revision, check, and transition in email
     notifications.
@@ -120,7 +134,10 @@ investigation.
 - [ ] Reduce development/production database drift.
   - Provide an optional full-Docker PostgreSQL development and CI path.
   - Destination: `dev-scaffold`
-  - Proof required: Phase 4 website implementation.
+  - Status: Implemented by the server-rendered Django profile across
+    [dev-scaffold#19](https://github.com/animan1/dev-scaffold/pull/19) through
+    [dev-scaffold#23](https://github.com/animan1/dev-scaffold/pull/23); keep
+    unchecked until the complete stack lands.
 
 - [ ] Add an optional server-rendered web quality profile.
   - Playwright customer journeys, axe accessibility checks, redirect/link
