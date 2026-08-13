@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.request import urlopen
 
-from backoffice_lib.json_dataclass import from_json_data
 from django.conf import settings
 from django.utils import timezone
 
@@ -87,7 +86,7 @@ def _release_health(review_url: str, ca_file: str, label: str) -> ReleaseHealth:
     status_url = f"{review_url}/api/healthz"
     try:
         with urlopen(status_url, timeout=10, context=context) as response:  # noqa: S310
-            release = from_json_data(ReleaseHealth, json.load(response))
+            release = ReleaseHealth.from_payload(json.load(response))
     except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
         raise StagingReleaseError(f"{label} health could not be read") from error
     return release
