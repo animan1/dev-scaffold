@@ -90,6 +90,13 @@ Rollback is selection of an older retained manifest, not a rebuild:
 make rollback-release RELEASE_FILE=/path/to/previous-release.env
 ```
 
+The monitoring package also includes the staged-release comparison proven in
+Cuplr. Given staging and production review URLs, it derives each
+`/api/healthz` endpoint, verifies the release metadata, waits for the configured
+bake period, and returns a prioritized promotion action only when staging is
+actually ahead. Optional CA-file settings support separately owned local TLS
+boundaries without duplicating status URLs.
+
 Verify a published image's signed SBOM attestation against the repository that
 built it:
 
