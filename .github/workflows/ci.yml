@@ -2,12 +2,23 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
     branches: ["**"]
 
 jobs:
+  profile-selection:
+    runs-on: ubuntu-latest
+    outputs:
+      ci-profiles: ${{ steps.profiles.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: profiles
+        run: echo "value=$(make --no-print-directory ci-profiles)" >> "$GITHUB_OUTPUT"
+
   backend:
+    needs: profile-selection
+    if: contains(needs.profile-selection.outputs.ci-profiles, 'react-vite')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
