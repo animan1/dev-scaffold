@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from django.conf import settings
-from django.http import HttpRequest, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import path
 
 from .release_health import ReleaseHealth
@@ -18,6 +18,11 @@ def health(_request: HttpRequest) -> JsonResponse:
     return JsonResponse(release.payload())
 
 
+def home(_request: HttpRequest) -> HttpResponse:
+    return HttpResponse("<!doctype html><html><body><main>Django application</main></body></html>")
+
+
 urlpatterns = [
+    path("", home, name="home"),
     path("api/healthz", health, name="health"),
 ]
