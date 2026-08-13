@@ -1,0 +1,65 @@
+[project]
+name = "app"
+version = "0.1.0"
+description = "Server-rendered Django application"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "django>=5.2,<6",
+  "django-environ>=0.12,<1",
+  "django-stubs-ext>=5.2,<6",
+  "gunicorn>=23,<24",
+  "psycopg[binary]>=3.2,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "diff-cover>=9,<10",
+  "django-stubs>=5.2,<6",
+  "mypy>=1.17,<2",
+  "pre-commit>=4,<5",
+  "pytest>=8,<9",
+  "pytest-cov>=6,<7",
+  "pytest-django>=4,<5",
+  "ruff>=0.12,<1",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "app.project.settings.dev"
+pythonpath = ["src"]
+addopts = "-ra --strict-markers"
+
+[tool.coverage.run]
+branch = true
+source = ["src/app"]
+omit = [
+  "src/app/manage.py",
+  "src/app/project/asgi.py",
+  "src/app/project/wsgi.py",
+  "src/app/project/settings/*.py",
+]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["B", "C90", "E", "F", "I", "N", "UP"]
+ignore = ["E203", "E266", "E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_configs = true
+warn_return_any = true
+warn_unused_ignores = true
+exclude = ["migrations"]
+
+[[tool.mypy.overrides]]
+module = ["environ", "environ.*"]
+ignore_missing_imports = true
+
+[tool.django-stubs]
+django_settings_module = "app.project.settings.dev"
