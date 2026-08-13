@@ -67,6 +67,46 @@ investigation.
     compatible greenfield extension tracked separately in
     [dev-scaffold#12](https://github.com/animan1/dev-scaffold/pull/12).
 
+- [x] Make operational notifications identify their deployment context.
+  - Include the environment, release revision, check, and transition in email
+    notifications.
+  - Validate SMTP configuration only when SMTP is the selected notification
+    transport.
+  - Destination: `dev-scaffold`
+  - Status: Proven in
+    [Cuplr#104](https://github.com/animan1/cuplr/pull/104) and included in the
+    monitoring backport in
+    [dev-scaffold#11](https://github.com/animan1/dev-scaffold/pull/11).
+
+- [ ] Add an optional release-promotion safety profile.
+  - Compare immutable release metadata between staging and production.
+  - Derive each health endpoint from its operator-facing review URL instead of
+    maintaining duplicate URLs that can drift.
+  - Surface promotion reminders in both environments without implying that
+    staging can promote itself.
+  - Escalate an overdue promotion once at bounded thresholds and send one
+    recovery notification when production catches up.
+  - Provide development-only notification previews without mutating monitoring
+    state or contacting external recipients.
+  - Destination: `dev-scaffold`
+  - Status: Backport requested from
+    [Cuplr#105](https://github.com/animan1/cuplr/pull/105),
+    [Cuplr#106](https://github.com/animan1/cuplr/pull/106), and
+    [Cuplr#107](https://github.com/animan1/cuplr/pull/107). The underlying
+    staged-release comparison was proven in
+    [Cuplr#99](https://github.com/animan1/cuplr/pull/99) through
+    [Cuplr#101](https://github.com/animan1/cuplr/pull/101).
+
+- [ ] Serialize shared development dependency synchronization.
+  - When multiple development services share one dependency environment, make
+    secondary services wait for the backend's dependency sync and health check
+    instead of racing their own sync.
+  - Destination: `dev-scaffold`
+  - Status: Backport requested from the dependency-sync fix in
+    [Cuplr#107](https://github.com/animan1/cuplr/pull/107); apply when an
+    optional development monitor or another shared-environment service is
+    enabled.
+
 ## Consider on next major release
 
 - [ ] Reconsider a standalone external dead-man implementation.
@@ -96,8 +136,15 @@ investigation.
     restore credentials.
   - Support combined database/media recovery points, freshness evidence, and
     isolated end-to-end restore verification.
+  - Derive freshness from the newest recoverable repository snapshot rather
+    than trusting a last-success marker that can outlive a deleted snapshot.
+  - Refresh repository-derived status independently of the backup schedule and
+    report unreadable or empty repository state as unavailable.
   - Destination: Cuplr now; `dev-scaffold` after website proof.
-  - Status: New request.
+  - Status: Backup profile requested; repository-derived freshness proven in
+    [Cuplr#103](https://github.com/animan1/cuplr/pull/103), with bounded
+    two-interval alert grace proven in
+    [Cuplr#104](https://github.com/animan1/cuplr/pull/104).
 
 ## Investigation candidate
 
