@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
 
 def _repository_root() -> Path:
+    configured_root = os.getenv("REPO_DIR")
+    if configured_root is not None:
+        return Path(configured_root)
     return Path(__file__).resolve().parents[2]
 
 
