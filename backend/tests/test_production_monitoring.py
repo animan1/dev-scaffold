@@ -14,7 +14,7 @@ def _repository_root() -> Path:
 
 def _make(*arguments: str) -> str:
     result = subprocess.run(
-        ["make", "--dry-run", *arguments],
+        ["make", "--dry-run", "SCAFFOLD_PROFILE=react-vite", *arguments],
         cwd=_repository_root(),
         check=True,
         capture_output=True,

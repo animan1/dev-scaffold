@@ -25,15 +25,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify the profile through its shared Make contract
+      - name: Select the downstream-only server-rendered profile
+        run: |
+          printf '%s\n' \
+            'SCAFFOLD_PROFILE ?= server-rendered-django' \
+            'CI_PROFILES ?= server-rendered-django' \
+            > .scaffold-profile
+          test "$(make --no-print-directory ci-profiles)" = "server-rendered-django"
+
+      - name: Verify the downstream profile through its shared Make contract
         env:
           DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
-          SCAFFOLD_PROFILE: server-rendered-django
         run: make verify
 
       - name: Stop profile services without deleting volumes
         if: always()
-        run: make down SCAFFOLD_PROFILE=server-rendered-django
+        run: make down
 
   backend:
     needs: profile-selection

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -22,9 +23,25 @@ def _make(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[st
     )
 
 
-def test_default_profile_keeps_the_react_vite_contract() -> None:
-    assert _make("ci-profiles").stdout.strip() == "react-vite server-rendered-django"
-    assert "deploy/docker-compose.dev.yml" in _make("--dry-run", "up").stdout
+def _committed_profiles() -> tuple[str, list[str]]:
+    selector = (_repository_root() / ".scaffold-profile").read_text()
+    selected_match = re.search(r"^SCAFFOLD_PROFILE\s*\?=\s*(\S+)\s*$", selector, re.MULTILINE)
+    ci_match = re.search(r"^CI_PROFILES\s*\?=\s*(.+?)\s*$", selector, re.MULTILINE)
+    assert selected_match is not None
+    assert ci_match is not None
+    return selected_match.group(1), ci_match.group(1).split()
+
+
+def test_committed_profile_selects_its_make_and_ci_contracts() -> None:
+    selected_profile, ci_profiles = _committed_profiles()
+    expected_compose = {
+        "react-vite": "deploy/docker-compose.dev.yml",
+        "server-rendered-django": "profiles/server-rendered-django/compose.yml",
+    }
+
+    assert selected_profile in ci_profiles
+    assert _make("ci-profiles").stdout.strip().split() == ci_profiles
+    assert expected_compose[selected_profile] in _make("--dry-run", "up").stdout
 
 
 def test_unknown_profile_requires_its_own_implementation() -> None:
@@ -45,6 +62,11 @@ def test_ci_routes_profiles_without_duplicate_pr_push_runs() -> None:
         in workflow
     )
     server_job = workflow.split("  server-rendered-profile:", 1)[1].split("\n  backend:", 1)[0]
-    assert "SCAFFOLD_PROFILE: server-rendered-django" in server_job
+    assert "SCAFFOLD_PROFILE ?= server-rendered-django" in server_job
+    assert "CI_PROFILES ?= server-rendered-django" in server_job
+    assert (
+        'test "$(make --no-print-directory ci-profiles)" = "server-rendered-django"' in server_job
+    )
     assert "run: make verify" in server_job
+    assert "SCAFFOLD_PROFILE:" not in server_job
     assert "pnpm" not in server_job
