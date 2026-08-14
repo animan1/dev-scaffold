@@ -10,6 +10,11 @@ Projects that render HTML in Django can select the optional
 which uses PostgreSQL and the same full-Docker Make contract in development and
 CI without activating the React/Vite toolchain.
 
+For an existing repository, follow the provenance-preserving
+[initial adoption guide](docs/adopting-into-an-existing-repository.md) before
+application work. Once a project contains real code, use the separate
+[established-project upgrade guide](docs/upgrading-an-established-project.md).
+
 ## Features
 
 - **Backend**: Django with type hints, Ruff formatting and linting, MyPy type checking, pytest, and coverage enforcement.

@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+scaffold_root="$(cd -- "$script_dir/.." && pwd -P)"
+
+destination_input="${1:-}"
+if [[ -z "$destination_input" ]]; then
+  read -r -p "Destination repository: " destination_input
+fi
+if [[ -z "$destination_input" || ! -d "$destination_input/.git" ]]; then
+  echo "Destination must be an existing Git repository." >&2
+  exit 1
+fi
+
+destination_root="$(cd -- "$destination_input" && pwd -P)"
+if [[ "$destination_root" == "$scaffold_root" ]]; then
+  echo "Destination must not be the dev-scaffold checkout." >&2
+  exit 1
+fi
+if [[ -n "$(git -C "$destination_root" status --porcelain)" ]]; then
+  echo "Destination must have a clean working tree." >&2
+  exit 1
+fi
+
+commit_input="${2:-}"
+if [[ -z "$commit_input" ]]; then
+  read -r -p "Scaffold commit [HEAD]: " commit_input
+fi
+commit_input="${commit_input:-HEAD}"
+scaffold_commit="$(git -C "$scaffold_root" rev-parse "$commit_input^{commit}")"
+scaffold_tree="$(git -C "$scaffold_root" rev-parse "$scaffold_commit^{tree}")"
+scaffold_repository="$(git -C "$scaffold_root" remote get-url origin 2>/dev/null || true)"
+scaffold_repository="${scaffold_repository:-$scaffold_root}"
+
+destination_parent="$(dirname -- "$destination_root")"
+destination_name="$(basename -- "$destination_root")"
+import_tmp="$destination_parent/.tmp/$destination_name-scaffold-${scaffold_commit:0:12}"
+if [[ -e "$import_tmp" ]]; then
+  echo "Import workspace already exists: $import_tmp" >&2
+  exit 1
+fi
+
+snapshot_root="$import_tmp/snapshot"
+mkdir -p "$snapshot_root"
+git -C "$scaffold_root" archive --format=tar \
+  --output="$import_tmp/scaffold.tar" "$scaffold_commit"
+tar -xf "$import_tmp/scaffold.tar" -C "$snapshot_root"
+
+if command -v shasum >/dev/null 2>&1; then
+  archive_sha256="$(shasum -a 256 "$import_tmp/scaffold.tar" | awk '{print $1}')"
+elif command -v sha256sum >/dev/null 2>&1; then
+  archive_sha256="$(sha256sum "$import_tmp/scaffold.tar" | awk '{print $1}')"
+else
+  echo "Either shasum or sha256sum is required." >&2
+  exit 1
+fi
+
+git -C "$scaffold_root" ls-tree -r --name-only "$scaffold_commit" \
+  | LC_ALL=C sort > "$import_tmp/upstream-paths"
+: > "$import_tmp/collision-paths"
+while IFS= read -r path; do
+  if [[ -e "$destination_root/$path" || -L "$destination_root/$path" ]]; then
+    printf '%s\n' "$path" >> "$import_tmp/collision-paths"
+  fi
+done < "$import_tmp/upstream-paths"
+
+comm -23 "$import_tmp/upstream-paths" "$import_tmp/collision-paths" \
+  > "$import_tmp/import-paths"
+
+{
+  printf 'SCAFFOLD_REPOSITORY=%q\n' "$scaffold_repository"
+  printf 'SCAFFOLD_COMMIT=%q\n' "$scaffold_commit"
+  printf 'SCAFFOLD_TREE=%q\n' "$scaffold_tree"
+  printf 'SCAFFOLD_IMPORTED_DATE=%q\n' "$(date +%F)"
+  printf 'SCAFFOLD_ARCHIVE_SHA256=%q\n' "$archive_sha256"
+  printf 'SCAFFOLD_IMPORT_METHOD=%q\n' "git archive with collision exclusion"
+} > "$import_tmp/provenance-values.env"
+
+collision_count="$(wc -l < "$import_tmp/collision-paths" | tr -d ' ')"
+import_count="$(wc -l < "$import_tmp/import-paths" | tr -d ' ')"
+echo "Prepared scaffold $scaffold_commit ($scaffold_tree)"
+echo "Import workspace: $import_tmp"
+echo "Non-collision paths: $import_count"
+echo "Collision paths: $collision_count"
+
+read -r -p "Copy and stage non-collision paths? [y/N] " confirmation
+if [[ "$confirmation" != "y" && "$confirmation" != "Y" ]]; then
+  echo "No destination files changed. Review the reports in $import_tmp."
+  exit 0
+fi
+
+rsync -a --files-from="$import_tmp/import-paths" \
+  "$snapshot_root/" "$destination_root/"
+while IFS= read -r path; do
+  cmp --silent "$snapshot_root/$path" "$destination_root/$path" || {
+    echo "Verification failed: $path" >&2
+    exit 1
+  }
+done < "$import_tmp/import-paths"
+
+git -C "$destination_root" add \
+  --pathspec-from-file="$import_tmp/import-paths"
+echo "Copied and verified non-collision paths. Review with:"
+echo "  git -C '$destination_root' diff --cached --stat"
+echo "Fill docs/scaffold-provenance.env from:"
+echo "  $import_tmp/provenance-values.env"
