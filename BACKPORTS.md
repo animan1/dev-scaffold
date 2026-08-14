@@ -67,7 +67,7 @@ investigation.
     compatible greenfield extension tracked separately in
     [dev-scaffold#12](https://github.com/animan1/dev-scaffold/pull/12).
 
-- [ ] Add an optional server-rendered Django application profile.
+- [x] Add an optional server-rendered Django application profile.
   - Keep the React/Vite profile intact and select behavior with one committed
     switch rather than copying or deleting scaffold files.
   - Use full-Docker Django and PostgreSQL development, the same aggregate Make
@@ -78,8 +78,7 @@ investigation.
   - Destination: `dev-scaffold`
   - Status: Implemented across
     [dev-scaffold#19](https://github.com/animan1/dev-scaffold/pull/19) through
-    [dev-scaffold#23](https://github.com/animan1/dev-scaffold/pull/23); keep
-    unchecked until the complete stack lands.
+    [dev-scaffold#23](https://github.com/animan1/dev-scaffold/pull/23).
 
 - [x] Make operational notifications identify their deployment context.
   - Include the environment, release revision, check, and transition in email
