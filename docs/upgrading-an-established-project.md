@@ -21,12 +21,17 @@ branch, and pin the target scaffold commit rather than merging a moving branch.
 
 ## Inventory the upgrade before applying it
 
-Find the last adopted scaffold commit from the project's provenance record. For
-shared ancestry, confirm it with the merge base. Then record:
+Read the last adopted scaffold commit from the project's tracked provenance
+record, created from
+[the scaffold provenance template](scaffold-provenance.env.example). For shared
+ancestry, confirm it with the merge base. Resolve the new target only after
+fetching and reviewing upstream:
 
 ```bash
-baseline_commit="<last-adopted-scaffold-commit>"
-target_commit="<new-scaffold-commit>"
+git fetch upstream main
+source docs/scaffold-provenance.env
+baseline_commit="$SCAFFOLD_COMMIT"
+target_commit="$(git rev-parse upstream/main)"
 
 git diff --name-status "$baseline_commit" "$target_commit"
 git diff --name-only "$baseline_commit"...HEAD
@@ -48,11 +53,9 @@ ports, secrets, and destructive Make targets before running anything.
 
 ## Shared-ancestry upgrade, such as Cuplr
 
-Fetch the scaffold remote and resolve the reviewed target SHA:
+Create the upgrade branch and merge the reviewed target SHA:
 
 ```bash
-git fetch upstream main
-target_commit="$(git rev-parse upstream/main)"
 git switch -c codex/upgrade-dev-scaffold
 git merge --no-ff --no-commit "$target_commit"
 ```
