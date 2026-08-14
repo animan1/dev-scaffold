@@ -1,0 +1,100 @@
+name: "${COMPOSE_PROJECT_NAME:?Set COMPOSE_PROJECT_NAME through the profile Makefile}"
+
+services:
+  db:
+    image: postgres:16.10-bookworm
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_USER: app
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  app:
+    build:
+      context: .
+      dockerfile: profiles/server-rendered-django/backend.Dockerfile
+      target: development
+    command:
+      [
+        "sh",
+        "-lc",
+        "uv run --project /workspace/profiles/server-rendered-django python -m app.manage migrate && uv run --project /workspace/profiles/server-rendered-django python -m app.manage runserver 0.0.0.0:8000",
+      ]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://app:app@db:5432/app
+      DEPLOYMENT_ENVIRONMENT: development
+      DJANGO_ALLOWED_HOSTS: "${APP_HOST:-localhost},127.0.0.1"
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: development-only
+      HOME: /tmp
+      MYPY_CACHE_DIR: /tmp/mypy-cache
+      RUFF_CACHE_DIR: /tmp/ruff-cache
+      UV_COMPILE_BYTECODE: "0"
+      UV_NO_SYNC: "1"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/healthz', timeout=2)",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    ports:
+      - "127.0.0.1:${APP_PORT:-18000}:8000"
+    user: "${HOST_UID:?Set HOST_UID through the profile Makefile}:${HOST_GID:?Set HOST_GID through the profile Makefile}"
+    volumes:
+      - .:/workspace
+      - ./backend:/workspace/backend
+      - "${GIT_COMMON_DIR:?Set GIT_COMMON_DIR through the profile Makefile}:${GIT_COMMON_DIR}:ro"
+    working_dir: /workspace/backend
+
+  monitor:
+    profiles: ["monitoring"]
+    build:
+      context: .
+      dockerfile: profiles/server-rendered-django/backend.Dockerfile
+      target: development
+    command:
+      [
+        "uv",
+        "run",
+        "--project",
+        "/workspace/profiles/server-rendered-django",
+        "python",
+        "-m",
+        "app.manage",
+        "monitor_operational_integrity",
+        "--watch",
+        "--interval-seconds",
+        "${MONITOR_INTERVAL_SECONDS:-900}",
+      ]
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://app:app@db:5432/app
+      DJANGO_SECRET_KEY: development-only
+      HOME: /tmp
+      UV_COMPILE_BYTECODE: "0"
+      UV_NO_SYNC: "1"
+    restart: unless-stopped
+    user: "${HOST_UID:?Set HOST_UID through the profile Makefile}:${HOST_GID:?Set HOST_GID through the profile Makefile}"
+    volumes:
+      - ./backend:/workspace/backend
+      - "${GIT_COMMON_DIR:?Set GIT_COMMON_DIR through the profile Makefile}:${GIT_COMMON_DIR}:ro"
+    working_dir: /workspace/backend
+
+volumes:
+  postgres_data:
