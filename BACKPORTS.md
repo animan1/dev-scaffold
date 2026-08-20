@@ -84,14 +84,16 @@ investigation.
   - Provide `make deps.lock` for the selected profile using the pinned uv image
     so developers do not need host-installed uv.
   - Destination: `dev-scaffold`
-  - Status: Requested; implementation in progress.
+  - Status: Proposed in
+    [dev-scaffold#26](https://github.com/animan1/dev-scaffold/pull/26).
 
 - [ ] Use the selected profile's Python tool configuration.
   - Make Ruff, MyPy, pytest, and coverage explicitly load
     `profiles/server-rendered-django/pyproject.toml` when that profile is
     selected instead of discovering the inactive backend configuration.
   - Destination: `dev-scaffold`
-  - Status: Requested; implementation in progress.
+  - Status: Proposed in
+    [dev-scaffold#26](https://github.com/animan1/dev-scaffold/pull/26).
 
 - [x] Make operational notifications identify their deployment context.
   - Include the environment, release revision, check, and transition in email
