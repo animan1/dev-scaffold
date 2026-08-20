@@ -14,8 +14,8 @@ future scaffold merges can update both profiles normally.
 - A persistent PostgreSQL volume. `make down` preserves it; `make reset
   CONFIRM_RESET=1` is the explicit destructive operation.
 - The same Make interface for developers and CI: `build`, `up`, `down`,
-  `reset`, `format`, `lint`, `typecheck`, `test`, `coverage`, `check`,
-  `verify`, `precommit`, `build-production`, and `smoke`.
+  `reset`, `deps.lock`, `format`, `lint`, `typecheck`, `test`, `coverage`,
+  `check`, `verify`, `precommit`, `build-production`, and `smoke`.
 - Ruff formatting and linting, strict MyPy, pytest, total and changed-line
   coverage, migration-drift checks, Django deployment checks, a multi-stage
   non-root production image, and routed smoke tests.
@@ -49,7 +49,12 @@ Then exercise the profile through its stable contract:
 ```bash
 make verify
 make precommit
+make deps.lock
 ```
+
+`make deps.lock` updates only the selected profile's lockfile using a uv 0.8.17
+container with the profile's Python 3.12 and Bookworm runtime. It does not
+require uv on the host.
 
 Set a unique project name and unused port when the directory defaults are not
 suitable:

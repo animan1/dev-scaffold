@@ -13,6 +13,7 @@ COMPOSE := COMPOSE_PROJECT_NAME=$(PROJECT_NAME) APP_HOST=$(APP_HOST) APP_PORT=$(
 	docker compose --project-directory . -f profiles/server-rendered-django/compose.yml
 RUN := $(COMPOSE) run --rm app
 UV_RUN := uv run --project /workspace/profiles/server-rendered-django
+PROFILE_PROJECT := /workspace/profiles/server-rendered-django/pyproject.toml
 
 .DEFAULT_GOAL := help
 
@@ -57,28 +58,39 @@ wait: ## Wait for the routed Django health endpoint
 
 .PHONY: format
 format: ## Apply the single deterministic Python formatter and safe lint fixes
-	$(RUN) $(UV_RUN) ruff check --fix .
-	$(RUN) $(UV_RUN) ruff format .
+	$(RUN) $(UV_RUN) ruff check --config $(PROFILE_PROJECT) --fix .
+	$(RUN) $(UV_RUN) ruff format --config $(PROFILE_PROJECT) .
 
 .PHONY: format-check
 format-check: ## Check Python formatting without mutation
-	$(RUN) $(UV_RUN) ruff format --check .
+	$(RUN) $(UV_RUN) ruff format --config $(PROFILE_PROJECT) --check .
 
 .PHONY: lint
 lint: ## Run strict Ruff linting
-	$(RUN) $(UV_RUN) ruff check .
+	$(RUN) $(UV_RUN) ruff check --config $(PROFILE_PROJECT) .
 
 .PHONY: typecheck
 typecheck: ## Run strict MyPy type checking
-	$(RUN) $(UV_RUN) mypy .
+	$(RUN) $(UV_RUN) mypy --config-file $(PROFILE_PROJECT) .
 
 .PHONY: test
 test: ## Run backend tests once without the coverage gate
-	$(RUN) $(UV_RUN) pytest
+	$(RUN) $(UV_RUN) pytest -c $(PROFILE_PROJECT) /workspace/backend
 
 .PHONY: coverage
 coverage: ## Run the single coverage-enabled test suite and write coverage.xml
-	$(RUN) $(UV_RUN) pytest --cov=src --cov-report=term-missing --cov-report=xml
+	$(RUN) $(UV_RUN) pytest -c $(PROFILE_PROJECT) --cov=src \
+		--cov-config=$(PROFILE_PROJECT) --cov-report=term-missing --cov-report=xml \
+		/workspace/backend
+
+.PHONY: deps.lock
+deps.lock: ## Update this profile's lockfile with pinned Dockerized uv
+	docker run --rm --user "$$(id -u):$$(id -g)" \
+		--env UV_CACHE_DIR=/tmp/uv-cache \
+		--tmpfs /tmp:rw,mode=1777 \
+		--volume "$(CURDIR):/workspace" \
+		--workdir /workspace --entrypoint /usr/local/bin/uv $(UV_IMAGE) \
+		lock --project profiles/server-rendered-django
 
 .PHONY: changed-coverage
 changed-coverage: ## Enforce coverage on Python lines changed from DIFF_BASE
