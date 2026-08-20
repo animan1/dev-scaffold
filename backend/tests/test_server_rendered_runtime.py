@@ -65,7 +65,5 @@ def test_server_rendered_web_owns_static_and_media_delivery_only() -> None:
     assert "ssl_certificate" not in nginx
     assert "listen 443" not in nginx
     assert "USER nginx" in dockerfile
-    assert (
-        "FROM nginx:1.27.5-alpine@sha256:"
-        "65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10"
-    ) in dockerfile
+    assert "FROM nginx:1.27.5-alpine\n" in dockerfile
+    assert "nginx:1.27.5-alpine@sha256:" not in dockerfile
