@@ -94,8 +94,8 @@ deps.lock: ## Update this profile's lockfile with pinned Dockerized uv
 
 .PHONY: changed-coverage
 changed-coverage: ## Enforce coverage on Python lines changed from DIFF_BASE
-	$(RUN) sh -lc 'cd /workspace && uv run --project profiles/server-rendered-django diff-cover \
-		backend/coverage.xml --compare-branch=$(DIFF_BASE) --fail-under=90'
+	$(RUN) sh -lc 'cd /workspace/backend && $(UV_RUN) diff-cover \
+		coverage.xml --compare-branch=$(DIFF_BASE) --fail-under=90'
 
 .PHONY: migrations-check
 migrations-check: ## Reject model changes without migrations
