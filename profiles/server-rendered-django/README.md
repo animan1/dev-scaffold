@@ -25,6 +25,34 @@ The active profile has no frontend service and invokes no React, Vite, pnpm,
 or frontend quality gate. It contains no Wagtail or project-specific domain,
 content, credential, hostname, path, or deployment configuration.
 
+## Immutable release topology
+
+The stable immutable-release Make targets select a two-image production set:
+
+- `-backend` is the non-root Django/Gunicorn image. It runs migrations and
+  `collectstatic`, writes uploaded files to the persistent `media` volume, and
+  is never published directly to a host port.
+- `-web` is a non-root, application-owned Nginx image. It proxies all dynamic
+  routes to Gunicorn and mounts `staticfiles` and `media` read-only.
+
+The web origin binds only to `127.0.0.1:${RELEASE_HTTP_PORT}`. A separately
+owned host reverse proxy routes the public hostname to that origin and owns
+TLS. It does not join the application network, receive application credentials,
+mount application volumes, or access the Docker socket.
+
+`make verify-release-images` starts the exact commit-tagged images with
+`--no-build`, runs production checks and migrations, collects static files,
+and smoke-tests the routed home, health, static, and media paths. It then stops
+Gunicorn and proves Nginx still serves static and media. CI generates and
+attests one SBOM per image; `make push-release-images` records both digests in
+the release manifest consumed by `deploy-release` and `rollback-release`.
+
+The downstream application adds Wagtail, models, upload forms, storage policy,
+and backup/restore integration without changing this proxy boundary. A project
+that replaces the local media volume with object storage owns that explicit
+adaptation and its credentials; no object-storage or host-proxy credentials
+belong in the generic scaffold web image.
+
 ## Select the profile
 
 Edit `.scaffold-profile`:
