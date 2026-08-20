@@ -39,8 +39,8 @@ ENV DJANGO_SETTINGS_MODULE=app.project.settings.prod \
     DATABASE_URL=postgresql://app:app@db:5432/app
 
 RUN uv sync --frozen --no-dev \
-    && mkdir -p /static /workspace/backend \
-    && chown -R app:app /opt/venv /workspace/backend /home/app /static
+    && mkdir -p /media /static /workspace/backend \
+    && chown -R app:app /opt/venv /workspace/backend /home/app /media /static
 
 USER app
 WORKDIR /workspace/backend
