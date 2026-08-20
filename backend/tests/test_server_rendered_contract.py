@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 
 def _repository_root() -> Path:
@@ -92,3 +95,53 @@ def test_server_rendered_tools_explicitly_load_profile_configuration() -> None:
     coverage_output = _make("--dry-run", "coverage").stdout
     assert f"pytest -c {profile_config}" in coverage_output
     assert f"--cov-config={profile_config}" in coverage_output
+
+
+def test_changed_coverage_runs_from_backend() -> None:
+    output = _make("--dry-run", "changed-coverage").stdout
+
+    assert "cd /workspace/backend" in output
+    assert "diff-cover" in output
+    assert "coverage.xml" in output
+    assert "backend/coverage.xml" not in output
+
+
+@pytest.mark.skipif(shutil.which("diff-cover") is None, reason="diff-cover is profile-only")
+def test_diff_cover_matches_changed_backend_application_lines(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    backend = repository / "backend"
+    application = backend / "src" / "app" / "example.py"
+    application.parent.mkdir(parents=True)
+    application.write_text("def answer() -> int:\n    return 1\n")
+
+    subprocess.run(["git", "init", "--quiet"], cwd=repository, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repository, check=True)
+    subprocess.run(["git", "add", "backend/src/app/example.py"], cwd=repository, check=True)
+    subprocess.run(["git", "commit", "--quiet", "-m", "baseline"], cwd=repository, check=True)
+
+    application.write_text("def answer() -> int:\n    return 2\n")
+    (backend / "coverage.xml").write_text(
+        """<?xml version="1.0" ?>
+<coverage version="7.0" lines-valid="2" lines-covered="1" line-rate="0.5">
+  <sources><source>.</source></sources>
+  <packages><package name="app"><classes>
+    <class name="example" filename="src/app/example.py">
+      <lines><line number="1" hits="1"/><line number="2" hits="0"/></lines>
+    </class>
+  </classes></package></packages>
+</coverage>
+"""
+    )
+
+    result = subprocess.run(
+        ["diff-cover", "coverage.xml", "--compare-branch=HEAD", "--fail-under=90"],
+        cwd=backend,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "src/app/example.py" in result.stdout
+    assert "No lines with coverage information" not in result.stdout
