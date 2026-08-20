@@ -27,11 +27,11 @@ content, credential, hostname, path, or deployment configuration.
 
 ## Immutable release topology
 
-The stable immutable-release Make targets select a two-image production set:
+The production Compose definition contains a two-image application set:
 
-- `-backend` is the non-root Django/Gunicorn image. It runs migrations and
-  `collectstatic`, writes uploaded files to the persistent `media` volume, and
-  is never published directly to a host port.
+- `-backend` is the non-root Django/Gunicorn image. Django writes uploaded files
+  to the persistent `media` volume, and Gunicorn is never published directly
+  to a host port.
 - `-web` is a non-root, application-owned Nginx image. It proxies all dynamic
   routes to Gunicorn and mounts `staticfiles` and `media` read-only.
 
@@ -40,12 +40,11 @@ owned host reverse proxy routes the public hostname to that origin and owns
 TLS. It does not join the application network, receive application credentials,
 mount application volumes, or access the Docker socket.
 
-`make verify-release-images` starts the exact commit-tagged images with
-`--no-build`, runs production checks and migrations, collects static files,
-and smoke-tests the routed home, health, static, and media paths. It then stops
-Gunicorn and proves Nginx still serves static and media. CI generates and
-attests one SBOM per image; `make push-release-images` records both digests in
-the release manifest consumed by `deploy-release` and `rollback-release`.
+The Compose definition does not hide application initialization in a container
+entrypoint. Release automation must explicitly run Django's production checks,
+`migrate`, and `collectstatic` with the selected backend image before starting
+the full image set. In particular, `collectstatic` must populate the shared
+`staticfiles` volume when that volume is new.
 
 The downstream application adds Wagtail, models, upload forms, storage policy,
 and backup/restore integration without changing this proxy boundary. A project
