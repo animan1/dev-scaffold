@@ -6,6 +6,10 @@ UV_IMAGE ?= ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
 ci-profiles:
 	@printf '%s\n' "$(CI_PROFILES)"
 
+.PHONY: selected-profile
+selected-profile:
+	@printf '%s\n' "$(SCAFFOLD_PROFILE)"
+
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 
 SHELL := /bin/bash
@@ -344,6 +348,12 @@ down-release-ci: ## Stop the isolated immutable-release test stack
 		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
 		$(COMPOSE_RELEASE_CI) down -v --remove-orphans; \
 	fi
+
+.PHONY: logs-release-ci
+logs-release-ci: ## Show logs from the isolated immutable-release test stack
+	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
+		$(COMPOSE_RELEASE_CI) logs --tail=200
 
 .PHONY: push-release-images
 push-release-images: ## Push verified images and record their immutable digests

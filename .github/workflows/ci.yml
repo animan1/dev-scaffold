@@ -11,10 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ci-profiles: ${{ steps.profiles.outputs.value }}
+      selected-profile: ${{ steps.profiles.outputs.selected }}
     steps:
       - uses: actions/checkout@v4
       - id: profiles
-        run: echo "value=$(make --no-print-directory ci-profiles)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "value=$(make --no-print-directory ci-profiles)" >> "$GITHUB_OUTPUT"
+          echo "selected=$(make --no-print-directory selected-profile)" >> "$GITHUB_OUTPUT"
 
   server-rendered-profile:
     needs: profile-selection
@@ -38,9 +41,13 @@ jobs:
           DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
         run: make verify
 
+      - name: Exercise the server-rendered immutable-release contract
+        if: needs.profile-selection.outputs.selected-profile != 'server-rendered-django'
+        run: make build-release-images verify-release-images
+
       - name: Stop profile services without deleting volumes
         if: always()
-        run: make down
+        run: make down down-release-ci
 
   backend:
     needs: profile-selection
@@ -65,8 +72,28 @@ jobs:
         if: always()
         run: make down
 
+  immutable-release-gate:
+    needs: [profile-selection, server-rendered-profile, backend]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require every selected profile verification
+        run: |
+          scripts/check-immutable-release-gate \
+            --ci-profiles '${{ needs.profile-selection.outputs.ci-profiles }}' \
+            --selected-profile '${{ needs.profile-selection.outputs.selected-profile }}' \
+            --react-result '${{ needs.backend.result }}' \
+            --server-rendered-result '${{ needs.server-rendered-profile.result }}'
+
   immutable-release:
-    needs: backend
+    needs: [profile-selection, immutable-release-gate]
+    if: >-
+      ${{
+        always() &&
+        needs.profile-selection.result == 'success' &&
+        needs.immutable-release-gate.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       attestations: write

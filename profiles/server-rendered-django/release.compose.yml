@@ -1,0 +1,84 @@
+name: "${COMPOSE_PROJECT_NAME:?Set COMPOSE_PROJECT_NAME through the profile Makefile}"
+
+services:
+  db:
+    image: postgres:16.10-bookworm
+    env_file:
+      - "${PROD_ENV_FILE:?Set PROD_ENV_FILE through the profile Makefile}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  app:
+    image: "${RELEASE_BACKEND_IMAGE:?Set RELEASE_BACKEND_IMAGE from a release manifest}"
+    env_file:
+      - "${PROD_ENV_FILE:?Set PROD_ENV_FILE through the profile Makefile}"
+    environment:
+      DEPLOYMENT_ENVIRONMENT: production
+      RELEASE_DEPLOYED_AT: "${RELEASE_DEPLOYED_AT:-}"
+      RELEASE_IMAGE_PREFIX: "${RELEASE_IMAGE_PREFIX:-unconfigured}"
+      RELEASE_REVISION: "${RELEASE_REVISION:-unknown}"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; request = urllib.request.Request('http://127.0.0.1:8000/api/healthz', headers={'Host': 'localhost', 'X-Forwarded-Proto': 'https'}); urllib.request.urlopen(request, timeout=2)",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    volumes:
+      - media:/media
+      - staticfiles:/static
+
+  web:
+    image: "${RELEASE_WEB_IMAGE:?Set RELEASE_WEB_IMAGE from a release manifest}"
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${RELEASE_HTTP_PORT:-18080}:8080"
+    restart: unless-stopped
+    volumes:
+      - media:/media:ro
+      - staticfiles:/static:ro
+
+  monitor:
+    profiles: ["monitoring"]
+    image: "${RELEASE_BACKEND_IMAGE:?Set RELEASE_BACKEND_IMAGE from a release manifest}"
+    command:
+      [
+        "python",
+        "-m",
+        "app.manage",
+        "monitor_operational_integrity",
+        "--watch",
+        "--interval-seconds",
+        "${MONITOR_INTERVAL_SECONDS:-900}",
+      ]
+    env_file:
+      - "${PROD_ENV_FILE:?Set PROD_ENV_FILE through the profile Makefile}"
+    environment:
+      DEPLOYMENT_ENVIRONMENT: production
+      RELEASE_DEPLOYED_AT: "${RELEASE_DEPLOYED_AT:-}"
+      RELEASE_IMAGE_PREFIX: "${RELEASE_IMAGE_PREFIX:-unconfigured}"
+      RELEASE_REVISION: "${RELEASE_REVISION:-unknown}"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  media:
+  postgres_data:
+  staticfiles:

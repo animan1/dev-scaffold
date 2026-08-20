@@ -25,6 +25,41 @@ The active profile has no frontend service and invokes no React, Vite, pnpm,
 or frontend quality gate. It contains no Wagtail or project-specific domain,
 content, credential, hostname, path, or deployment configuration.
 
+## Immutable release topology
+
+The production Compose definition contains a two-image application set:
+
+- `-backend` is the non-root Django/Gunicorn image. Django writes uploaded files
+  to the persistent `media` volume, and Gunicorn is never published directly
+  to a host port.
+- `-web` is a non-root, application-owned Nginx image. It proxies all dynamic
+  routes to Gunicorn and mounts `staticfiles` and `media` read-only.
+
+The web origin binds only to `127.0.0.1:${RELEASE_HTTP_PORT}`. A separately
+owned host reverse proxy routes the public hostname to that origin and owns
+TLS. It does not join the application network, receive application credentials,
+mount application volumes, or access the Docker socket.
+
+The Compose definition does not hide application initialization in a container
+entrypoint. Release automation must explicitly run Django's production checks,
+`migrate`, and `collectstatic` with the selected backend image before starting
+the full image set. In particular, `collectstatic` must populate the shared
+`staticfiles` volume when that volume is new.
+
+The selected profile supplies those explicit operations through the stable
+release Make interface. `initialize-release-ci` creates the isolated test stack,
+runs the production checks and migrations, and populates a fresh static volume.
+`verify-release-images` then smoke-tests dynamic, static, and media routes before
+and after stopping Gunicorn. Production deployment uses `initialize-release`
+before `deploy-release`; rollback selects an older digest manifest and follows
+the same initialization path. Neither path builds an image during deployment.
+
+The downstream application adds Wagtail, models, upload forms, storage policy,
+and backup/restore integration without changing this proxy boundary. A project
+that replaces the local media volume with object storage owns that explicit
+adaptation and its credentials; no object-storage or host-proxy credentials
+belong in the generic scaffold web image.
+
 ## Select the profile
 
 Edit `.scaffold-profile`:
