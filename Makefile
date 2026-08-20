@@ -1,5 +1,6 @@
 SCAFFOLD_ROOT := $(dir $(abspath $(firstword $(MAKEFILE_LIST))))
 include $(SCAFFOLD_ROOT).scaffold-profile
+UV_IMAGE ?= ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
 
 .PHONY: ci-profiles
 ci-profiles:
@@ -405,6 +406,14 @@ be.setup: be.sync hooks
 .PHONY: be.sync
 be.sync:
 	cd $(PY_DIR) && uv sync --all-extras
+
+.PHONY: deps.lock
+deps.lock: ## Update the selected profile's Python lockfile with pinned Dockerized uv
+	docker run --rm --user "$$(id -u):$$(id -g)" \
+		--env UV_CACHE_DIR=/tmp/uv-cache \
+		--tmpfs /tmp:rw,mode=1777 \
+		--volume "$(CURDIR)/$(PY_DIR):/workspace" \
+		--workdir /workspace --entrypoint /usr/local/bin/uv $(UV_IMAGE) lock
 
 .PHONY: hooks
 hooks: ## Install pre-commit hooks

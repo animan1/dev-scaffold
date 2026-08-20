@@ -30,6 +30,7 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "up",
         "down",
         "reset",
+        "deps.lock",
         "format",
         "lint",
         "typecheck",
@@ -71,3 +72,23 @@ def test_server_rendered_precommit_is_a_recipe() -> None:
     output = _make("--dry-run", "precommit").stdout
     assert "pre-commit run" in output
     assert "--all-files" in output
+
+
+def test_server_rendered_dependency_lock_uses_pinned_dockerized_uv() -> None:
+    output = _make("--dry-run", "deps.lock").stdout
+
+    assert "docker run --rm" in output
+    assert "ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim" in output
+    assert "lock --project profiles/server-rendered-django" in output
+
+
+def test_server_rendered_tools_explicitly_load_profile_configuration() -> None:
+    profile_config = "/workspace/profiles/server-rendered-django/pyproject.toml"
+
+    assert f"ruff check --config {profile_config}" in _make("--dry-run", "lint").stdout
+    assert f"mypy --config-file {profile_config}" in _make("--dry-run", "typecheck").stdout
+    test_output = _make("--dry-run", "test").stdout
+    assert f"pytest -c {profile_config}" in test_output
+    coverage_output = _make("--dry-run", "coverage").stdout
+    assert f"pytest -c {profile_config}" in coverage_output
+    assert f"--cov-config={profile_config}" in coverage_output
