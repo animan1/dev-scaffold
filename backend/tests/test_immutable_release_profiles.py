@@ -87,21 +87,21 @@ def test_server_rendered_release_preserves_manifest_deploy_and_rollback_contract
 def test_server_rendered_only_selector_runs_the_shared_release_publication() -> None:
     workflow = (_repository_root() / ".github/workflows/ci.yml").read_text()
     server_job = workflow.split("  server-rendered-profile:", 1)[1].split("\n  backend:", 1)[0]
+    gate_job = workflow.split("  immutable-release-gate:", 1)[1].split("\n  immutable-release:", 1)[
+        0
+    ]
     release_job = workflow.split("  immutable-release:", 1)[1]
 
     assert "make build-release-images verify-release-images" in server_job
     assert "selected-profile != 'server-rendered-django'" in server_job
     assert "make down down-release-ci" in server_job
-    assert "needs: [profile-selection, server-rendered-profile, backend]" in release_job
+    assert "needs: [profile-selection, server-rendered-profile, backend]" in gate_job
+    assert "scripts/check-immutable-release-gate" in gate_job
+    assert "--react-result '${{ needs.backend.result }}'" in gate_job
+    assert "--server-rendered-result '${{ needs.server-rendered-profile.result }}'" in gate_job
+    assert "needs: [profile-selection, immutable-release-gate]" in release_job
     assert "always()" in release_job
-    assert "outputs.selected-profile" in release_job
-    assert "!contains(needs.profile-selection.outputs.ci-profiles, 'react-vite')" in release_job
-    assert "needs.backend.result == 'success'" in release_job
-    assert (
-        "!contains(needs.profile-selection.outputs.ci-profiles, 'server-rendered-django')"
-        in release_job
-    )
-    assert "needs.server-rendered-profile.result == 'success'" in release_job
+    assert "needs.immutable-release-gate.result == 'success'" in release_job
     assert "run: make build-release-images" in release_job
     assert "run: make verify-release-images" in release_job
     assert release_job.count("uses: anchore/sbom-action@v0") == 2
