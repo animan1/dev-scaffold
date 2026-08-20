@@ -46,6 +46,14 @@ entrypoint. Release automation must explicitly run Django's production checks,
 the full image set. In particular, `collectstatic` must populate the shared
 `staticfiles` volume when that volume is new.
 
+The selected profile supplies those explicit operations through the stable
+release Make interface. `initialize-release-ci` creates the isolated test stack,
+runs the production checks and migrations, and populates a fresh static volume.
+`verify-release-images` then smoke-tests dynamic, static, and media routes before
+and after stopping Gunicorn. Production deployment uses `initialize-release`
+before `deploy-release`; rollback selects an older digest manifest and follows
+the same initialization path. Neither path builds an image during deployment.
+
 The downstream application adds Wagtail, models, upload forms, storage policy,
 and backup/restore integration without changing this proxy boundary. A project
 that replaces the local media volume with object storage owns that explicit
