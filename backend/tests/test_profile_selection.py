@@ -56,6 +56,7 @@ def test_ci_routes_profiles_without_duplicate_pr_push_runs() -> None:
 
     assert "branches: [main]" in workflow
     assert "make --no-print-directory ci-profiles" in workflow
+    assert "make --no-print-directory selected-profile" in workflow
     assert "contains(needs.profile-selection.outputs.ci-profiles, 'react-vite')" in workflow
     assert (
         "contains(needs.profile-selection.outputs.ci-profiles, 'server-rendered-django')"

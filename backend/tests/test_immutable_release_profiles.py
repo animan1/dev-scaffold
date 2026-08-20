@@ -82,3 +82,31 @@ def test_server_rendered_release_preserves_manifest_deploy_and_rollback_contract
     assert "pull app web" in makefile
     assert "deploy-release: initialize-release" in makefile
     assert "rollback-release: deploy-release" in makefile
+
+
+def test_server_rendered_only_selector_runs_the_shared_release_publication() -> None:
+    workflow = (_repository_root() / ".github/workflows/ci.yml").read_text()
+    server_job = workflow.split("  server-rendered-profile:", 1)[1].split("\n  backend:", 1)[0]
+    release_job = workflow.split("  immutable-release:", 1)[1]
+
+    assert "make build-release-images verify-release-images" in server_job
+    assert "selected-profile != 'server-rendered-django'" in server_job
+    assert "make down down-release-ci" in server_job
+    assert "needs: [profile-selection, server-rendered-profile, backend]" in release_job
+    assert "always()" in release_job
+    assert "outputs.selected-profile" in release_job
+    assert "!contains(needs.profile-selection.outputs.ci-profiles, 'react-vite')" in release_job
+    assert "needs.backend.result == 'success'" in release_job
+    assert (
+        "!contains(needs.profile-selection.outputs.ci-profiles, 'server-rendered-django')"
+        in release_job
+    )
+    assert "needs.server-rendered-profile.result == 'success'" in release_job
+    assert "run: make build-release-images" in release_job
+    assert "run: make verify-release-images" in release_job
+    assert release_job.count("uses: anchore/sbom-action@v0") == 2
+    assert "RELEASE_BACKEND_SBOM" in release_job
+    assert "RELEASE_WEB_SBOM" in release_job
+    assert "make push-release-images" in release_job
+    assert "RELEASE_BACKEND_IMAGE=//p" in release_job
+    assert "RELEASE_WEB_IMAGE=//p" in release_job

@@ -11,10 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ci-profiles: ${{ steps.profiles.outputs.value }}
+      selected-profile: ${{ steps.profiles.outputs.selected }}
     steps:
       - uses: actions/checkout@v4
       - id: profiles
-        run: echo "value=$(make --no-print-directory ci-profiles)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "value=$(make --no-print-directory ci-profiles)" >> "$GITHUB_OUTPUT"
+          echo "selected=$(make --no-print-directory selected-profile)" >> "$GITHUB_OUTPUT"
 
   server-rendered-profile:
     needs: profile-selection
@@ -38,9 +41,13 @@ jobs:
           DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
         run: make verify
 
+      - name: Exercise the server-rendered immutable-release contract
+        if: needs.profile-selection.outputs.selected-profile != 'server-rendered-django'
+        run: make build-release-images verify-release-images
+
       - name: Stop profile services without deleting volumes
         if: always()
-        run: make down
+        run: make down down-release-ci
 
   backend:
     needs: profile-selection
@@ -66,7 +73,24 @@ jobs:
         run: make down
 
   immutable-release:
-    needs: backend
+    needs: [profile-selection, server-rendered-profile, backend]
+    if: >-
+      ${{
+        always() &&
+        needs.profile-selection.result == 'success' &&
+        contains(
+          needs.profile-selection.outputs.ci-profiles,
+          needs.profile-selection.outputs.selected-profile
+        ) &&
+        (
+          !contains(needs.profile-selection.outputs.ci-profiles, 'react-vite') ||
+          needs.backend.result == 'success'
+        ) &&
+        (
+          !contains(needs.profile-selection.outputs.ci-profiles, 'server-rendered-django') ||
+          needs.server-rendered-profile.result == 'success'
+        )
+      }}
     runs-on: ubuntu-latest
     permissions:
       attestations: write
