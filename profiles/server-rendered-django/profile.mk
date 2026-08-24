@@ -29,6 +29,8 @@ COMPOSE_RELEASE = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=.tmp/server-rendered-release-ci.env docker compose --project-directory . \
 	-f $(RELEASE_COMPOSE_FILE) --env-file .tmp/server-rendered-release-ci.env
+RUN_RELEASE = $(COMPOSE_RELEASE) run --rm --no-deps app
+RUN_RELEASE_CI = $(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) run --rm --no-deps app
 LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
 	RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) RELEASE_IMAGE_PREFIX=$(RELEASE_IMAGE_PREFIX) \
 	RELEASE_REVISION=$(RELEASE_REVISION) RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT)
@@ -167,19 +169,19 @@ prepare-release-ci: ## Prepare isolated, non-secret server-rendered release conf
 .PHONY: initialize-release-ci
 initialize-release-ci: prepare-release-ci ## Initialize a fresh release test database and static volume
 	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) config --quiet
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) up -d --no-build db app
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) exec -T app \
+	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) up -d --no-build db
+	$(RUN_RELEASE_CI) \
 		python -m app.manage check --deploy
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) exec -T app \
+	$(RUN_RELEASE_CI) \
 		python -m app.manage migrate
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) exec -T app \
+	$(RUN_RELEASE_CI) \
 		python -m app.manage collectstatic --noinput --clear
 
 .PHONY: verify-release-images
 verify-release-images: initialize-release-ci ## Smoke-test the exact production image set
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) exec -T app \
+	$(RUN_RELEASE_CI) \
 		sh -c "printf 'MEDIA_OK\\n' > /media/release-smoketest.txt"
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) up -d --no-build web
+	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) up -d --no-build app web
 	@for attempt in $$(seq 1 60); do \
 		if curl -fsS -H 'Host: localhost' -H 'X-Forwarded-Proto: https' \
 			'http://127.0.0.1:$(RELEASE_HTTP_PORT)/api/healthz' >/dev/null; then \
@@ -239,13 +241,14 @@ initialize-release: ## Initialize the database and static volume with recorded i
 	@test -f $(RELEASE_FILE) || { echo 'Set RELEASE_FILE to a recorded release manifest'; exit 1; }
 	$(COMPOSE_RELEASE) config --quiet
 	$(COMPOSE_RELEASE) pull app web
-	$(COMPOSE_RELEASE) up -d --no-build db app
-	$(COMPOSE_RELEASE) exec -T app python -m app.manage migrate
-	$(COMPOSE_RELEASE) exec -T app python -m app.manage collectstatic --noinput --clear
+	$(COMPOSE_RELEASE) up -d --no-build db
+	$(RUN_RELEASE) python -m app.manage check --deploy
+	$(RUN_RELEASE) python -m app.manage migrate
+	$(RUN_RELEASE) python -m app.manage collectstatic --noinput --clear
 
 .PHONY: deploy-release
 deploy-release: initialize-release ## Deploy the digest-pinned server-rendered image set
-	$(COMPOSE_RELEASE) up -d --no-build
+	$(COMPOSE_RELEASE) up -d --no-build app web
 
 .PHONY: rollback-release
 rollback-release: ## Deploy a previously recorded release manifest
