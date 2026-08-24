@@ -1,10 +1,16 @@
 SCAFFOLD_ROOT := $(dir $(abspath $(firstword $(MAKEFILE_LIST))))
 include $(SCAFFOLD_ROOT).scaffold-profile
 UV_IMAGE ?= ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
+SCAFFOLD_BACKUP_PROFILE ?= none
+CI_BACKUP_PROFILES ?= immutable-backup
 
 .PHONY: ci-profiles
 ci-profiles:
 	@printf '%s\n' "$(CI_PROFILES)"
+
+.PHONY: ci-backup-profiles
+ci-backup-profiles:
+	@printf '%s\n' "$(CI_BACKUP_PROFILES)"
 
 .PHONY: selected-profile
 selected-profile:
@@ -526,4 +532,8 @@ fe.verify: ## Frontend lint + typecheck + tests + fmt-check
 
 else
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
+endif
+
+ifneq ($(SCAFFOLD_BACKUP_PROFILE),none)
+include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_BACKUP_PROFILE)/profile.mk
 endif
