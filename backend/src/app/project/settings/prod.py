@@ -39,6 +39,7 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool("DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS
 SECURE_HSTS_PRELOAD = env.bool("DJANGO_SECURE_HSTS_PRELOAD", default=True)
 
 STATIC_ROOT = "/static/"
+MEDIA_ROOT = "/media/"
 
 # --- Logging ---
 # Ship useful logs to stdout/stderr (picked up by Docker)
