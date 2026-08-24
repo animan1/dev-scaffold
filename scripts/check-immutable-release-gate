@@ -27,9 +27,8 @@ def main() -> int:
     unknown_profiles = sorted(set(active_profiles) - RESULT_ARGUMENTS.keys())
 
     if unknown_profiles:
-        print(
-            f"Unsupported CI profiles: {', '.join(unknown_profiles)}", file=sys.stderr
-        )
+        message = f"Unsupported CI profiles: {', '.join(unknown_profiles)}"
+        print(message, file=sys.stderr)
         return 1
     if arguments.selected_profile not in active_profiles:
         print("Selected profile is not included in CI_PROFILES", file=sys.stderr)
