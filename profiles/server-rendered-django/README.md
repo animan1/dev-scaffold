@@ -46,6 +46,22 @@ entrypoint. Release automation must explicitly run Django's production checks,
 the full image set. In particular, `collectstatic` must populate the shared
 `staticfiles` volume when that volume is new.
 
+The selected profile supplies those explicit operations through the stable
+release Make interface. Initialization starts only PostgreSQL, then uses
+one-shot containers from the recorded backend image for the production check,
+migrations, and static collection. A failed operation therefore leaves the
+currently deployed application and web containers in place; only successful
+initialization permits `deploy-release` or `verify-release-images` to start the
+persistent application and web services. Neither path builds an image during
+deployment.
+
+Selecting an older manifest is an application-image rollback only when the
+current database schema remains compatible with that application version.
+Running `migrate` from the older image does not automatically reverse migrations
+introduced by a newer release. When the schema or uploaded media is incompatible,
+database and media restoration is a separate, explicitly authorized recovery
+operation using the project's backup/restore procedure.
+
 The downstream application adds Wagtail, models, upload forms, storage policy,
 and backup/restore integration without changing this proxy boundary. A project
 that replaces the local media volume with object storage owns that explicit
