@@ -6,16 +6,16 @@ FROM ${RESTIC_IMAGE} AS restic
 FROM ${RCLONE_IMAGE} AS rclone
 FROM ${POSTGRES_IMAGE}
 
-RUN groupadd --gid 10001 website-backup \
-    && useradd --uid 10001 --gid website-backup --create-home website-backup \
+RUN groupadd --gid 10001 scaffold-backup \
+    && useradd --uid 10001 --gid scaffold-backup --create-home scaffold-backup \
     && mkdir -p /backup-status /workspace \
-    && chown -R website-backup:website-backup /backup-status /workspace
+    && chown -R scaffold-backup:scaffold-backup /backup-status /workspace
 
 COPY --from=restic /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=restic /usr/bin/restic /usr/local/bin/restic
 COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 
-USER website-backup
+USER scaffold-backup
 WORKDIR /workspace
 ENTRYPOINT []
 CMD ["sh"]

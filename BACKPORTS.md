@@ -188,7 +188,10 @@ investigation.
   - Refresh repository-derived status independently of the backup schedule and
     report unreadable or empty repository state as unavailable.
   - Destination: Cuplr now; `dev-scaffold` after website proof.
-  - Status: Backup profile requested; repository-derived freshness proven in
+  - Status: Backup image foundation proven in
+    [Crane's Castle#27](https://github.com/animan1/cranescastle-web/pull/27)
+    and being backported as the first profile slice. Repository-derived
+    freshness proven in
     [Cuplr#103](https://github.com/animan1/cuplr/pull/103), with bounded
     two-interval alert grace proven in
     [Cuplr#104](https://github.com/animan1/cuplr/pull/104).

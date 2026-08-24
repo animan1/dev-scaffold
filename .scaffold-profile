@@ -1,2 +1,4 @@
 SCAFFOLD_PROFILE ?= react-vite
 CI_PROFILES ?= react-vite server-rendered-django
+SCAFFOLD_BACKUP_PROFILE ?= none
+CI_BACKUP_PROFILES ?= immutable-backup

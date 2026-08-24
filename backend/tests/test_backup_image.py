@@ -24,7 +24,7 @@ def _make(*arguments: str) -> str:
 
 
 def test_backup_image_uses_immutable_versioned_component_images() -> None:
-    dockerfile = (_repository_root() / "deploy/backup/Dockerfile").read_text()
+    dockerfile = (_repository_root() / "profiles/immutable-backup/Dockerfile").read_text()
 
     for expected in (
         "postgres:16.10-bookworm@sha256:",
@@ -35,9 +35,9 @@ def test_backup_image_uses_immutable_versioned_component_images() -> None:
 
 
 def test_backup_image_is_application_independent_and_non_root() -> None:
-    dockerfile = (_repository_root() / "deploy/backup/Dockerfile").read_text()
+    dockerfile = (_repository_root() / "profiles/immutable-backup/Dockerfile").read_text()
 
-    assert "USER website-backup" in dockerfile
+    assert "USER scaffold-backup" in dockerfile
     assert "COPY backend" not in dockerfile
     assert "COPY profiles" not in dockerfile
     assert "DJANGO" not in dockerfile
@@ -45,10 +45,10 @@ def test_backup_image_is_application_independent_and_non_root() -> None:
 
 
 def test_backup_image_make_contract_uses_declared_inputs() -> None:
-    build = _make("build-backup-image")
-    verify = _make("verify-backup-image")
+    build = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "build-backup-image")
+    verify = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "verify-backup-image")
 
-    assert "deploy/backup/Dockerfile" in build
+    assert "profiles/immutable-backup/Dockerfile" in build
     assert "--build-arg POSTGRES_IMAGE=postgres:16.10-bookworm@sha256:" in build
     assert "--build-arg RESTIC_IMAGE=restic/restic:0.19.1@sha256:" in build
     assert "--build-arg RCLONE_IMAGE=rclone/rclone:1.74.4@sha256:" in build
@@ -60,8 +60,8 @@ def test_backup_image_make_contract_uses_declared_inputs() -> None:
 
 
 def test_backup_component_update_workflow_is_make_driven() -> None:
-    pull = _make("backup-images-pull")
-    digests = _make("backup-images-digests")
+    pull = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "backup-images-pull")
+    digests = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "backup-images-digests")
 
     assert "docker pull postgres:16.10-bookworm" in pull
     assert "docker pull restic/restic:0.19.1" in pull
@@ -70,7 +70,7 @@ def test_backup_component_update_workflow_is_make_driven() -> None:
 
 
 def test_backup_image_version_report_is_make_driven() -> None:
-    report = _make("backup-image-versions")
+    report = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "backup-image-versions")
 
     assert "pg_dump --version" in report
     assert "restic version" in report
@@ -78,6 +78,21 @@ def test_backup_image_version_report_is_make_driven() -> None:
 
 
 def test_aggregate_verification_includes_backup_image() -> None:
-    makefile = (_repository_root() / "Makefile").read_text()
+    default_verify = _make("SCAFFOLD_BACKUP_PROFILE=none", "verify")
+    selected_verify = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "verify")
 
-    assert "verify: verify-backup-image" in makefile
+    assert "profiles/immutable-backup/Dockerfile" not in default_verify
+    assert "profiles/immutable-backup/Dockerfile" in selected_verify
+
+
+def test_backup_profile_is_selected_and_verified_independently() -> None:
+    repository = _repository_root()
+    selector = (repository / ".scaffold-profile").read_text()
+    makefile = (repository / "Makefile").read_text()
+    workflow = (repository / ".github/workflows/ci.yml").read_text()
+
+    assert "SCAFFOLD_BACKUP_PROFILE ?= none" in selector
+    assert "CI_BACKUP_PROFILES ?= immutable-backup" in selector
+    assert "profiles/$(SCAFFOLD_BACKUP_PROFILE)/profile.mk" in makefile
+    assert "immutable-backup-profile:" in workflow
+    assert "SCAFFOLD_BACKUP_PROFILE=immutable-backup verify-backup-image" in workflow

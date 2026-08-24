@@ -10,12 +10,14 @@ jobs:
   profile-selection:
     runs-on: ubuntu-latest
     outputs:
+      ci-backup-profiles: ${{ steps.profiles.outputs.backup }}
       ci-profiles: ${{ steps.profiles.outputs.value }}
       selected-profile: ${{ steps.profiles.outputs.selected }}
     steps:
       - uses: actions/checkout@v4
       - id: profiles
         run: |
+          echo "backup=$(make --no-print-directory ci-backup-profiles)" >> "$GITHUB_OUTPUT"
           echo "value=$(make --no-print-directory ci-profiles)" >> "$GITHUB_OUTPUT"
           echo "selected=$(make --no-print-directory selected-profile)" >> "$GITHUB_OUTPUT"
 
@@ -71,6 +73,15 @@ jobs:
       - name: Tear down
         if: always()
         run: make down
+
+  immutable-backup-profile:
+    needs: profile-selection
+    if: contains(needs.profile-selection.outputs.ci-backup-profiles, 'immutable-backup')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the exact immutable backup image
+        run: make SCAFFOLD_BACKUP_PROFILE=immutable-backup verify-backup-image
 
   immutable-release-gate:
     needs: [profile-selection, server-rendered-profile, backend]
