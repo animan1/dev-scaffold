@@ -22,13 +22,16 @@ RELEASE_WEB_TAG ?= $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
 RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
 RELEASE_HTTP_PORT ?= 18080
 PROD_ENV_FILE ?= deploy/.env.prod
+RELEASE_CI_ENV_FILE ?= .tmp/server-rendered-release-ci.env
 RELEASE_COMPOSE_FILE := profiles/server-rendered-django/release.compose.yml
 COMPOSE_RELEASE = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(PROD_ENV_FILE) docker compose --project-directory . \
 	-f $(RELEASE_COMPOSE_FILE) --env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
 COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
-	PROD_ENV_FILE=.tmp/server-rendered-release-ci.env docker compose --project-directory . \
-	-f $(RELEASE_COMPOSE_FILE) --env-file .tmp/server-rendered-release-ci.env
+	PROD_ENV_FILE=$(RELEASE_CI_ENV_FILE) docker compose --project-directory . \
+	-f $(RELEASE_COMPOSE_FILE) --env-file $(RELEASE_CI_ENV_FILE)
+RUN_RELEASE = $(COMPOSE_RELEASE) run --rm --no-deps app
+RUN_RELEASE_CI = $(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) run --rm --no-deps app
 LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
 	RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) RELEASE_IMAGE_PREFIX=$(RELEASE_IMAGE_PREFIX) \
 	RELEASE_REVISION=$(RELEASE_REVISION) RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT)
@@ -153,7 +156,7 @@ build-release-images: ## Build commit-addressed Django and application Nginx ima
 
 .PHONY: prepare-release-ci
 prepare-release-ci: ## Prepare isolated, non-secret server-rendered release configuration
-	@mkdir -p .tmp
+	@mkdir -p $(dir $(RELEASE_CI_ENV_FILE))
 	@printf '%s\n' \
 		'DJANGO_SECRET_KEY=release-ci-only-abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ' \
 		'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1' \
@@ -162,24 +165,24 @@ prepare-release-ci: ## Prepare isolated, non-secret server-rendered release conf
 		'POSTGRES_PASSWORD=release-ci-only' \
 		'POSTGRES_DB=app' \
 		'DATABASE_URL=postgresql://app:release-ci-only@db:5432/app' \
-		> .tmp/server-rendered-release-ci.env
+		> $(RELEASE_CI_ENV_FILE)
 
 .PHONY: initialize-release-ci
 initialize-release-ci: prepare-release-ci ## Initialize a fresh release test database and static volume
 	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) config --quiet
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) up -d --no-build db app
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) exec -T app \
+	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) up -d --no-build db
+	$(RUN_RELEASE_CI) \
 		python -m app.manage check --deploy
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) exec -T app \
+	$(RUN_RELEASE_CI) \
 		python -m app.manage migrate
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) exec -T app \
+	$(RUN_RELEASE_CI) \
 		python -m app.manage collectstatic --noinput --clear
 
 .PHONY: verify-release-images
 verify-release-images: initialize-release-ci ## Smoke-test the exact production image set
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) exec -T app \
+	$(RUN_RELEASE_CI) \
 		sh -c "printf 'MEDIA_OK\\n' > /media/release-smoketest.txt"
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) up -d --no-build web
+	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) up -d --no-build app web
 	@for attempt in $$(seq 1 60); do \
 		if curl -fsS -H 'Host: localhost' -H 'X-Forwarded-Proto: https' \
 			'http://127.0.0.1:$(RELEASE_HTTP_PORT)/api/healthz' >/dev/null; then \
@@ -213,7 +216,7 @@ verify-monitoring-config: prepare-release-ci ## Validate the optional release mo
 
 .PHONY: down-release-ci
 down-release-ci: ## Remove the isolated immutable-release verification stack
-	@if [[ -f .tmp/server-rendered-release-ci.env ]]; then \
+	@if [[ -f $(RELEASE_CI_ENV_FILE) ]]; then \
 		$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) down -v --remove-orphans; \
 	fi
 
@@ -239,13 +242,14 @@ initialize-release: ## Initialize the database and static volume with recorded i
 	@test -f $(RELEASE_FILE) || { echo 'Set RELEASE_FILE to a recorded release manifest'; exit 1; }
 	$(COMPOSE_RELEASE) config --quiet
 	$(COMPOSE_RELEASE) pull app web
-	$(COMPOSE_RELEASE) up -d --no-build db app
-	$(COMPOSE_RELEASE) exec -T app python -m app.manage migrate
-	$(COMPOSE_RELEASE) exec -T app python -m app.manage collectstatic --noinput --clear
+	$(COMPOSE_RELEASE) up -d --no-build db
+	$(RUN_RELEASE) python -m app.manage check --deploy
+	$(RUN_RELEASE) python -m app.manage migrate
+	$(RUN_RELEASE) python -m app.manage collectstatic --noinput --clear
 
 .PHONY: deploy-release
 deploy-release: initialize-release ## Deploy the digest-pinned server-rendered image set
-	$(COMPOSE_RELEASE) up -d --no-build
+	$(COMPOSE_RELEASE) up -d --no-build app web
 
 .PHONY: rollback-release
 rollback-release: ## Deploy a previously recorded release manifest
