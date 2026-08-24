@@ -94,7 +94,7 @@ def test_server_rendered_release_preserves_manifest_deploy_and_rollback_contract
 @pytest.mark.parametrize(
     ("target", "extra_arguments"),
     (
-        ("verify-release-images", ()),
+        ("verify-release-images", ("RELEASE_CI_ENV_FILE={ci_env_file}",)),
         ("deploy-release", ("RELEASE_FILE={release_file}",)),
     ),
 )
@@ -115,7 +115,11 @@ def test_failed_migration_never_starts_a_persistent_application(
     fake_docker.chmod(0o755)
     release_file = tmp_path / "release.env"
     release_file.write_text("SCAFFOLD_PROFILE=server-rendered-django\n")
-    arguments = tuple(argument.format(release_file=release_file) for argument in extra_arguments)
+    ci_env_file = tmp_path / "release-ci.env"
+    arguments = tuple(
+        argument.format(release_file=release_file, ci_env_file=ci_env_file)
+        for argument in extra_arguments
+    )
     environment = os.environ.copy()
     environment["DOCKER_LOG"] = str(docker_log)
     environment["PATH"] = f"{tmp_path}:{environment['PATH']}"
