@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import sys
 
-
 RESULT_ARGUMENTS = {
     "react-vite": "react_result",
     "server-rendered-django": "server_rendered_result",
