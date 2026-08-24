@@ -87,12 +87,11 @@ def test_aggregate_verification_includes_backup_image() -> None:
 
 def test_backup_profile_is_selected_and_verified_independently() -> None:
     repository = _repository_root()
-    selector = (repository / ".scaffold-profile").read_text()
     makefile = (repository / "Makefile").read_text()
     workflow = (repository / ".github/workflows/ci.yml").read_text()
 
-    assert "SCAFFOLD_BACKUP_PROFILE ?= none" in selector
-    assert "CI_BACKUP_PROFILES ?= immutable-backup" in selector
+    assert "SCAFFOLD_BACKUP_PROFILE ?= none" in makefile
+    assert "CI_BACKUP_PROFILES ?= immutable-backup" in makefile
     assert "profiles/$(SCAFFOLD_BACKUP_PROFILE)/profile.mk" in makefile
     assert "immutable-backup-profile:" in workflow
     assert "SCAFFOLD_BACKUP_PROFILE=immutable-backup verify-backup-image" in workflow
