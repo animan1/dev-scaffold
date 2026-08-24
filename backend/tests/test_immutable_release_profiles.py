@@ -152,3 +152,31 @@ def test_failed_migration_never_starts_a_persistent_application(
     assert database_start < failed_migration
     assert not any("up -d --no-build app web" in command for command in commands)
     assert not any("exec -T app" in command for command in commands)
+
+
+def test_server_rendered_only_selector_runs_the_shared_release_publication() -> None:
+    workflow = (_repository_root() / ".github/workflows/ci.yml").read_text()
+    server_job = workflow.split("  server-rendered-profile:", 1)[1].split("\n  backend:", 1)[0]
+    gate_job = workflow.split("  immutable-release-gate:", 1)[1].split("\n  immutable-release:", 1)[
+        0
+    ]
+    release_job = workflow.split("  immutable-release:", 1)[1]
+
+    assert "make build-release-images verify-release-images" in server_job
+    assert "selected-profile != 'server-rendered-django'" in server_job
+    assert "make down down-release-ci" in server_job
+    assert "needs: [profile-selection, server-rendered-profile, backend]" in gate_job
+    assert "scripts/check-immutable-release-gate" in gate_job
+    assert "--react-result '${{ needs.backend.result }}'" in gate_job
+    assert "--server-rendered-result '${{ needs.server-rendered-profile.result }}'" in gate_job
+    assert "needs: [profile-selection, immutable-release-gate]" in release_job
+    assert "always()" in release_job
+    assert "needs.immutable-release-gate.result == 'success'" in release_job
+    assert "run: make build-release-images" in release_job
+    assert "run: make verify-release-images" in release_job
+    assert release_job.count("uses: anchore/sbom-action@v0") == 2
+    assert "RELEASE_BACKEND_SBOM" in release_job
+    assert "RELEASE_WEB_SBOM" in release_job
+    assert "make push-release-images" in release_job
+    assert "RELEASE_BACKEND_IMAGE=//p" in release_job
+    assert "RELEASE_WEB_IMAGE=//p" in release_job

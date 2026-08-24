@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""Require every selected application profile verification to succeed."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+
+RESULT_ARGUMENTS = {
+    "react-vite": "react_result",
+    "server-rendered-django": "server_rendered_result",
+}
+
+
+def _arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ci-profiles", required=True)
+    parser.add_argument("--selected-profile", required=True)
+    parser.add_argument("--react-result", required=True)
+    parser.add_argument("--server-rendered-result", required=True)
+    return parser.parse_args()
+
+
+def main() -> int:
+    arguments = _arguments()
+    active_profiles = arguments.ci_profiles.split()
+    unknown_profiles = sorted(set(active_profiles) - RESULT_ARGUMENTS.keys())
+
+    if unknown_profiles:
+        message = f"Unsupported CI profiles: {', '.join(unknown_profiles)}"
+        print(message, file=sys.stderr)
+        return 1
+    if arguments.selected_profile not in active_profiles:
+        print("Selected profile is not included in CI_PROFILES", file=sys.stderr)
+        return 1
+
+    failures = [
+        profile
+        for profile in active_profiles
+        if getattr(arguments, RESULT_ARGUMENTS[profile]) != "success"
+    ]
+    if failures:
+        print(
+            f"Required profile verification failed: {', '.join(failures)}",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"Immutable release gate passed for: {' '.join(active_profiles)}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

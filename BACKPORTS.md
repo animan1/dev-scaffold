@@ -48,6 +48,22 @@ investigation.
     publication is tracked in
     [dev-scaffold#8](https://github.com/animan1/dev-scaffold/pull/8).
 
+- [x] Make immutable releases profile-aware.
+  - Gate release creation on the selected profile's verification without a
+    skipped inactive-profile job suppressing publication.
+  - Build, smoke-test, publish, attest, record, deploy, and roll back the exact
+    artifact set selected by each profile.
+  - Give server-rendered Django applications an application-owned Nginx origin
+    for static and persistent uploaded media behind separately owned host TLS.
+  - Destination: `dev-scaffold`
+  - Status: Application-owned release topology landed in
+    [dev-scaffold#28](https://github.com/animan1/dev-scaffold/pull/28);
+    release build, verification, publication, deployment, and rollback wiring
+    landed in
+    [dev-scaffold#29](https://github.com/animan1/dev-scaffold/pull/29);
+    selected-profile release gating landed in
+    [dev-scaffold#30](https://github.com/animan1/dev-scaffold/pull/30).
+
 - [x] Support deployment behind separately owned host ingress.
   - Bind application origins to configurable loopback ports.
   - Trust forwarded headers only across the documented proxy boundary.

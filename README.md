@@ -75,15 +75,25 @@ The default local-production workflow remains intentionally simple and builds
 from the checkout. Projects that need a pull-only host can opt into the
 immutable-release profile.
 
-CI derives two packages from the repository name (`-backend` and `-web`), tags
-them with the full commit SHA, verifies and smoke-tests those exact local
-images, and only then pushes them to this repository's GHCR namespace. A
-successful `main` run publishes a release artifact containing digest-pinned
-image references, release identity metadata, and an SPDX JSON SBOM for each
-image. The workflow also signs each SBOM as a GitHub artifact attestation and
-attaches it to the corresponding image digest in GHCR. The public health
-endpoint reports that release identity so deployment automation can compare
-environments without access to application data.
+CI reads the committed scaffold selector and waits for that profile's
+verification. A skipped inactive-profile job does not suppress the release.
+Both profiles retain the same two-package contract (`-backend` and `-web`),
+tagged with the full commit SHA, but each profile supplies its own build and
+production topology:
+
+- `react-vite` keeps the existing Django backend plus built React/Vite Nginx
+  image and release Compose path unchanged.
+- `server-rendered-django` builds a non-root Gunicorn image and a non-root,
+  application-owned Nginx image. Nginx proxies Django, serves collected static
+  files, and serves uploaded media from a persistent volume mounted read-only.
+
+CI verifies and smoke-tests the exact selected images before pushing them to
+the repository's GHCR namespace. A successful `main` run publishes a release
+artifact containing digest-pinned image references, release identity metadata,
+and an SPDX JSON SBOM for each image. The workflow signs each SBOM as a GitHub
+artifact attestation and attaches it to the corresponding image digest in
+GHCR. The public health endpoint reports that release identity so deployment
+automation can compare environments without access to application data.
 
 Download that run's `release-<sha>` artifact onto the host. Keep the project's
 production configuration in `deploy/.env.prod`, then deploy without building:
@@ -92,10 +102,16 @@ production configuration in `deploy/.env.prod`, then deploy without building:
 make deploy-release RELEASE_FILE=/path/to/release-<sha>.env
 ```
 
-The release path pulls the recorded digests, runs migrations and static-file
-collection with the recorded backend image, and starts Compose with
-`--no-build`. Registry login is host- and project-specific; authenticate the
-host only to the GHCR packages belonging to that project.
+For `server-rendered-django`, the `deploy-release` recipe depends on the
+profile's explicit `initialize-release` operation. That operation pulls the
+recorded digests, starts PostgreSQL and the recorded backend image with
+`--no-build`, runs `migrate`, and runs `collectstatic --clear` to populate even
+a fresh static volume. Deployment then starts the complete recorded image set.
+The React profile retains its existing release recipe. The server-rendered
+Compose project retains the PostgreSQL and uploaded-media volumes across
+releases and rollbacks, and Nginx can continue serving static and media files
+while Gunicorn is restarted. Registry login is host- and project-specific;
+authenticate the host only to the GHCR packages belonging to that project.
 
 Rollback is selection of an older retained manifest, not a rebuild:
 
@@ -128,6 +144,11 @@ Production can expose an HTTP-only origin on a configurable loopback port for a
 separately managed host ingress. The external proxy owns public TLS and routes a
 hostname to that origin; the application does not bind a public port or mount a
 certificate in this profile.
+
+For `server-rendered-django`, that loopback origin is the application-owned
+Nginx sidecar. The host proxy does hostname routing and TLS only. It receives no
+application secrets, volume access, or Docker-socket access; static and media
+delivery remain inside the application's Compose boundary.
 
 ```bash
 make up-prod HOST_INGRESS=1 HOST_INGRESS_PORT=18080
