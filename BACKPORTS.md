@@ -190,7 +190,8 @@ investigation.
   - Destination: Cuplr now; `dev-scaffold` after website proof.
   - Status: Backup image foundation proven in
     [Crane's Castle#27](https://github.com/animan1/cranescastle-web/pull/27)
-    and being backported as the first profile slice. Repository-derived
+    and being backported in [dev-scaffold#31](https://github.com/animan1/dev-scaffold/pull/31)
+    as the first profile slice. Repository-derived
     freshness proven in
     [Cuplr#103](https://github.com/animan1/cuplr/pull/103), with bounded
     two-interval alert grace proven in
