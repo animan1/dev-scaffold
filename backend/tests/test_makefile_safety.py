@@ -44,6 +44,14 @@ def test_react_profile_exposes_django_migration_commands() -> None:
     assert "python -m app.manage migrate" in migrate
 
 
+def test_react_profile_exposes_django_development_helpers() -> None:
+    superuser = _make("--dry-run", "superuser").stdout
+    shell = _make("--dry-run", "shell").stdout
+
+    assert "python -m app.manage createsuperuser" in superuser
+    assert "python -m app.manage shell" in shell
+
+
 def test_down_preserves_development_volumes() -> None:
     output = _make("--dry-run", "down").stdout
     assert "docker compose -f deploy/docker-compose.dev.yml down" in output

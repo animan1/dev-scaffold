@@ -400,14 +400,6 @@ DJANGO_DEV_MANAGE ?= cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.sett
 be.run: ## Run Django dev server (app.settings.dev)
 	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage runserver 0.0.0.0:8000
 
-.PHONY: superuser
-superuser: ## Create Django superuser (dev)
-	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage createsuperuser
-
-.PHONY: shell
-shell: ## Run Django shell (dev)
-	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage shell
-
 # ---- Setup / Hooks ----
 .PHONY: setup
 setup: ## Install Python/FE deps and pre-commit hooks
@@ -532,12 +524,18 @@ else
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
-.PHONY: migrations migrate
+.PHONY: migrations migrate superuser shell
 migrations: ## Create migrations for intentional model changes
 	$(DJANGO_DEV_MANAGE) makemigrations
 
 migrate: ## Apply development database migrations
 	$(DJANGO_DEV_MANAGE) migrate
+
+superuser: ## Create an interactive Django superuser (development only)
+	$(DJANGO_DEV_MANAGE) createsuperuser
+
+shell: ## Open the Django shell (development only)
+	$(DJANGO_DEV_MANAGE) shell
 
 ifneq ($(SCAFFOLD_BACKUP_PROFILE),none)
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_BACKUP_PROFILE)/profile.mk
