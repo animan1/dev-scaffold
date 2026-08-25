@@ -103,7 +103,9 @@ investigation.
     existing React-profile behavior.
   - Destination: `dev-scaffold`
   - Status: Scaffold deficiency identified during review of
-    [Crane's Castle#29](https://github.com/animan1/cranescastle-web/pull/29#discussion_r3849019538).
+    [Crane's Castle#29](https://github.com/animan1/cranescastle-web/pull/29#discussion_r3849019538);
+    backport proposed in
+    [dev-scaffold#32](https://github.com/animan1/dev-scaffold/pull/32).
 
 - [ ] Add a Dockerized dependency-lock workflow.
   - Provide `make deps.lock` for the selected profile using the pinned uv image
