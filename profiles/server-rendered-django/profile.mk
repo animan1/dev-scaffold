@@ -13,6 +13,7 @@ COMPOSE := COMPOSE_PROJECT_NAME=$(PROJECT_NAME) APP_HOST=$(APP_HOST) APP_PORT=$(
 	docker compose --project-directory . -f profiles/server-rendered-django/compose.yml
 RUN := $(COMPOSE) run --rm app
 UV_RUN := uv run --project /workspace/profiles/server-rendered-django
+DJANGO_DEV_MANAGE := $(RUN) $(UV_RUN) python -m app.manage
 PROFILE_PROJECT := /workspace/profiles/server-rendered-django/pyproject.toml
 RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
 RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)
@@ -121,14 +122,6 @@ changed-coverage: ## Enforce coverage on Python lines changed from DIFF_BASE
 .PHONY: migrations-check
 migrations-check: ## Reject model changes without migrations
 	$(RUN) $(UV_RUN) python -m app.manage makemigrations --check --dry-run
-
-.PHONY: migrations
-migrations: ## Create migrations for intentional model changes
-	$(RUN) $(UV_RUN) python -m app.manage makemigrations
-
-.PHONY: migrate
-migrate: ## Apply development database migrations
-	$(RUN) $(UV_RUN) python -m app.manage migrate
 
 .PHONY: django-check
 django-check: ## Run Django's production deployment checks

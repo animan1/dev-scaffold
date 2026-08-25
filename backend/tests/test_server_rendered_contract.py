@@ -39,8 +39,6 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "typecheck",
         "test",
         "coverage",
-        "migrations",
-        "migrate",
         "check",
         "verify",
         "precommit",
