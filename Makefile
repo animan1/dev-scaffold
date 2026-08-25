@@ -394,13 +394,11 @@ be.wait-prod: CURL_FLAGS := -k
 be.wait-prod: be.wait
 
 # ---- Django dev helpers ----
+DJANGO_DEV_MANAGE ?= cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage
+
 .PHONY: be.run
 be.run: ## Run Django dev server (app.settings.dev)
 	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage runserver 0.0.0.0:8000
-
-.PHONY: migrate
-migrate: ## Run Django migrations (dev)
-	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage migrate
 
 .PHONY: superuser
 superuser: ## Create Django superuser (dev)
@@ -533,6 +531,13 @@ fe.verify: ## Frontend lint + typecheck + tests + fmt-check
 else
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
+
+.PHONY: migrations migrate
+migrations: ## Create migrations for intentional model changes
+	$(DJANGO_DEV_MANAGE) makemigrations
+
+migrate: ## Apply development database migrations
+	$(DJANGO_DEV_MANAGE) migrate
 
 ifneq ($(SCAFFOLD_BACKUP_PROFILE),none)
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_BACKUP_PROFILE)/profile.mk

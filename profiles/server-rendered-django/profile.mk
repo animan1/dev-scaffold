@@ -13,6 +13,7 @@ COMPOSE := COMPOSE_PROJECT_NAME=$(PROJECT_NAME) APP_HOST=$(APP_HOST) APP_PORT=$(
 	docker compose --project-directory . -f profiles/server-rendered-django/compose.yml
 RUN := $(COMPOSE) run --rm app
 UV_RUN := uv run --project /workspace/profiles/server-rendered-django
+DJANGO_DEV_MANAGE := $(RUN) $(UV_RUN) python -m app.manage
 PROFILE_PROJECT := /workspace/profiles/server-rendered-django/pyproject.toml
 RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
 RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)

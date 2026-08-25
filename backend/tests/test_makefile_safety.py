@@ -36,6 +36,14 @@ def test_react_profile_dependency_lock_uses_pinned_dockerized_uv() -> None:
     assert "--entrypoint /usr/local/bin/uv" in output
 
 
+def test_react_profile_exposes_django_migration_commands() -> None:
+    migrations = _make("--dry-run", "migrations").stdout
+    migrate = _make("--dry-run", "migrate").stdout
+
+    assert "python -m app.manage makemigrations" in migrations
+    assert "python -m app.manage migrate" in migrate
+
+
 def test_down_preserves_development_volumes() -> None:
     output = _make("--dry-run", "down").stdout
     assert "docker compose -f deploy/docker-compose.dev.yml down" in output

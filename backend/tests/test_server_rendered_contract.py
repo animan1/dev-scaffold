@@ -85,6 +85,16 @@ def test_server_rendered_dependency_lock_uses_pinned_dockerized_uv() -> None:
     assert "lock --project profiles/server-rendered-django" in output
 
 
+def test_server_rendered_django_migration_commands_use_docker() -> None:
+    migrations = _make("--dry-run", "migrations").stdout
+    migrate = _make("--dry-run", "migrate").stdout
+
+    assert "docker compose" in migrations
+    assert "python -m app.manage makemigrations" in migrations
+    assert "docker compose" in migrate
+    assert "python -m app.manage migrate" in migrate
+
+
 def test_server_rendered_tools_explicitly_load_profile_configuration() -> None:
     profile_config = "/workspace/profiles/server-rendered-django/pyproject.toml"
 

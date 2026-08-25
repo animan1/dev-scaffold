@@ -96,6 +96,18 @@ investigation.
     [dev-scaffold#19](https://github.com/animan1/dev-scaffold/pull/19) through
     [dev-scaffold#23](https://github.com/animan1/dev-scaffold/pull/23).
 
+- [x] Provide profile-consistent Django migration commands.
+  - Expose stable `make migrations` and `make migrate` operations for every
+    application profile with a Django backend.
+  - Keep the server-rendered workflow inside Docker while preserving the
+    existing React-profile behavior.
+  - Destination: `dev-scaffold`
+  - Status: Implemented in
+    [dev-scaffold#32](https://github.com/animan1/dev-scaffold/pull/32), after the
+    scaffold deficiency was identified during review of
+    [Crane's Castle#29](https://github.com/animan1/cranescastle-web/pull/29#discussion_r3849019538);
+    both profiles now use the same top-level targets.
+
 - [ ] Add a Dockerized dependency-lock workflow.
   - Provide `make deps.lock` for the selected profile using the pinned uv image
     so developers do not need host-installed uv.
