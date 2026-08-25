@@ -39,6 +39,8 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "typecheck",
         "test",
         "coverage",
+        "migrations",
+        "migrate",
         "check",
         "verify",
         "precommit",
@@ -83,6 +85,16 @@ def test_server_rendered_dependency_lock_uses_pinned_dockerized_uv() -> None:
     assert "docker run --rm" in output
     assert "ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim" in output
     assert "lock --project profiles/server-rendered-django" in output
+
+
+def test_server_rendered_django_migration_commands_use_docker() -> None:
+    migrations = _make("--dry-run", "migrations").stdout
+    migrate = _make("--dry-run", "migrate").stdout
+
+    assert "docker compose" in migrations
+    assert "python -m app.manage makemigrations" in migrations
+    assert "docker compose" in migrate
+    assert "python -m app.manage migrate" in migrate
 
 
 def test_server_rendered_tools_explicitly_load_profile_configuration() -> None:

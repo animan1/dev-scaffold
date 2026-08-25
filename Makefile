@@ -402,6 +402,10 @@ be.run: ## Run Django dev server (app.settings.dev)
 migrate: ## Run Django migrations (dev)
 	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage migrate
 
+.PHONY: migrations
+migrations: ## Create migrations for intentional model changes
+	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage makemigrations
+
 .PHONY: superuser
 superuser: ## Create Django superuser (dev)
 	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage createsuperuser
