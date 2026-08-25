@@ -122,6 +122,14 @@ changed-coverage: ## Enforce coverage on Python lines changed from DIFF_BASE
 migrations-check: ## Reject model changes without migrations
 	$(RUN) $(UV_RUN) python -m app.manage makemigrations --check --dry-run
 
+.PHONY: migrations
+migrations: ## Create migrations for intentional model changes
+	$(RUN) $(UV_RUN) python -m app.manage makemigrations
+
+.PHONY: migrate
+migrate: ## Apply development database migrations
+	$(RUN) $(UV_RUN) python -m app.manage migrate
+
 .PHONY: django-check
 django-check: ## Run Django's production deployment checks
 	$(RUN) sh -lc 'DJANGO_SETTINGS_MODULE=app.project.settings.prod \
