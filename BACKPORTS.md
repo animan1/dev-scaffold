@@ -108,6 +108,17 @@ investigation.
     [Crane's Castle#29](https://github.com/animan1/cranescastle-web/pull/29#discussion_r3849019538);
     both profiles now use the same top-level targets.
 
+- [x] Provide profile-consistent Django development helpers.
+  - Expose generic, development-only `make superuser` and `make shell` targets
+    for every application profile with a Django backend.
+  - Use the selected profile's `DJANGO_DEV_MANAGE` runner so full-Docker
+    profiles never fall back to host Python.
+  - Destination: `dev-scaffold`
+  - Status: Implemented in
+    [dev-scaffold#33](https://github.com/animan1/dev-scaffold/pull/33) as a
+    follow-up to
+    [dev-scaffold#32](https://github.com/animan1/dev-scaffold/pull/32).
+
 - [ ] Add a Dockerized dependency-lock workflow.
   - Provide `make deps.lock` for the selected profile using the pinned uv image
     so developers do not need host-installed uv.

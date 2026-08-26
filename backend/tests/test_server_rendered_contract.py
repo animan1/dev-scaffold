@@ -95,6 +95,35 @@ def test_server_rendered_django_migration_commands_use_docker() -> None:
     assert "python -m app.manage migrate" in migrate
 
 
+def test_server_rendered_django_development_helpers_use_docker() -> None:
+    help_output = _make("help").stdout
+    superuser = _make("--dry-run", "superuser").stdout
+    shell = _make("--dry-run", "shell").stdout
+
+    assert "superuser" in help_output
+    assert "shell" in help_output
+    assert "fe.run" not in help_output
+    assert "be.run" not in help_output
+    assert "docker compose" in superuser
+    assert "run --rm app" in superuser
+    assert "python -m app.manage createsuperuser" in superuser
+    assert "cd backend/src" not in superuser
+    assert "docker compose" in shell
+    assert "run --rm app" in shell
+    assert "python -m app.manage shell" in shell
+    assert "cd backend/src" not in shell
+
+
+def test_server_rendered_help_includes_selected_optional_profiles() -> None:
+    help_output = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "help").stdout
+
+    assert "build-backup-image" in help_output
+    assert "verify-backup-image" in help_output
+    assert "backup-image-versions" in help_output
+    assert "fe.run" not in help_output
+    assert "be.run" not in help_output
+
+
 def test_server_rendered_tools_explicitly_load_profile_configuration() -> None:
     profile_config = "/workspace/profiles/server-rendered-django/pyproject.toml"
 

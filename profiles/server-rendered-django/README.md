@@ -15,8 +15,8 @@ future scaffold merges can update both profiles normally.
   CONFIRM_RESET=1` is the explicit destructive operation.
 - The same Make interface for developers and CI: `build`, `up`, `down`,
   `reset`, `deps.lock`, `format`, `lint`, `typecheck`, `test`, `coverage`,
-  `migrations`, `migrate`, `check`, `verify`, `precommit`, `build-production`,
-  and `smoke`.
+  `migrations`, `migrate`, `superuser`, `shell`, `check`, `verify`, `precommit`,
+  `build-production`, and `smoke`.
 - Ruff formatting and linting, strict MyPy, pytest, total and changed-line
   coverage, migration-drift checks, Django deployment checks, a multi-stage
   non-root production image, and routed smoke tests.
