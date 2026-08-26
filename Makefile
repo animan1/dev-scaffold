@@ -539,4 +539,5 @@ shell: ## Open the Django shell (development only)
 
 ifneq ($(SCAFFOLD_BACKUP_PROFILE),none)
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_BACKUP_PROFILE)/profile.mk
+SELECTED_OPTIONAL_PROFILE_MAKEFILES += $(lastword $(MAKEFILE_LIST))
 endif

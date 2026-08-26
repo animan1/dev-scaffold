@@ -44,6 +44,10 @@ LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
 help: ## Show available commands
 	@{ \
 		grep -E '^[a-zA-Z0-9_.-]+:.*?## ' $(SERVER_PROFILE_MAKEFILE); \
+		if [[ -n "$(strip $(SELECTED_OPTIONAL_PROFILE_MAKEFILES))" ]]; then \
+			grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' \
+				$(SELECTED_OPTIONAL_PROFILE_MAKEFILES); \
+		fi; \
 		grep -E '^(migrations|migrate|superuser|shell):.*?## ' \
 			$(firstword $(MAKEFILE_LIST)); \
 	} | sort | awk 'BEGIN {FS=":.*?## "} \
