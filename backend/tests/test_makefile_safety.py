@@ -48,6 +48,9 @@ def test_react_profile_exposes_django_development_helpers() -> None:
     superuser = _make("--dry-run", "superuser").stdout
     shell = _make("--dry-run", "shell").stdout
 
+    assert superuser.index("python -m app.manage migrate") < superuser.index(
+        "python -m app.manage createsuperuser"
+    )
     assert "python -m app.manage createsuperuser" in superuser
     assert "python -m app.manage shell" in shell
 
