@@ -114,9 +114,10 @@ investigation.
   - Use the selected profile's `DJANGO_DEV_MANAGE` runner so full-Docker
     profiles never fall back to host Python.
   - Destination: `dev-scaffold`
-  - Status: Implemented as a follow-up to
-    [dev-scaffold#32](https://github.com/animan1/dev-scaffold/pull/32);
-    implementation PR link pending.
+  - Status: Implemented in
+    [dev-scaffold#33](https://github.com/animan1/dev-scaffold/pull/33) as a
+    follow-up to
+    [dev-scaffold#32](https://github.com/animan1/dev-scaffold/pull/32).
 
 - [ ] Add a Dockerized dependency-lock workflow.
   - Provide `make deps.lock` for the selected profile using the pinned uv image
