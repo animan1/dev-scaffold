@@ -1,4 +1,17 @@
 services:
+  backup-init:
+    profiles: ["backup-init"]
+    image: "${BACKUP_IMAGE:?Set BACKUP_IMAGE through the profile Makefile}"
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        install -d -o ${BACKUP_RUNTIME_UID:-10001} -g ${BACKUP_RUNTIME_GID:-10001}
+        /backups ${BACKUP_STATUS_DIR:-/backup-status}
+    user: "0:0"
+    volumes:
+      - "${BACKUP_LOCAL_PATH:?Set BACKUP_LOCAL_PATH through the profile Makefile}:/backups"
+      - "backup_status:${BACKUP_STATUS_DIR:-/backup-status}"
+
   backup:
     image: "${BACKUP_IMAGE:?Set BACKUP_IMAGE through the profile Makefile}"
     command: ["watch"]
@@ -20,6 +33,7 @@ services:
       RESTIC_REPOSITORY: "${BACKUP_REPOSITORY:-/backups}"
       RCLONE_CONFIG: "${BACKUP_RCLONE_CONFIG:-/config/rclone/rclone.conf}"
     restart: unless-stopped
+    user: "${BACKUP_RUNTIME_UID:-10001}:${BACKUP_RUNTIME_GID:-10001}"
     volumes:
       - "${BACKUP_LOCAL_PATH:?Set BACKUP_LOCAL_PATH through the profile Makefile}:/backups"
       - "${BACKUP_RCLONE_CONFIG_DIR:?Set BACKUP_RCLONE_CONFIG_DIR through the profile Makefile}:/config/rclone"

@@ -74,31 +74,41 @@ backup-image-versions: build-backup-image ## Print the exact tools installed in 
 backup-database-ready:
 	$(BACKUP_COMPOSE) up -d --wait $(BACKUP_DATABASE_SERVICE)
 
+.PHONY: backup-storage-ready
+backup-storage-ready:
+	@mkdir -p $(BACKUP_LOCAL_PATH) $(BACKUP_RCLONE_CONFIG_DIR)
+	$(BACKUP_COMPOSE) run --rm --no-deps backup-init
+
 .PHONY: backup-prod
 backup-prod: ## Create, retain, prune, and integrity-check an encrypted database backup
 	$(BACKUP_BUILD)
+	$(MAKE) backup-storage-ready
 	$(MAKE) backup-database-ready
 	$(BACKUP_RUN) once
 
 .PHONY: verify-backup-prod
 verify-backup-prod: ## Restore the latest backup into an isolated temporary database
 	$(BACKUP_BUILD)
+	$(MAKE) backup-storage-ready
 	$(MAKE) backup-database-ready
 	$(BACKUP_RUN) verify
 
 .PHONY: inspect-backup-prod
 inspect-backup-prod: ## Refresh backup freshness from the existing repository
 	$(BACKUP_BUILD)
+	$(MAKE) backup-storage-ready
 	$(BACKUP_RUN) inspect
 
 .PHONY: snapshots-prod
 snapshots-prod: ## List restorable database snapshots without creating a repository
 	$(BACKUP_BUILD)
+	$(MAKE) backup-storage-ready
 	$(BACKUP_RUN) snapshots
 
 .PHONY: up-backup-prod
 up-backup-prod: ## Start the scheduled backup and restore-verification worker
 	$(BACKUP_BUILD)
+	$(MAKE) backup-storage-ready
 	$(MAKE) backup-database-ready
 	$(BACKUP_COMPOSE) up -d --no-build $(BACKUP_SERVICE)
 
@@ -114,6 +124,7 @@ restore-prod: ## Replace the configured database from BACKUP_SNAPSHOT; requires 
 		exit 1; \
 	fi
 	$(BACKUP_BUILD)
+	$(MAKE) backup-storage-ready
 	$(BACKUP_COMPOSE) stop $(BACKUP_WRITER_SERVICES)
 	$(MAKE) backup-database-ready
 	$(BACKUP_COMPOSE) run --rm --no-deps \

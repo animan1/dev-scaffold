@@ -192,6 +192,8 @@ def test_backup_configuration_boundaries_remain_project_owned() -> None:
         "BACKUP_LOCAL_PATH",
         "BACKUP_PASSWORD",
         "BACKUP_REPOSITORY",
+        "BACKUP_RUNTIME_GID",
+        "BACKUP_RUNTIME_UID",
         "BACKUP_RCLONE_CONFIG",
         "BACKUP_STATUS_DIR",
         "BACKUP_TAG",
@@ -226,3 +228,14 @@ def test_routine_teardown_preserves_all_persistent_volume_classes() -> None:
     assert "staticfiles:" in react_compose
     assert "media:" in server_compose
     assert "backup_status:" in backup_compose
+
+
+def test_non_root_storage_is_prepared_without_initializing_restic() -> None:
+    compose = (_repository_root() / "profiles/immutable-backup/compose.yml").read_text()
+    initialization = compose.split("  backup-init:", 1)[1].split("  backup:", 1)[0]
+    snapshots = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "snapshots-prod").stdout
+
+    assert 'user: "0:0"' in initialization
+    assert "install -d" in initialization
+    assert "restic init" not in initialization
+    assert snapshots.index("backup-init") < snapshots.index("backup snapshots")
