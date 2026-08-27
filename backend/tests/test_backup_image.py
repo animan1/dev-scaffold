@@ -44,6 +44,15 @@ def test_backup_image_is_application_independent_and_non_root() -> None:
     assert "cuplr" not in dockerfile.lower()
 
 
+def test_backup_image_owns_the_generic_operation_entrypoint() -> None:
+    dockerfile = (_repository_root() / "profiles/immutable-backup/Dockerfile").read_text()
+
+    assert "profiles/immutable-backup/backup.sh" in dockerfile
+    assert 'ENTRYPOINT ["scaffold-backup"]' in dockerfile
+    assert 'CMD ["watch"]' in dockerfile
+    assert "jq" in dockerfile
+
+
 def test_backup_image_make_contract_uses_declared_inputs() -> None:
     build = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "build-backup-image")
     verify = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "verify-backup-image")
