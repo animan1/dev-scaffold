@@ -531,7 +531,7 @@ migrations: ## Create migrations for intentional model changes
 migrate: ## Apply development database migrations
 	$(DJANGO_DEV_MANAGE) migrate
 
-superuser: ## Create an interactive Django superuser (development only)
+superuser: migrate ## Migrate, then create an interactive Django superuser (development only)
 	$(DJANGO_DEV_MANAGE) createsuperuser
 
 shell: ## Open the Django shell (development only)

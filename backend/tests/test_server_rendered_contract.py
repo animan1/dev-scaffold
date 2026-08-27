@@ -69,6 +69,7 @@ def test_server_rendered_teardown_is_safe_and_reset_is_guarded() -> None:
 
     confirmed = _make("--dry-run", "reset", "CONFIRM_RESET=1").stdout
     assert "down -v --remove-orphans" in confirmed
+    assert " up " not in confirmed
 
 
 def test_server_rendered_precommit_is_a_recipe() -> None:
@@ -106,6 +107,9 @@ def test_server_rendered_django_development_helpers_use_docker() -> None:
     assert "be.run" not in help_output
     assert "docker compose" in superuser
     assert "run --rm app" in superuser
+    assert superuser.index("python -m app.manage migrate") < superuser.index(
+        "python -m app.manage createsuperuser"
+    )
     assert "python -m app.manage createsuperuser" in superuser
     assert "cd backend/src" not in superuser
     assert "docker compose" in shell

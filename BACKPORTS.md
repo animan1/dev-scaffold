@@ -117,7 +117,9 @@ investigation.
   - Status: Implemented in
     [dev-scaffold#33](https://github.com/animan1/dev-scaffold/pull/33) as a
     follow-up to
-    [dev-scaffold#32](https://github.com/animan1/dev-scaffold/pull/32).
+    [dev-scaffold#32](https://github.com/animan1/dev-scaffold/pull/32); fresh
+    database superuser safety is hardened in
+    [dev-scaffold#34](https://github.com/animan1/dev-scaffold/pull/34).
 
 - [ ] Add a Dockerized dependency-lock workflow.
   - Provide `make deps.lock` for the selected profile using the pinned uv image
