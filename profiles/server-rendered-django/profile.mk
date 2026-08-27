@@ -26,9 +26,10 @@ RELEASE_HTTP_PORT ?= 18080
 PROD_ENV_FILE ?= deploy/.env.prod
 RELEASE_CI_ENV_FILE ?= .tmp/server-rendered-release-ci.env
 RELEASE_COMPOSE_FILE := profiles/server-rendered-django/release.compose.yml
+RELEASE_COMPOSE_FILES := -f $(RELEASE_COMPOSE_FILE)
 COMPOSE_RELEASE = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(PROD_ENV_FILE) docker compose --project-directory . \
-	-f $(RELEASE_COMPOSE_FILE) --env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
+	$(RELEASE_COMPOSE_FILES) --env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
 COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(RELEASE_CI_ENV_FILE) docker compose --project-directory . \
 	-f $(RELEASE_COMPOSE_FILE) --env-file $(RELEASE_CI_ENV_FILE)

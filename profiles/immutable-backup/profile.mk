@@ -7,6 +7,29 @@ BACKUP_RESTIC_IMAGE ?= $(BACKUP_RESTIC_SOURCE)@sha256:136600b6ff6843d61d355f7f71
 BACKUP_RCLONE_IMAGE ?= $(BACKUP_RCLONE_SOURCE)@sha256:c61954aaa32328a5486715dd063a81c7879f5195ad3505cd362deddd509dc4a1
 BACKUP_IMAGE ?= local/$(PROJECT_NAME)-backup:$(shell git rev-parse HEAD)
 BACKUP_DOCKERFILE := profiles/immutable-backup/Dockerfile
+BACKUP_COMPOSE_FILE := profiles/immutable-backup/compose.yml
+BACKUP_DATABASE_SERVICE ?= db
+BACKUP_LOCAL_PATH ?= $(CURDIR)/deploy/backups
+BACKUP_RCLONE_CONFIG_DIR ?= $(CURDIR)/deploy/rclone
+BACKUP_SERVICE ?= backup
+BACKUP_SNAPSHOT ?= latest
+BACKUP_RESTORE_CONFIRM_VALUE := restore-production-database
+BACKUP_BUILD ?= $(MAKE) build-backup-image
+export BACKUP_IMAGE BACKUP_LOCAL_PATH BACKUP_RCLONE_CONFIG_DIR
+
+ifeq ($(SCAFFOLD_PROFILE),react-vite)
+PROD_COMPOSE_FILES += -f $(BACKUP_COMPOSE_FILE)
+BACKUP_COMPOSE = $(COMPOSE_PROD)
+BACKUP_WRITER_SERVICES ?= backend monitor backup
+else ifeq ($(SCAFFOLD_PROFILE),server-rendered-django)
+RELEASE_COMPOSE_FILES += -f $(BACKUP_COMPOSE_FILE)
+BACKUP_COMPOSE = $(COMPOSE_RELEASE)
+BACKUP_WRITER_SERVICES ?= app monitor backup
+else
+$(error The immutable-backup profile needs a production Compose contract for SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE))
+endif
+
+BACKUP_RUN = $(BACKUP_COMPOSE) run --rm --no-deps $(BACKUP_SERVICE)
 
 .PHONY: backup-images-pull
 backup-images-pull: ## Pull the versioned backup component images used for dependency review
@@ -34,11 +57,68 @@ verify-backup-image: build-backup-image ## Verify the exact backup image tool an
 		'pg_dump --version | grep -q "16.10" \
 		&& restic version | grep -q "restic 0.19.1" \
 		&& rclone version | grep -q "rclone v1.74.4" \
+		&& jq --version \
+		&& test -x /usr/local/bin/scaffold-backup \
 		&& test -s /etc/ssl/certs/ca-certificates.crt'
+
+.PHONY: verify-backup-compose
+verify-backup-compose: ## Validate the application-neutral backup worker overlay
+	docker compose --project-directory . -f $(BACKUP_COMPOSE_FILE) config --quiet
 
 .PHONY: backup-image-versions
 backup-image-versions: build-backup-image ## Print the exact tools installed in the backup image
 	docker run --rm --entrypoint sh $(BACKUP_IMAGE) -c \
 		'pg_dump --version; restic version; rclone version'
 
-verify: verify-backup-image
+.PHONY: backup-database-ready
+backup-database-ready:
+	$(BACKUP_COMPOSE) up -d --wait $(BACKUP_DATABASE_SERVICE)
+
+.PHONY: backup-prod
+backup-prod: ## Create, retain, prune, and integrity-check an encrypted database backup
+	$(BACKUP_BUILD)
+	$(MAKE) backup-database-ready
+	$(BACKUP_RUN) once
+
+.PHONY: verify-backup-prod
+verify-backup-prod: ## Restore the latest backup into an isolated temporary database
+	$(BACKUP_BUILD)
+	$(MAKE) backup-database-ready
+	$(BACKUP_RUN) verify
+
+.PHONY: inspect-backup-prod
+inspect-backup-prod: ## Refresh backup freshness from the existing repository
+	$(BACKUP_BUILD)
+	$(BACKUP_RUN) inspect
+
+.PHONY: snapshots-prod
+snapshots-prod: ## List restorable database snapshots without creating a repository
+	$(BACKUP_BUILD)
+	$(BACKUP_RUN) snapshots
+
+.PHONY: up-backup-prod
+up-backup-prod: ## Start the scheduled backup and restore-verification worker
+	$(BACKUP_BUILD)
+	$(MAKE) backup-database-ready
+	$(BACKUP_COMPOSE) up -d --no-build $(BACKUP_SERVICE)
+
+.PHONY: logs-backup-prod
+logs-backup-prod: ## Show recent scheduled backup worker logs
+	$(BACKUP_COMPOSE) logs --tail=200 $(BACKUP_SERVICE)
+
+.PHONY: restore-prod
+restore-prod: ## Replace the configured database from BACKUP_SNAPSHOT; requires CONFIRM=restore-prod
+	@if [[ "$(CONFIRM)" != "restore-prod" ]]; then \
+		echo "Refusing to replace the configured database."; \
+		echo "Run: make restore-prod CONFIRM=restore-prod BACKUP_SNAPSHOT=$(BACKUP_SNAPSHOT)"; \
+		exit 1; \
+	fi
+	$(BACKUP_BUILD)
+	$(BACKUP_COMPOSE) stop $(BACKUP_WRITER_SERVICES)
+	$(MAKE) backup-database-ready
+	$(BACKUP_COMPOSE) run --rm --no-deps \
+		-e BACKUP_RESTORE_CONFIRMATION=$(BACKUP_RESTORE_CONFIRM_VALUE) \
+		-e BACKUP_RESTORE_SNAPSHOT=$(BACKUP_SNAPSHOT) $(BACKUP_SERVICE) restore
+	@echo "Database restore complete; run the consuming project's migration, startup, and smoke procedures."
+
+verify: verify-backup-image verify-backup-compose

@@ -44,3 +44,7 @@ deploy/nginx/certs/
 
 # File-mounted production secrets
 /deploy/secrets/
+
+# Backup repositories and provider configuration
+/deploy/backups/
+/deploy/rclone/
