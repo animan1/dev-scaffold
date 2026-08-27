@@ -216,8 +216,10 @@ investigation.
   - Status: Backup image foundation proven in
     [Crane's Castle#27](https://github.com/animan1/cranescastle-web/pull/27)
     and being backported in [dev-scaffold#31](https://github.com/animan1/dev-scaffold/pull/31)
-    as the first profile slice. Repository-derived
-    freshness proven in
+    as the first profile slice. Generic PostgreSQL backup, inspection,
+    isolated verification, snapshot listing, and guarded restore operations
+    are being extracted from Cuplr as the next profile slices. Repository-derived
+    freshness was proven in
     [Cuplr#103](https://github.com/animan1/cuplr/pull/103), with bounded
     two-interval alert grace proven in
     [Cuplr#104](https://github.com/animan1/cuplr/pull/104).

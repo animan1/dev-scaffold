@@ -69,6 +69,16 @@ make smoke-prod      # run API, static, and FE smokes
 make down-prod       # stop stack
 ```
 
+### Optional immutable PostgreSQL backups
+
+Projects can select the application-neutral
+[immutable-backup profile](profiles/immutable-backup/README.md) alongside
+either primary profile. It provides an immutable PostgreSQL/Restic/rclone
+container plus stable Make operations for encrypted backups, repository
+inspection, isolated restore verification, snapshot listing, scheduled work,
+and guarded database restoration. The profile requires no host backup tools and
+does not include Django/Wagtail uploaded media.
+
 ### Optional immutable releases
 
 The default local-production workflow remains intentionally simple and builds
