@@ -6,7 +6,10 @@ FROM ${RESTIC_IMAGE} AS restic
 FROM ${RCLONE_IMAGE} AS rclone
 FROM ${POSTGRES_IMAGE}
 
-RUN groupadd --gid 10001 scaffold-backup \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends jq \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 scaffold-backup \
     && useradd --uid 10001 --gid scaffold-backup --create-home scaffold-backup \
     && mkdir -p /backup-status /workspace \
     && chown -R scaffold-backup:scaffold-backup /backup-status /workspace
@@ -14,8 +17,9 @@ RUN groupadd --gid 10001 scaffold-backup \
 COPY --from=restic /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=restic /usr/bin/restic /usr/local/bin/restic
 COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
+COPY --chmod=755 profiles/immutable-backup/backup.sh /usr/local/bin/scaffold-backup
 
 USER scaffold-backup
 WORKDIR /workspace
-ENTRYPOINT []
-CMD ["sh"]
+ENTRYPOINT ["scaffold-backup"]
+CMD ["watch"]
