@@ -82,6 +82,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify the exact immutable backup image
         run: make SCAFFOLD_BACKUP_PROFILE=immutable-backup verify-backup-image
+      - name: Exercise backup and isolated restore verification end to end
+        run: make SCAFFOLD_BACKUP_PROFILE=immutable-backup exercise-backup-profile
+      - name: Show disposable backup exercise logs
+        if: failure()
+        run: make SCAFFOLD_BACKUP_PROFILE=immutable-backup logs-backup-exercise
+      - name: Remove disposable backup exercise
+        if: always()
+        run: make SCAFFOLD_BACKUP_PROFILE=immutable-backup down-backup-exercise
 
   immutable-release-gate:
     needs: [profile-selection, server-rendered-profile, backend]

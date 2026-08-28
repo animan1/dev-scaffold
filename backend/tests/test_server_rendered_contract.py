@@ -124,6 +124,10 @@ def test_server_rendered_help_includes_selected_optional_profiles() -> None:
     assert "build-backup-image" in help_output
     assert "verify-backup-image" in help_output
     assert "backup-image-versions" in help_output
+    assert "backup-prod" in help_output
+    assert "verify-backup-prod" in help_output
+    assert "snapshots-prod" in help_output
+    assert "restore-prod" in help_output
     assert "fe.run" not in help_output
     assert "be.run" not in help_output
 
