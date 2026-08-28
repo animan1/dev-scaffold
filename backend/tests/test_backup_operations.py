@@ -337,6 +337,19 @@ def test_non_root_storage_is_prepared_without_initializing_restic() -> None:
     assert snapshots.index("backup-init") < snapshots.index("backup snapshots")
 
 
+def test_make_exercises_real_backup_and_isolated_restore_entrypoints() -> None:
+    exercise = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "exercise-backup-profile").stdout
+
+    assert ".tmp/immutable-backup-exercise" in exercise
+    assert "exercise.compose.yml" in exercise
+    assert exercise.index("backup once") < exercise.index("backup verify")
+    assert exercise.index("backup verify") < exercise.index("backup snapshots")
+    assert "/backup-status/last-backup" in exercise
+    assert "/backup-status/last-restore-verification" in exercise
+    assert "backup_restore_verify_%" in exercise
+    assert "down -v --remove-orphans" in exercise
+
+
 def test_worker_uses_bounded_retry_interval_after_failure() -> None:
     worker = _operation("watch()", 'case "${1:-watch}"')
     success = worker.split("if backup_once && verify_restore; then", 1)[1].split("else", 1)[0]
