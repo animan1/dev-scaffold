@@ -128,6 +128,31 @@ backup_once() {
   record_latest_snapshot
 }
 
+create_verification_database() {
+  local attempt
+  local candidate
+  local create_output=""
+  local suffix
+  for attempt in 1 2 3 4 5; do
+    suffix="$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
+    candidate="backup_restore_verify_${suffix}"
+    if create_output="$(
+      createdb \
+        --host "${PGHOST}" \
+        --username "${POSTGRES_USER}" \
+        "${candidate}" 2>&1
+    )"; then
+      VERIFICATION_DB="${candidate}"
+      return 0
+    fi
+  done
+
+  echo "Unable to create an isolated verification database after 5 attempts." >&2
+  echo "PostgreSQL reported:" >&2
+  echo "${create_output}" >&2
+  return 1
+}
+
 verify_restore() {
   require_repository
 
@@ -143,12 +168,8 @@ verify_restore() {
   }
   trap cleanup EXIT INT TERM
 
-  VERIFICATION_DB="backup_restore_verify_$$"
   cleanup
-  createdb \
-    --host "${PGHOST}" \
-    --username "${POSTGRES_USER}" \
-    "${VERIFICATION_DB}"
+  create_verification_database
   restic dump \
     --host "${BACKUP_HOST}" \
     --tag "${BACKUP_TAG}" \
@@ -231,19 +252,39 @@ restore_database() {
 
 watch() {
   local backup_interval="${BACKUP_INTERVAL_SECONDS:-86400}"
+  local inspection_interval="${BACKUP_INSPECTION_INTERVAL_SECONDS:-900}"
   local next_backup_at=0
   local now
+  local retry_interval="${BACKUP_RETRY_INTERVAL_SECONDS:-${inspection_interval}}"
+  if ! [[ "${backup_interval}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "BACKUP_INTERVAL_SECONDS must be a positive integer." >&2
+    return 1
+  fi
+  if ! [[ "${inspection_interval}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "BACKUP_INSPECTION_INTERVAL_SECONDS must be a positive integer." >&2
+    return 1
+  fi
+  if ! [[ "${retry_interval}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "BACKUP_RETRY_INTERVAL_SECONDS must be a positive integer." >&2
+    return 1
+  fi
+  if (( retry_interval > backup_interval )); then
+    retry_interval="${backup_interval}"
+  fi
   while true; do
     now="$(date -u +%s)"
     if (( now >= next_backup_at )); then
-      if ! backup_once || ! verify_restore; then
+      if backup_once && verify_restore; then
+        next_backup_at=$((now + backup_interval))
+      else
         echo "Scheduled database backup or restore verification failed." >&2
+        echo "Retrying in ${retry_interval} seconds." >&2
+        next_backup_at=$((now + retry_interval))
       fi
-      next_backup_at=$((now + backup_interval))
     elif ! inspect_repository; then
       echo "Scheduled backup repository inspection failed." >&2
     fi
-    sleep "${BACKUP_INSPECTION_INTERVAL_SECONDS:-900}"
+    sleep "${inspection_interval}"
   done
 }
 

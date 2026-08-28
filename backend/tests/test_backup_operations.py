@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -49,6 +50,49 @@ def _restore(*, database: str, confirmation: str) -> subprocess.CompletedProcess
     )
 
 
+def _fake_backup_commands(directory: Path) -> None:
+    commands = {
+        "createdb": """#!/bin/sh
+if [ -n "${CREATE_ATTEMPT_FILE:-}" ]; then
+  count="$(cat "${CREATE_ATTEMPT_FILE}" 2>/dev/null || printf '0')"
+  count="$((count + 1))"
+  printf '%s\n' "${count}" >"${CREATE_ATTEMPT_FILE}"
+  if [ "${count}" = "1" ]; then
+    echo 'database already exists' >&2
+    exit 1
+  fi
+fi
+""",
+        "dropdb": "#!/bin/sh\nexit 0\n",
+        "pg_restore": "#!/bin/sh\ncat >/dev/null\n",
+        "psql": "#!/bin/sh\nexit 0\n",
+        "restic": """#!/bin/sh
+case "$1" in
+  cat) exit 0 ;;
+  dump) printf 'fake custom dump' ;;
+  *) exit 0 ;;
+esac
+""",
+    }
+    directory.mkdir()
+    for name, contents in commands.items():
+        command = directory / name
+        command.write_text(contents)
+        command.chmod(0o755)
+
+
+def _verification_environment(fake_bin: Path, status: Path) -> dict[str, str]:
+    return os.environ | {
+        "BACKUP_STATUS_DIR": str(status),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "POSTGRES_DB": "app",
+        "POSTGRES_PASSWORD": "test-only",
+        "POSTGRES_USER": "test-only",
+        "RESTIC_PASSWORD": "test-only",
+        "RESTIC_REPOSITORY": "test-only",
+    }
+
+
 def test_backup_script_has_valid_bash_syntax() -> None:
     subprocess.run(
         ["bash", "-n", "profiles/immutable-backup/backup.sh"],
@@ -66,10 +110,15 @@ def test_backup_is_custom_format_and_validated_before_success() -> None:
 
 
 def test_verification_uses_and_removes_an_isolated_database() -> None:
+    creation = _operation("create_verification_database()", "verify_restore()")
     verification = _operation("verify_restore()", "list_snapshots()")
 
-    assert 'VERIFICATION_DB="backup_restore_verify_$$"' in verification
-    assert verification.index("createdb") < verification.index("pg_restore")
+    assert "/dev/urandom" in creation
+    assert 'candidate="backup_restore_verify_${suffix}"' in creation
+    assert "for attempt in 1 2 3 4 5" in creation
+    assert creation.index("createdb") < creation.index('VERIFICATION_DB="${candidate}"')
+    assert "$$" not in creation
+    assert verification.index("create_verification_database") < verification.index("pg_restore")
     assert verification.index("pg_restore") < verification.index(
         'command "SELECT current_database()"'
     )
@@ -78,6 +127,53 @@ def test_verification_uses_and_removes_an_isolated_database() -> None:
     )
     assert "dropdb" in verification
     assert "trap cleanup EXIT INT TERM" in verification
+
+
+def test_concurrent_verifications_use_distinct_database_safe_names(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    _fake_backup_commands(fake_bin)
+    processes = [
+        subprocess.Popen(
+            ["bash", "profiles/immutable-backup/backup.sh", "verify"],
+            cwd=_repository_root(),
+            env=_verification_environment(fake_bin, tmp_path / f"status-{index}"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for index in range(2)
+    ]
+    results = [process.communicate(timeout=10) for process in processes]
+    names = []
+    for process, (stdout, stderr) in zip(processes, results, strict=True):
+        assert process.returncode == 0, stderr
+        match = re.search(r"backup_restore_verify_[0-9a-f]{24}", stdout)
+        assert match is not None
+        names.append(match.group())
+
+    assert len(set(names)) == 2
+
+
+def test_verification_database_creation_retries_without_cleaning_collision(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    attempts = tmp_path / "attempts"
+    _fake_backup_commands(fake_bin)
+    environment = _verification_environment(fake_bin, tmp_path / "status")
+    environment["CREATE_ATTEMPT_FILE"] = str(attempts)
+
+    result = subprocess.run(
+        ["bash", "profiles/immutable-backup/backup.sh", "verify"],
+        cwd=_repository_root(),
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert attempts.read_text().strip() == "2"
 
 
 def test_restore_validates_download_before_replacing_database() -> None:
@@ -239,3 +335,15 @@ def test_non_root_storage_is_prepared_without_initializing_restic() -> None:
     assert "install -d" in initialization
     assert "restic init" not in initialization
     assert snapshots.index("backup-init") < snapshots.index("backup snapshots")
+
+
+def test_worker_uses_bounded_retry_interval_after_failure() -> None:
+    worker = _operation("watch()", 'case "${1:-watch}"')
+    success = worker.split("if backup_once && verify_restore; then", 1)[1].split("else", 1)[0]
+    failure = worker.split("else", 1)[1].split("\n      fi", 1)[0]
+
+    assert "BACKUP_RETRY_INTERVAL_SECONDS:-${inspection_interval}" in worker
+    assert 'retry_interval="${backup_interval}"' in worker
+    assert "now + backup_interval" in success
+    assert "now + retry_interval" in failure
+    assert 'sleep "${inspection_interval}"' in worker
