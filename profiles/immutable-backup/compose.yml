@@ -1,0 +1,43 @@
+services:
+  backup-init:
+    profiles: ["backup-init"]
+    image: "${BACKUP_IMAGE:?Set BACKUP_IMAGE through the profile Makefile}"
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        install -d -o ${BACKUP_RUNTIME_UID:-10001} -g ${BACKUP_RUNTIME_GID:-10001}
+        /backups ${BACKUP_STATUS_DIR:-/backup-status}
+    user: "0:0"
+    volumes:
+      - "${BACKUP_LOCAL_PATH:?Set BACKUP_LOCAL_PATH through the profile Makefile}:/backups"
+      - "backup_status:${BACKUP_STATUS_DIR:-/backup-status}"
+
+  backup:
+    image: "${BACKUP_IMAGE:?Set BACKUP_IMAGE through the profile Makefile}"
+    command: ["watch"]
+    environment:
+      BACKUP_FILENAME: "${BACKUP_FILENAME:-database.dump}"
+      BACKUP_HOST: "${BACKUP_HOST:-production}"
+      BACKUP_INSPECTION_INTERVAL_SECONDS: "${BACKUP_INSPECTION_INTERVAL_SECONDS:-900}"
+      BACKUP_INTERVAL_SECONDS: "${BACKUP_INTERVAL_SECONDS:-86400}"
+      BACKUP_KEEP_DAILY: "${BACKUP_KEEP_DAILY:-7}"
+      BACKUP_KEEP_MONTHLY: "${BACKUP_KEEP_MONTHLY:-6}"
+      BACKUP_KEEP_WEEKLY: "${BACKUP_KEEP_WEEKLY:-4}"
+      BACKUP_STATUS_DIR: "${BACKUP_STATUS_DIR:-/backup-status}"
+      BACKUP_TAG: "${BACKUP_TAG:-postgres}"
+      PGHOST: "${BACKUP_DATABASE_HOST:-db}"
+      POSTGRES_DB: "${POSTGRES_DB:-app}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-}"
+      POSTGRES_USER: "${POSTGRES_USER:-app}"
+      RESTIC_PASSWORD: "${BACKUP_PASSWORD:-}"
+      RESTIC_REPOSITORY: "${BACKUP_REPOSITORY:-/backups}"
+      RCLONE_CONFIG: "${BACKUP_RCLONE_CONFIG:-/config/rclone/rclone.conf}"
+    restart: unless-stopped
+    user: "${BACKUP_RUNTIME_UID:-10001}:${BACKUP_RUNTIME_GID:-10001}"
+    volumes:
+      - "${BACKUP_LOCAL_PATH:?Set BACKUP_LOCAL_PATH through the profile Makefile}:/backups"
+      - "${BACKUP_RCLONE_CONFIG_DIR:?Set BACKUP_RCLONE_CONFIG_DIR through the profile Makefile}:/config/rclone"
+      - "backup_status:${BACKUP_STATUS_DIR:-/backup-status}"
+
+volumes:
+  backup_status:
