@@ -8,6 +8,9 @@ BACKUP_RCLONE_IMAGE ?= $(BACKUP_RCLONE_SOURCE)@sha256:c61954aaa32328a5486715dd06
 BACKUP_IMAGE ?= local/$(PROJECT_NAME)-backup:$(shell git rev-parse HEAD)
 BACKUP_DOCKERFILE := profiles/immutable-backup/Dockerfile
 BACKUP_COMPOSE_FILE := profiles/immutable-backup/compose.yml
+BACKUP_EXERCISE_COMPOSE_FILE := profiles/immutable-backup/exercise.compose.yml
+BACKUP_EXERCISE_ROOT ?= $(CURDIR)/.tmp/immutable-backup-exercise
+BACKUP_EXERCISE_PROJECT ?= $(PROJECT_NAME)-backup-exercise
 BACKUP_DATABASE_SERVICE ?= db
 BACKUP_LOCAL_PATH ?= $(CURDIR)/deploy/backups
 BACKUP_RCLONE_CONFIG_DIR ?= $(CURDIR)/deploy/rclone
@@ -30,6 +33,15 @@ $(error The immutable-backup profile needs a production Compose contract for SCA
 endif
 
 BACKUP_RUN = $(BACKUP_COMPOSE) run --rm --no-deps $(BACKUP_SERVICE)
+BACKUP_EXERCISE_COMPOSE = COMPOSE_PROJECT_NAME=$(BACKUP_EXERCISE_PROJECT) \
+	BACKUP_IMAGE=$(BACKUP_IMAGE) BACKUP_LOCAL_PATH=$(BACKUP_EXERCISE_ROOT)/repository \
+	BACKUP_RCLONE_CONFIG_DIR=$(BACKUP_EXERCISE_ROOT)/rclone \
+	BACKUP_POSTGRES_IMAGE=$(BACKUP_POSTGRES_IMAGE) BACKUP_REPOSITORY=/backups \
+	BACKUP_PASSWORD=exercise-only POSTGRES_DB=backup_exercise \
+	POSTGRES_USER=backup_exercise POSTGRES_PASSWORD=exercise-only \
+	docker compose --project-directory . -f $(BACKUP_COMPOSE_FILE) \
+	-f $(BACKUP_EXERCISE_COMPOSE_FILE)
+BACKUP_EXERCISE_RUN = $(BACKUP_EXERCISE_COMPOSE) run --rm --no-deps $(BACKUP_SERVICE)
 
 .PHONY: backup-images-pull
 backup-images-pull: ## Pull the versioned backup component images used for dependency review
@@ -64,6 +76,41 @@ verify-backup-image: build-backup-image ## Verify the exact backup image tool an
 .PHONY: verify-backup-compose
 verify-backup-compose: ## Validate the application-neutral backup worker overlay
 	docker compose --project-directory . -f $(BACKUP_COMPOSE_FILE) config --quiet
+	$(BACKUP_EXERCISE_COMPOSE) config --quiet
+
+.PHONY: prepare-backup-exercise
+prepare-backup-exercise: build-backup-image
+	@mkdir -p $(BACKUP_EXERCISE_ROOT)/repository $(BACKUP_EXERCISE_ROOT)/rclone
+	$(BACKUP_EXERCISE_COMPOSE) down -v --remove-orphans
+	$(BACKUP_EXERCISE_COMPOSE) run --rm --no-deps backup-init
+	$(BACKUP_EXERCISE_COMPOSE) run --rm --no-deps --user 0:0 \
+		--entrypoint sh $(BACKUP_SERVICE) -c 'find /backups -mindepth 1 -delete'
+	$(BACKUP_EXERCISE_COMPOSE) up -d --wait $(BACKUP_DATABASE_SERVICE)
+
+.PHONY: exercise-backup-profile
+exercise-backup-profile: prepare-backup-exercise ## Run real backup and isolated restore verification against disposable PostgreSQL
+	$(BACKUP_EXERCISE_RUN) once
+	$(BACKUP_EXERCISE_RUN) verify
+	$(BACKUP_EXERCISE_RUN) snapshots
+	$(BACKUP_EXERCISE_COMPOSE) run --rm --no-deps --entrypoint sh \
+		$(BACKUP_SERVICE) -c 'test -s /backup-status/last-backup \
+		&& test -s /backup-status/last-restore-verification \
+		&& test "$$(PGPASSWORD="$${POSTGRES_PASSWORD}" psql \
+			--host db --username backup_exercise \
+			--dbname backup_exercise --tuples-only --no-align \
+			--command "SELECT count(*) FROM pg_database \
+			WHERE datname LIKE '\''backup_restore_verify_%'\''")" = 0'
+	$(MAKE) down-backup-exercise
+
+.PHONY: logs-backup-exercise
+logs-backup-exercise: ## Show disposable backup exercise logs
+	$(BACKUP_EXERCISE_COMPOSE) logs --tail=200
+
+.PHONY: down-backup-exercise
+down-backup-exercise: ## Remove only the disposable backup exercise data
+	$(BACKUP_EXERCISE_COMPOSE) run --rm --no-deps --user 0:0 \
+		--entrypoint sh $(BACKUP_SERVICE) -c 'find /backups -mindepth 1 -delete'
+	$(BACKUP_EXERCISE_COMPOSE) down -v --remove-orphans
 
 .PHONY: backup-image-versions
 backup-image-versions: build-backup-image ## Print the exact tools installed in the backup image
