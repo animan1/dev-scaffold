@@ -84,8 +84,8 @@ The following boundaries are configurable without changing the generic script:
 - snapshot identity: `BACKUP_HOST`, `BACKUP_TAG`, and `BACKUP_FILENAME`;
 - retention: `BACKUP_KEEP_DAILY`, `BACKUP_KEEP_WEEKLY`, and
   `BACKUP_KEEP_MONTHLY`;
-- scheduling: `BACKUP_INTERVAL_SECONDS` and
-  `BACKUP_INSPECTION_INTERVAL_SECONDS`;
+- scheduling: `BACKUP_INTERVAL_SECONDS`, `BACKUP_INSPECTION_INTERVAL_SECONDS`,
+  and `BACKUP_RETRY_INTERVAL_SECONDS`;
 - storage and status: `BACKUP_LOCAL_PATH`, `BACKUP_REPOSITORY`,
   `BACKUP_STATUS_DIR`, and `BACKUP_RCLONE_CONFIG_DIR`;
 - container identity: `BACKUP_RUNTIME_UID` and `BACKUP_RUNTIME_GID` (both
@@ -99,6 +99,20 @@ The following boundaries are configurable without changing the generic script:
 Start the selected production database first or let the Make targets do so.
 The host needs Docker and Make only; PostgreSQL, Restic, rclone, and Python all
 run in containers.
+
+Before connecting the profile to production, exercise the exact entrypoint
+against a disposable project-scoped PostgreSQL database and local Restic
+repository:
+
+```sh
+make SCAFFOLD_BACKUP_PROFILE=immutable-backup exercise-backup-profile
+```
+
+The exercise writes only below `.tmp/immutable-backup-exercise`, performs a
+real custom-format backup and isolated restore verification, checks both status
+markers and cleanup of the temporary database, lists the snapshot, and removes
+the disposable Compose volumes and repository contents. CI runs the same Make
+target.
 
 Each operation first runs a short root initialization container that grants the
 configured non-root runtime identity access to the repository and status mount.
@@ -135,6 +149,12 @@ that is still present in Restic. Repository failures record `unavailable`, so a
 stale success marker cannot hide deleted or unreadable recovery points. The
 project-scoped `backup_status` volume preserves both status markers during
 routine teardown.
+
+The normal backup interval advances only after both backup and restore
+verification succeed. A failure retries after `BACKUP_RETRY_INTERVAL_SECONDS`,
+which defaults to the inspection interval and is capped at the normal backup
+interval. All scheduling intervals must be positive integers, preventing a
+tight retry loop.
 
 Database restoration is destructive and requires the exact confirmation:
 
