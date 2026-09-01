@@ -32,6 +32,8 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "build",
         "up",
         "down",
+        "logs",
+        "ps",
         "reset",
         "deps.lock",
         "format",
@@ -70,6 +72,19 @@ def test_server_rendered_teardown_is_safe_and_reset_is_guarded() -> None:
     confirmed = _make("--dry-run", "reset", "CONFIRM_RESET=1").stdout
     assert "down -v --remove-orphans" in confirmed
     assert " up " not in confirmed
+
+
+def test_server_rendered_diagnostics_use_selected_compose_and_help() -> None:
+    help_output = _make("help").stdout
+    logs = _make("--dry-run", "logs").stdout
+    ps = _make("--dry-run", "ps").stdout
+
+    assert "logs" in help_output
+    assert "ps" in help_output
+    assert "profiles/server-rendered-django/compose.yml logs -f --tail=200" in logs
+    assert "COMPOSE_PROJECT_NAME=" in logs
+    assert "profiles/server-rendered-django/compose.yml ps" in ps
+    assert "COMPOSE_PROJECT_NAME=" in ps
 
 
 def test_server_rendered_precommit_is_a_recipe() -> None:
