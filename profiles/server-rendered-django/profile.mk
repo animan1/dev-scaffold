@@ -65,6 +65,14 @@ up: ## Start Django and PostgreSQL in full-Docker development
 down: ## Stop development services while preserving project volumes
 	$(COMPOSE) down --remove-orphans
 
+.PHONY: logs
+logs: ## Follow recent development service logs
+	$(COMPOSE) logs -f --tail=200
+
+.PHONY: ps
+ps: ## List development containers
+	$(COMPOSE) ps
+
 .PHONY: reset
 reset: ## Destructively remove development services and volumes; requires CONFIRM_RESET=1
 	@if [[ "$(CONFIRM_RESET)" != "1" ]]; then \
