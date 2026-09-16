@@ -99,8 +99,9 @@ prepare-backup-compose-contract:
 		> $(BACKUP_COMPOSE_CONTRACT_ENV_FILE)
 
 .PHONY: verify-backup-compose
-verify-backup-compose: prepare-backup-compose-contract ## Validate the resolved backup worker and monitor contract
-	@$(BACKUP_COMPOSE_CONTRACT) config --format json | jq -e \
+verify-backup-compose: build-backup-image prepare-backup-compose-contract ## Validate the resolved backup worker and monitor contract
+	@$(BACKUP_COMPOSE_CONTRACT) config --format json \
+		| docker run --rm -i --entrypoint jq $(BACKUP_IMAGE) -e \
 		--arg project '$(BACKUP_COMPOSE_CONTRACT_PROJECT)' \
 		'(.services.backup.volumes | map(select(.target == "/backup-status")) | first.source) as $$status | ($$status != null) and (.services.monitor.environment.BACKUP_STATUS_DIR == "/backup-status") and any(.services.monitor.volumes[]; .source == $$status and .target == "/backup-status" and .read_only == true) and (.volumes[$$status].name == ($$project + "_backup_status"))' >/dev/null
 	$(BACKUP_EXERCISE_COMPOSE) config --quiet

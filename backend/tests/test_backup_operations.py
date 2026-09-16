@@ -271,6 +271,7 @@ def test_resolved_compose_contract_shares_project_scoped_monitor_status() -> Non
     ).stdout
 
     assert "config --format json" in output
+    assert "docker run --rm -i --entrypoint jq" in output
     assert ".services.backup.volumes" in output
     assert ".services.monitor.volumes" in output
     assert "BACKUP_STATUS_DIR" in output
