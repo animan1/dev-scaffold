@@ -102,12 +102,7 @@ prepare-backup-compose-contract:
 verify-backup-compose: prepare-backup-compose-contract ## Validate the resolved backup worker and monitor contract
 	@$(BACKUP_COMPOSE_CONTRACT) config --format json | jq -e \
 		--arg project '$(BACKUP_COMPOSE_CONTRACT_PROJECT)' \
-		'(.services.backup.volumes | map(select(.target == "/backup-status")) | first.source) as $$status \
-		| ($$status != null) \
-		and (.services.monitor.environment.BACKUP_STATUS_DIR == "/backup-status") \
-		and any(.services.monitor.volumes[]; \
-			.source == $$status and .target == "/backup-status" and .read_only == true) \
-		and (.volumes[$$status].name == ($$project + "_backup_status"))' >/dev/null
+		'(.services.backup.volumes | map(select(.target == "/backup-status")) | first.source) as $$status | ($$status != null) and (.services.monitor.environment.BACKUP_STATUS_DIR == "/backup-status") and any(.services.monitor.volumes[]; .source == $$status and .target == "/backup-status" and .read_only == true) and (.volumes[$$status].name == ($$project + "_backup_status"))' >/dev/null
 	$(BACKUP_EXERCISE_COMPOSE) config --quiet
 
 .PHONY: prepare-backup-exercise
