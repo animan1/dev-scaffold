@@ -80,8 +80,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Verify resolved backup status wiring for both application profiles
+        run: |
+          make SCAFFOLD_PROFILE=react-vite SCAFFOLD_BACKUP_PROFILE=immutable-backup verify-backup-compose
+          make SCAFFOLD_PROFILE=server-rendered-django SCAFFOLD_BACKUP_PROFILE=immutable-backup verify-backup-compose
       - name: Verify the exact immutable backup image
         run: make SCAFFOLD_BACKUP_PROFILE=immutable-backup verify-backup-image
+      - name: Exercise backup and isolated restore verification end to end
+        run: make SCAFFOLD_BACKUP_PROFILE=immutable-backup exercise-backup-profile
+      - name: Show disposable backup exercise logs
+        if: failure()
+        run: make SCAFFOLD_BACKUP_PROFILE=immutable-backup logs-backup-exercise
+      - name: Remove disposable backup exercise
+        if: always()
+        run: make SCAFFOLD_BACKUP_PROFILE=immutable-backup down-backup-exercise
 
   immutable-release-gate:
     needs: [profile-selection, server-rendered-profile, backend]

@@ -22,6 +22,8 @@ SHELL := /bin/bash
 COMPOSE_DEV := docker compose -f deploy/docker-compose.dev.yml
 FRONTEND_DIR := frontend
 PROJECT_NAME ?= $(notdir $(CURDIR))
+COMPOSE_PROJECT_NAME ?= $(PROJECT_NAME)
+export COMPOSE_PROJECT_NAME
 HOST_INGRESS ?= 0
 MONITORING ?= 0
 HOST_INGRESS_HOST ?= app.example.test
