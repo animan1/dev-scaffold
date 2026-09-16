@@ -11,6 +11,8 @@ BACKUP_COMPOSE_FILE := profiles/immutable-backup/compose.yml
 BACKUP_EXERCISE_COMPOSE_FILE := profiles/immutable-backup/exercise.compose.yml
 BACKUP_EXERCISE_ROOT ?= $(CURDIR)/.tmp/immutable-backup-exercise
 BACKUP_EXERCISE_PROJECT ?= $(PROJECT_NAME)-backup-exercise
+BACKUP_COMPOSE_CONTRACT_PROJECT ?= $(PROJECT_NAME)-backup-contract
+BACKUP_COMPOSE_CONTRACT_ENV_FILE ?= $(CURDIR)/.tmp/immutable-backup-compose.env
 BACKUP_DATABASE_SERVICE ?= db
 BACKUP_LOCAL_PATH ?= $(CURDIR)/deploy/backups
 BACKUP_RCLONE_CONFIG_DIR ?= $(CURDIR)/deploy/rclone
@@ -23,14 +25,27 @@ export BACKUP_IMAGE BACKUP_LOCAL_PATH BACKUP_RCLONE_CONFIG_DIR
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 PROD_COMPOSE_FILES += -f $(BACKUP_COMPOSE_FILE)
 BACKUP_COMPOSE = $(COMPOSE_PROD)
+BACKUP_COMPOSE_CONTRACT_FILES = -f deploy/docker-compose.prod.yml -f $(BACKUP_COMPOSE_FILE)
+BACKUP_COMPOSE_CONTRACT_PROJECT_DIRECTORY =
 BACKUP_WRITER_SERVICES ?= backend monitor backup
 else ifeq ($(SCAFFOLD_PROFILE),server-rendered-django)
 RELEASE_COMPOSE_FILES += -f $(BACKUP_COMPOSE_FILE)
 BACKUP_COMPOSE = $(COMPOSE_RELEASE)
+BACKUP_COMPOSE_CONTRACT_FILES = -f $(RELEASE_COMPOSE_FILE) -f $(BACKUP_COMPOSE_FILE)
+BACKUP_COMPOSE_CONTRACT_PROJECT_DIRECTORY = --project-directory .
 BACKUP_WRITER_SERVICES ?= app monitor backup
 else
 $(error The immutable-backup profile needs a production Compose contract for SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE))
 endif
+
+BACKUP_COMPOSE_CONTRACT = COMPOSE_PROJECT_NAME=$(BACKUP_COMPOSE_CONTRACT_PROJECT) \
+	PROD_ENV_FILE=$(BACKUP_COMPOSE_CONTRACT_ENV_FILE) \
+	RELEASE_BACKEND_IMAGE=local/backup-contract-backend:test \
+	RELEASE_WEB_IMAGE=local/backup-contract-web:test \
+	BACKUP_IMAGE=local/backup-contract:test \
+	docker compose $(BACKUP_COMPOSE_CONTRACT_PROJECT_DIRECTORY) \
+	$(BACKUP_COMPOSE_CONTRACT_FILES) --env-file $(BACKUP_COMPOSE_CONTRACT_ENV_FILE) \
+	--profile monitoring
 
 BACKUP_RUN = $(BACKUP_COMPOSE) run --rm --no-deps $(BACKUP_SERVICE)
 BACKUP_EXERCISE_COMPOSE = COMPOSE_PROJECT_NAME=$(BACKUP_EXERCISE_PROJECT) \
@@ -73,9 +88,26 @@ verify-backup-image: build-backup-image ## Verify the exact backup image tool an
 		&& test -x /usr/local/bin/scaffold-backup \
 		&& test -s /etc/ssl/certs/ca-certificates.crt'
 
+.PHONY: prepare-backup-compose-contract
+prepare-backup-compose-contract:
+	@mkdir -p $(dir $(BACKUP_COMPOSE_CONTRACT_ENV_FILE))
+	@printf '%s\n' \
+		'DJANGO_SECRET_KEY=backup-compose-contract-only' \
+		'POSTGRES_DB=app' \
+		'POSTGRES_PASSWORD=backup-compose-contract-only' \
+		'POSTGRES_USER=app' \
+		> $(BACKUP_COMPOSE_CONTRACT_ENV_FILE)
+
 .PHONY: verify-backup-compose
-verify-backup-compose: ## Validate the application-neutral backup worker overlay
-	docker compose --project-directory . -f $(BACKUP_COMPOSE_FILE) config --quiet
+verify-backup-compose: prepare-backup-compose-contract ## Validate the resolved backup worker and monitor contract
+	@$(BACKUP_COMPOSE_CONTRACT) config --format json | jq -e \
+		--arg project '$(BACKUP_COMPOSE_CONTRACT_PROJECT)' \
+		'(.services.backup.volumes | map(select(.target == "/backup-status")) | first.source) as $$status \
+		| ($$status != null) \
+		and (.services.monitor.environment.BACKUP_STATUS_DIR == "/backup-status") \
+		and any(.services.monitor.volumes[]; \
+			.source == $$status and .target == "/backup-status" and .read_only == true) \
+		and (.volumes[$$status].name == ($$project + "_backup_status"))' >/dev/null
 	$(BACKUP_EXERCISE_COMPOSE) config --quiet
 
 .PHONY: prepare-backup-exercise
