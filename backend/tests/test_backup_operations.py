@@ -263,6 +263,21 @@ def test_active_make_targets_dispatch_through_selected_backup_container() -> Non
         assert "backup snapshots" in snapshots
 
 
+def test_resolved_compose_contract_shares_project_scoped_monitor_status() -> None:
+    output = _make(
+        "SCAFFOLD_PROFILE=server-rendered-django",
+        "SCAFFOLD_BACKUP_PROFILE=immutable-backup",
+        "verify-backup-compose",
+    ).stdout
+
+    assert "config --format json" in output
+    assert "docker run --rm -i --entrypoint jq" in output
+    assert ".services.backup.volumes" in output
+    assert ".services.monitor.volumes" in output
+    assert "BACKUP_STATUS_DIR" in output
+    assert '$project + "_backup_status"' in output
+
+
 def test_restore_stops_configured_writers_before_destructive_container() -> None:
     output = _make(
         "SCAFFOLD_BACKUP_PROFILE=immutable-backup",

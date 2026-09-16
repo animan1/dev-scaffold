@@ -39,5 +39,12 @@ services:
       - "${BACKUP_RCLONE_CONFIG_DIR:?Set BACKUP_RCLONE_CONFIG_DIR through the profile Makefile}:/config/rclone"
       - "backup_status:${BACKUP_STATUS_DIR:-/backup-status}"
 
+  monitor:
+    profiles: ["monitoring"]
+    environment:
+      BACKUP_STATUS_DIR: /backup-status
+    volumes:
+      - "backup_status:/backup-status:ro"
+
 volumes:
   backup_status:

@@ -18,5 +18,8 @@ services:
       db:
         condition: service_healthy
 
+  monitor:
+    image: "${BACKUP_IMAGE:?Set BACKUP_IMAGE through the profile Makefile}"
+
 volumes:
   exercise_postgres:
