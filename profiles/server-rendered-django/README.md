@@ -69,6 +69,24 @@ that replaces the local media volume with object storage owns that explicit
 adaptation and its credentials; no object-storage or host-proxy credentials
 belong in the generic scaffold web image.
 
+### Exercise the production topology locally
+
+In the multi-profile scaffold repository, use the profile-local wrapper so the
+React/Vite default selection remains unchanged:
+
+```sh
+profiles/server-rendered-django/prod-sim up
+profiles/server-rendered-django/prod-sim down
+```
+
+`up` builds local backend and Nginx images, initializes an isolated
+`<project>-prod-sim` database and static volume, and starts the production-shaped
+origin without a published release manifest. `down` stops that stack while
+preserving its database, static, and media volumes. In a downstream repository
+that selects this profile, the equivalent commands are `make up-prod` and
+`make down-prod`. Digest-pinned deployment remains the separate
+`make deploy-release` operation.
+
 ## Select the profile
 
 Edit `.scaffold-profile`:

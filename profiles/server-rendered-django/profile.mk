@@ -25,6 +25,8 @@ RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
 RELEASE_HTTP_PORT ?= 18080
 PROD_ENV_FILE ?= deploy/.env.prod
 RELEASE_CI_ENV_FILE ?= .tmp/server-rendered-release-ci.env
+PROD_SIM_COMPOSE_PROJECT ?= $(PROJECT_NAME)-prod-sim
+PROD_SIM_ENV_FILE ?= .tmp/server-rendered-prod-sim.env
 RELEASE_COMPOSE_FILE := profiles/server-rendered-django/release.compose.yml
 RELEASE_COMPOSE_FILES := -f $(RELEASE_COMPOSE_FILE)
 COMPOSE_RELEASE = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
@@ -33,6 +35,9 @@ COMPOSE_RELEASE = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(RELEASE_CI_ENV_FILE) docker compose --project-directory . \
 	-f $(RELEASE_COMPOSE_FILE) --env-file $(RELEASE_CI_ENV_FILE)
+COMPOSE_PROD_SIM = COMPOSE_PROJECT_NAME=$(PROD_SIM_COMPOSE_PROJECT) \
+	PROD_ENV_FILE=$(PROD_SIM_ENV_FILE) docker compose --project-directory . \
+	-f $(RELEASE_COMPOSE_FILE) --env-file $(PROD_SIM_ENV_FILE)
 RUN_RELEASE = $(COMPOSE_RELEASE) run --rm --no-deps app
 RUN_RELEASE_CI = $(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) run --rm --no-deps app
 LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
@@ -269,6 +274,19 @@ initialize-release: ## Initialize the database and static volume with recorded i
 .PHONY: deploy-release
 deploy-release: initialize-release ## Deploy the digest-pinned server-rendered image set
 	$(COMPOSE_RELEASE) up -d --no-build app web
+
+.PHONY: up-prod
+up-prod: build-release-images ## Build and start an isolated production-shaped local stack
+	$(MAKE) initialize-release-ci \
+		RELEASE_COMPOSE_PROJECT=$(PROD_SIM_COMPOSE_PROJECT) \
+		RELEASE_CI_ENV_FILE=$(PROD_SIM_ENV_FILE)
+	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_PROD_SIM) up -d --no-build app web
+
+.PHONY: down-prod
+down-prod: ## Stop the local production simulation while preserving volumes
+	@if [[ -f $(PROD_SIM_ENV_FILE) ]]; then \
+		$(LOCAL_RELEASE_IMAGES) $(COMPOSE_PROD_SIM) down --remove-orphans; \
+	fi
 
 .PHONY: rollback-release
 rollback-release: ## Deploy a previously recorded release manifest
