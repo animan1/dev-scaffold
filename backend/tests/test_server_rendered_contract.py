@@ -46,6 +46,7 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "precommit",
         "build-production",
         "up-prod",
+        "smoke-prod",
         "down-prod",
         "smoke",
     ):
@@ -101,22 +102,63 @@ def test_server_rendered_up_prod_uses_isolated_production_simulation() -> None:
 
     assert "profiles/server-rendered-django/backend.Dockerfile" in output
     assert "profiles/server-rendered-django/release-nginx.Dockerfile" in output
+    assert "profiles/server-rendered-django/prod-sim-ingress.Dockerfile" in output
+    assert "profiles/server-rendered-django/prod-sim.compose.yml" in output
     assert f"COMPOSE_PROJECT_NAME={project_name}-prod-sim" in output
     assert "server-rendered-prod-sim.env" in output
-    assert "DJANGO_SECURE_SSL_REDIRECT=false" in output
+    assert "DJANGO_SECURE_SSL_REDIRECT" not in output
     assert "pull app web" not in output
     assert "Set RELEASE_FILE" not in output
     database_start = output.index("up -d --no-build db")
     production_check = output.index("python -m app.manage check --deploy")
     migration = output.index("python -m app.manage migrate")
     static_collection = output.index("python -m app.manage collectstatic --noinput --clear")
-    application_start = output.index("up -d --no-build app web")
+    application_start = output.index("app web prod-sim-ingress")
     assert database_start < production_check < migration < static_collection < application_start
 
     down = _make("--dry-run", "down-prod").stdout
     assert f"COMPOSE_PROJECT_NAME={project_name}-prod-sim" in down
     assert "down --remove-orphans" in down
     assert "down -v" not in down
+
+
+def test_server_rendered_prod_sim_uses_local_tls_ingress() -> None:
+    root = _repository_root()
+    overlay = (root / "profiles/server-rendered-django/prod-sim.compose.yml").read_text()
+    ingress = (root / "profiles/server-rendered-django/prod-sim-ingress.conf.template").read_text()
+    release = (root / "profiles/server-rendered-django/release.compose.yml").read_text()
+    smoke = _make("--dry-run", "smoke-prod").stdout
+
+    assert "ports: !override []" in overlay
+    assert "127.0.0.1:${PROD_SIM_HTTP_PORT:-18081}:80" in overlay
+    assert "127.0.0.1:${PROD_SIM_HTTPS_PORT:-18444}:443" in overlay
+    assert "prod-sim-ingress" not in release
+    assert "return 308 https://$host:${PROD_SIM_HTTPS_PORT}$request_uri" in ingress
+    assert "proxy_pass http://web:8080" in ingress
+    assert "proxy_set_header Host $http_host" in ingress
+    assert "proxy_set_header X-Forwarded-Proto https" in ingress
+    assert "http://127.0.0.1:18081/" in smoke
+    assert "https://127.0.0.1:18444/" in smoke
+    assert "/admin/login/\\?next=/admin/" in smoke
+    assert "set-cookie: csrftoken=.*; secure" in smoke
+
+
+def test_server_rendered_production_security_fails_closed() -> None:
+    settings = (_repository_root() / "backend/src/app/project/settings/prod.py").read_text()
+
+    assert "SECURE_SSL_REDIRECT = True" in settings
+    assert "SESSION_COOKIE_SECURE = True" in settings
+    assert "CSRF_COOKIE_SECURE = True" in settings
+    assert 'env.bool("DJANGO_SECURE_SSL_REDIRECT"' not in settings
+    assert 'env.bool("DJANGO_SESSION_COOKIE_SECURE"' not in settings
+    assert 'env.bool("DJANGO_CSRF_COOKIE_SECURE"' not in settings
+
+
+def test_server_rendered_profile_exposes_django_admin() -> None:
+    urls = (_repository_root() / "backend/src/app/project/urls.py").read_text()
+
+    assert "from django.contrib import admin" in urls
+    assert 'path("admin/", admin.site.urls)' in urls
 
 
 def test_server_rendered_prod_sim_wrapper_selects_the_profile() -> None:
@@ -135,6 +177,16 @@ def test_server_rendered_prod_sim_wrapper_selects_the_profile() -> None:
     assert "profiles/server-rendered-django/backend.Dockerfile" in output
     assert f"COMPOSE_PROJECT_NAME={project_name}-prod-sim" in output
     assert "deploy/docker-compose.prod.yml" not in output
+
+    smoke = subprocess.run(
+        [script, "smoke", "--dry-run"],
+        cwd=_repository_root(),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "http://127.0.0.1:18081/" in smoke
+    assert "https://127.0.0.1:18444/" in smoke
 
 
 def test_server_rendered_dependency_lock_uses_pinned_dockerized_uv() -> None:
