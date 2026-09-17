@@ -97,10 +97,11 @@ def test_server_rendered_precommit_is_a_recipe() -> None:
 
 def test_server_rendered_up_prod_uses_isolated_production_simulation() -> None:
     output = _make("--dry-run", "up-prod").stdout
+    project_name = _repository_root().name
 
     assert "profiles/server-rendered-django/backend.Dockerfile" in output
     assert "profiles/server-rendered-django/release-nginx.Dockerfile" in output
-    assert "COMPOSE_PROJECT_NAME=dev-scaffold-prod-sim" in output
+    assert f"COMPOSE_PROJECT_NAME={project_name}-prod-sim" in output
     assert "server-rendered-prod-sim.env" in output
     assert "DJANGO_SECURE_SSL_REDIRECT=false" in output
     assert "pull app web" not in output
@@ -113,13 +114,14 @@ def test_server_rendered_up_prod_uses_isolated_production_simulation() -> None:
     assert database_start < production_check < migration < static_collection < application_start
 
     down = _make("--dry-run", "down-prod").stdout
-    assert "COMPOSE_PROJECT_NAME=dev-scaffold-prod-sim" in down
+    assert f"COMPOSE_PROJECT_NAME={project_name}-prod-sim" in down
     assert "down --remove-orphans" in down
     assert "down -v" not in down
 
 
 def test_server_rendered_prod_sim_wrapper_selects_the_profile() -> None:
     script = _repository_root() / "profiles/server-rendered-django/prod-sim"
+    project_name = _repository_root().name
 
     assert os.access(script, os.X_OK)
     output = subprocess.run(
@@ -131,7 +133,7 @@ def test_server_rendered_prod_sim_wrapper_selects_the_profile() -> None:
     ).stdout
 
     assert "profiles/server-rendered-django/backend.Dockerfile" in output
-    assert "COMPOSE_PROJECT_NAME=dev-scaffold-prod-sim" in output
+    assert f"COMPOSE_PROJECT_NAME={project_name}-prod-sim" in output
     assert "deploy/docker-compose.prod.yml" not in output
 
 
