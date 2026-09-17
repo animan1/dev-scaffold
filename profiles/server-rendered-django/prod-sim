@@ -6,13 +6,13 @@ repository_root=$(CDPATH= cd -- "${profile_dir}/../.." && pwd)
 action=${1:-}
 
 case "${action}" in
-  up | down)
+  up | smoke | down)
     shift
     exec make --no-print-directory --directory="${repository_root}" \
       SCAFFOLD_PROFILE=server-rendered-django "${action}-prod" "$@"
     ;;
   *)
-    echo "Usage: profiles/server-rendered-django/prod-sim {up|down} [make arguments...]" >&2
+    echo "Usage: profiles/server-rendered-django/prod-sim {up|smoke|down} [make arguments...]" >&2
     exit 2
     ;;
 esac

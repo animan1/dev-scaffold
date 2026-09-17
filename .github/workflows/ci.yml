@@ -43,13 +43,16 @@ jobs:
           DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
         run: make verify
 
+      - name: Exercise the local production ingress simulation
+        run: make up-prod smoke-prod
+
       - name: Exercise the server-rendered immutable-release contract
         if: needs.profile-selection.outputs.selected-profile != 'server-rendered-django'
         run: make build-release-images verify-release-images
 
       - name: Stop profile services without deleting volumes
         if: always()
-        run: make down down-release-ci
+        run: make down down-release-ci down-prod
 
   backend:
     needs: profile-selection

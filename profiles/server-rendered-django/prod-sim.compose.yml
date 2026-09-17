@@ -1,0 +1,15 @@
+services:
+  web:
+    ports: !override []
+
+  prod-sim-ingress:
+    image: "${PROD_SIM_INGRESS_IMAGE:?Set PROD_SIM_INGRESS_IMAGE through the profile Makefile}"
+    depends_on:
+      web:
+        condition: service_started
+    environment:
+      PROD_SIM_HTTPS_PORT: "${PROD_SIM_HTTPS_PORT:-18444}"
+    ports:
+      - "127.0.0.1:${PROD_SIM_HTTP_PORT:-18081}:80"
+      - "127.0.0.1:${PROD_SIM_HTTPS_PORT:-18444}:443"
+    restart: unless-stopped

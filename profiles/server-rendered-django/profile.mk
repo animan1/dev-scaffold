@@ -25,9 +25,12 @@ RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
 RELEASE_HTTP_PORT ?= 18080
 PROD_ENV_FILE ?= deploy/.env.prod
 RELEASE_CI_ENV_FILE ?= .tmp/server-rendered-release-ci.env
-RELEASE_CI_SECURE_SSL_REDIRECT ?= true
 PROD_SIM_COMPOSE_PROJECT ?= $(PROJECT_NAME)-prod-sim
 PROD_SIM_ENV_FILE ?= .tmp/server-rendered-prod-sim.env
+PROD_SIM_HTTP_PORT ?= 18081
+PROD_SIM_HTTPS_PORT ?= 18444
+PROD_SIM_INGRESS_IMAGE ?= local/$(PROJECT_NAME)-prod-sim-ingress:test
+PROD_SIM_COMPOSE_FILE := profiles/server-rendered-django/prod-sim.compose.yml
 RELEASE_COMPOSE_FILE := profiles/server-rendered-django/release.compose.yml
 RELEASE_COMPOSE_FILES := -f $(RELEASE_COMPOSE_FILE)
 COMPOSE_RELEASE = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
@@ -37,8 +40,11 @@ COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(RELEASE_CI_ENV_FILE) docker compose --project-directory . \
 	-f $(RELEASE_COMPOSE_FILE) --env-file $(RELEASE_CI_ENV_FILE)
 COMPOSE_PROD_SIM = COMPOSE_PROJECT_NAME=$(PROD_SIM_COMPOSE_PROJECT) \
-	PROD_ENV_FILE=$(PROD_SIM_ENV_FILE) docker compose --project-directory . \
-	-f $(RELEASE_COMPOSE_FILE) --env-file $(PROD_SIM_ENV_FILE)
+	PROD_ENV_FILE=$(PROD_SIM_ENV_FILE) PROD_SIM_HTTP_PORT=$(PROD_SIM_HTTP_PORT) \
+	PROD_SIM_HTTPS_PORT=$(PROD_SIM_HTTPS_PORT) \
+	PROD_SIM_INGRESS_IMAGE=$(PROD_SIM_INGRESS_IMAGE) \
+	docker compose --project-directory . -f $(RELEASE_COMPOSE_FILE) \
+	-f $(PROD_SIM_COMPOSE_FILE) --env-file $(PROD_SIM_ENV_FILE)
 RUN_RELEASE = $(COMPOSE_RELEASE) run --rm --no-deps app
 RUN_RELEASE_CI = $(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) run --rm --no-deps app
 LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
@@ -186,7 +192,6 @@ prepare-release-ci: ## Prepare isolated, non-secret server-rendered release conf
 		'DJANGO_SECRET_KEY=release-ci-only-abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ' \
 		'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1' \
 		'DJANGO_CSRF_TRUSTED_ORIGINS=https://localhost' \
-		'DJANGO_SECURE_SSL_REDIRECT=$(RELEASE_CI_SECURE_SSL_REDIRECT)' \
 		'POSTGRES_USER=app' \
 		'POSTGRES_PASSWORD=release-ci-only' \
 		'POSTGRES_DB=app' \
@@ -278,12 +283,41 @@ deploy-release: initialize-release ## Deploy the digest-pinned server-rendered i
 	$(COMPOSE_RELEASE) up -d --no-build app web
 
 .PHONY: up-prod
-up-prod: build-release-images ## Build and start an isolated production-shaped local stack
+up-prod: build-release-images build-prod-sim-ingress ## Build and start an isolated production-shaped local stack
 	$(MAKE) initialize-release-ci \
 		RELEASE_COMPOSE_PROJECT=$(PROD_SIM_COMPOSE_PROJECT) \
-		RELEASE_CI_ENV_FILE=$(PROD_SIM_ENV_FILE) \
-		RELEASE_CI_SECURE_SSL_REDIRECT=false
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_PROD_SIM) up -d --no-build app web
+		RELEASE_CI_ENV_FILE=$(PROD_SIM_ENV_FILE)
+	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_PROD_SIM) up -d --no-build \
+		app web prod-sim-ingress
+
+.PHONY: build-prod-sim-ingress
+build-prod-sim-ingress: ## Build the local-only TLS ingress image
+	docker build -f profiles/server-rendered-django/prod-sim-ingress.Dockerfile \
+		-t $(PROD_SIM_INGRESS_IMAGE) .
+
+.PHONY: smoke-prod
+smoke-prod: ## Verify local HTTP redirect, HTTPS customer/admin routes, and secure cookies
+	@for attempt in $$(seq 1 60); do \
+		if curl -kfsS -H 'Host: localhost' \
+			'https://127.0.0.1:$(PROD_SIM_HTTPS_PORT)/api/healthz' >/dev/null; then \
+			break; \
+		fi; \
+		if [[ "$$attempt" = "60" ]]; then \
+			echo 'Production simulation ingress did not become ready'; exit 1; \
+		fi; \
+		sleep 1; \
+	done
+	@curl -fsSI -H 'Host: localhost' \
+		'http://127.0.0.1:$(PROD_SIM_HTTP_PORT)/' \
+		| grep -Eiq '^location: https://localhost:$(PROD_SIM_HTTPS_PORT)/'
+	curl -kfsS -H 'Host: localhost' \
+		'https://127.0.0.1:$(PROD_SIM_HTTPS_PORT)/' | grep -q '<main'
+	curl -kfsS -D - -o /dev/null -H 'Host: localhost' \
+		'https://127.0.0.1:$(PROD_SIM_HTTPS_PORT)/admin/' \
+		| grep -Eiq '^location: /admin/login/\?next=/admin/'
+	curl -kfsS -D - -o /dev/null -H 'Host: localhost' \
+		'https://127.0.0.1:$(PROD_SIM_HTTPS_PORT)/admin/login/' \
+		| grep -Eiq '^set-cookie: csrftoken=.*; secure(;|[[:space:]]*$$)'
 
 .PHONY: down-prod
 down-prod: ## Stop the local production simulation while preserving volumes
