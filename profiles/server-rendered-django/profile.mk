@@ -25,6 +25,7 @@ RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
 RELEASE_HTTP_PORT ?= 18080
 PROD_ENV_FILE ?= deploy/.env.prod
 RELEASE_CI_ENV_FILE ?= .tmp/server-rendered-release-ci.env
+RELEASE_CI_SECURE_SSL_REDIRECT ?= true
 PROD_SIM_COMPOSE_PROJECT ?= $(PROJECT_NAME)-prod-sim
 PROD_SIM_ENV_FILE ?= .tmp/server-rendered-prod-sim.env
 RELEASE_COMPOSE_FILE := profiles/server-rendered-django/release.compose.yml
@@ -185,6 +186,7 @@ prepare-release-ci: ## Prepare isolated, non-secret server-rendered release conf
 		'DJANGO_SECRET_KEY=release-ci-only-abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ' \
 		'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1' \
 		'DJANGO_CSRF_TRUSTED_ORIGINS=https://localhost' \
+		'DJANGO_SECURE_SSL_REDIRECT=$(RELEASE_CI_SECURE_SSL_REDIRECT)' \
 		'POSTGRES_USER=app' \
 		'POSTGRES_PASSWORD=release-ci-only' \
 		'POSTGRES_DB=app' \
@@ -279,7 +281,8 @@ deploy-release: initialize-release ## Deploy the digest-pinned server-rendered i
 up-prod: build-release-images ## Build and start an isolated production-shaped local stack
 	$(MAKE) initialize-release-ci \
 		RELEASE_COMPOSE_PROJECT=$(PROD_SIM_COMPOSE_PROJECT) \
-		RELEASE_CI_ENV_FILE=$(PROD_SIM_ENV_FILE)
+		RELEASE_CI_ENV_FILE=$(PROD_SIM_ENV_FILE) \
+		RELEASE_CI_SECURE_SSL_REDIRECT=false
 	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_PROD_SIM) up -d --no-build app web
 
 .PHONY: down-prod

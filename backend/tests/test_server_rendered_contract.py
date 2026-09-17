@@ -102,6 +102,7 @@ def test_server_rendered_up_prod_uses_isolated_production_simulation() -> None:
     assert "profiles/server-rendered-django/release-nginx.Dockerfile" in output
     assert "COMPOSE_PROJECT_NAME=dev-scaffold-prod-sim" in output
     assert "server-rendered-prod-sim.env" in output
+    assert "DJANGO_SECURE_SSL_REDIRECT=false" in output
     assert "pull app web" not in output
     assert "Set RELEASE_FILE" not in output
     database_start = output.index("up -d --no-build db")
