@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.conf import settings
+from django.contrib import admin
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import path
 
@@ -24,5 +25,6 @@ def home(_request: HttpRequest) -> HttpResponse:
 
 urlpatterns = [
     path("", home, name="home"),
+    path("admin/", admin.site.urls),
     path("api/healthz", health, name="health"),
 ]

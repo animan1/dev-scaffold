@@ -76,15 +76,25 @@ React/Vite default selection remains unchanged:
 
 ```sh
 profiles/server-rendered-django/prod-sim up
+profiles/server-rendered-django/prod-sim smoke
 profiles/server-rendered-django/prod-sim down
 ```
 
 `up` builds local backend and Nginx images, initializes an isolated
 `<project>-prod-sim` database and static volume, and starts the production-shaped
-origin without a published release manifest. `down` stops that stack while
-preserving its database, static, and media volumes. In a downstream repository
-that selects this profile, the equivalent commands are `make up-prod` and
-`make down-prod`. Digest-pinned deployment remains the separate
+origin behind a local-only TLS ingress without a published release manifest.
+The private application origin is not exposed to the host. HTTP at
+`http://localhost:18081` redirects to HTTPS at `https://localhost:18444`; the
+locally generated certificate causes the expected browser warning. `smoke`
+accepts that test certificate and verifies the redirect, customer page, admin
+redirect, and secure CSRF cookie. `down` stops the stack while preserving its
+database, static, and media volumes. Override `PROD_SIM_HTTP_PORT` and
+`PROD_SIM_HTTPS_PORT` when those loopback ports are occupied.
+
+In a downstream repository that selects this profile, the equivalent commands
+are `make up-prod`, `make smoke-prod`, and `make down-prod`. The local ingress is
+test infrastructure in `prod-sim.compose.yml`; it is not part of the deployable
+application topology. Digest-pinned deployment remains the separate
 `make deploy-release` operation.
 
 ## Select the profile
