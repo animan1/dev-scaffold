@@ -45,6 +45,8 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "verify",
         "precommit",
         "build-production",
+        "up-prod",
+        "down-prod",
         "smoke",
     ):
         assert f"\n{target}:" in makefile
@@ -91,6 +93,48 @@ def test_server_rendered_precommit_is_a_recipe() -> None:
     output = _make("--dry-run", "precommit").stdout
     assert "pre-commit run" in output
     assert "--all-files" in output
+
+
+def test_server_rendered_up_prod_uses_isolated_production_simulation() -> None:
+    output = _make("--dry-run", "up-prod").stdout
+    project_name = _repository_root().name
+
+    assert "profiles/server-rendered-django/backend.Dockerfile" in output
+    assert "profiles/server-rendered-django/release-nginx.Dockerfile" in output
+    assert f"COMPOSE_PROJECT_NAME={project_name}-prod-sim" in output
+    assert "server-rendered-prod-sim.env" in output
+    assert "DJANGO_SECURE_SSL_REDIRECT=false" in output
+    assert "pull app web" not in output
+    assert "Set RELEASE_FILE" not in output
+    database_start = output.index("up -d --no-build db")
+    production_check = output.index("python -m app.manage check --deploy")
+    migration = output.index("python -m app.manage migrate")
+    static_collection = output.index("python -m app.manage collectstatic --noinput --clear")
+    application_start = output.index("up -d --no-build app web")
+    assert database_start < production_check < migration < static_collection < application_start
+
+    down = _make("--dry-run", "down-prod").stdout
+    assert f"COMPOSE_PROJECT_NAME={project_name}-prod-sim" in down
+    assert "down --remove-orphans" in down
+    assert "down -v" not in down
+
+
+def test_server_rendered_prod_sim_wrapper_selects_the_profile() -> None:
+    script = _repository_root() / "profiles/server-rendered-django/prod-sim"
+    project_name = _repository_root().name
+
+    assert os.access(script, os.X_OK)
+    output = subprocess.run(
+        [script, "up", "--dry-run"],
+        cwd=_repository_root(),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+    assert "profiles/server-rendered-django/backend.Dockerfile" in output
+    assert f"COMPOSE_PROJECT_NAME={project_name}-prod-sim" in output
+    assert "deploy/docker-compose.prod.yml" not in output
 
 
 def test_server_rendered_dependency_lock_uses_pinned_dockerized_uv() -> None:
