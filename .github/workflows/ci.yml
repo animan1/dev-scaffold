@@ -134,6 +134,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Detect artifact attestation support
+        id: provenance
+        shell: bash
+        run: |
+          supported="$(scripts/release-attestation-support \
+            --visibility '${{ github.event.repository.visibility }}' \
+            --owner-type '${{ github.event.repository.owner.type }}')"
+          echo "supported=${supported}" >> "$GITHUB_OUTPUT"
+
       - name: Configure project-owned release packages
         shell: bash
         run: |
@@ -200,27 +209,7 @@ jobs:
           echo "web_name=${web%@*}" >> "$GITHUB_OUTPUT"
           echo "web_digest=${web#*@}" >> "$GITHUB_OUTPUT"
 
-      - name: Attest backend SBOM
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/attest@v4
-        with:
-          subject-name: ${{ steps.release.outputs.backend_name }}
-          subject-digest: ${{ steps.release.outputs.backend_digest }}
-          sbom-path: ${{ env.RELEASE_BACKEND_SBOM }}
-          push-to-registry: true
-          create-storage-record: false
-
-      - name: Attest web SBOM
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/attest@v4
-        with:
-          subject-name: ${{ steps.release.outputs.web_name }}
-          subject-digest: ${{ steps.release.outputs.web_digest }}
-          sbom-path: ${{ env.RELEASE_WEB_SBOM }}
-          push-to-registry: true
-          create-storage-record: false
-
-      - name: Publish digest-pinned release manifest
+      - name: Publish digest-pinned release manifest and SBOMs
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
@@ -231,3 +220,38 @@ jobs:
             ${{ env.RELEASE_WEB_SBOM }}
           if-no-files-found: error
           retention-days: 90
+
+      - name: Report reduced provenance fallback
+        if: >-
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main' &&
+          steps.provenance.outputs.supported != 'true'
+        run: >-
+          echo '::warning title=Artifact attestations unavailable::The release manifest
+          and SPDX SBOMs were published without GitHub artifact attestations.'
+
+      - name: Attest backend SBOM
+        if: >-
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main' &&
+          steps.provenance.outputs.supported == 'true'
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ steps.release.outputs.backend_name }}
+          subject-digest: ${{ steps.release.outputs.backend_digest }}
+          sbom-path: ${{ env.RELEASE_BACKEND_SBOM }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Attest web SBOM
+        if: >-
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main' &&
+          steps.provenance.outputs.supported == 'true'
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ steps.release.outputs.web_name }}
+          subject-digest: ${{ steps.release.outputs.web_digest }}
+          sbom-path: ${{ env.RELEASE_WEB_SBOM }}
+          push-to-registry: true
+          create-storage-record: false
