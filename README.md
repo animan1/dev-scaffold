@@ -88,12 +88,31 @@ production topology:
   files, and serves uploaded media from a persistent volume mounted read-only.
 
 CI verifies and smoke-tests the exact selected images before pushing them to
-the repository's GHCR namespace. A successful `main` run publishes a release
-artifact containing digest-pinned image references, release identity metadata,
-and an SPDX JSON SBOM for each image. The workflow signs each SBOM as a GitHub
-artifact attestation and attaches it to the corresponding image digest in
-GHCR. The public health endpoint reports that release identity so deployment
-automation can compare environments without access to application data.
+the repository's GHCR namespace. A successful `main` run publishes an ordinary
+workflow artifact containing digest-pinned image references, release identity
+metadata, and an SPDX JSON SBOM for each image. When GitHub artifact
+attestations are available, the workflow also signs each SBOM and attaches the
+attestation to the corresponding image digest in GHCR. Public repositories
+enable attestations automatically. Private and internal repositories use the
+fallback by default, regardless of whether a user or organization owns them;
+they do not need to become public or move to an organization.
+
+GitHub Enterprise Cloud can provide artifact attestations to eligible private
+and internal repositories, but that plan capability cannot be inferred
+reliably from repository visibility or owner type. After confirming support,
+an organization-owned repository can set the Actions variable
+`ENABLE_NONPUBLIC_ATTESTATIONS` to the exact value `true` to opt in. The opt-in
+does not enable attestations for user-owned private repositories. Leave it
+unset or set it to `false` everywhere else.
+
+The private-repository fallback preserves exact digest selection and both
+downloadable SBOMs, but it provides a reduced provenance guarantee: the SBOMs
+are not cryptographically bound by GitHub to the repository and workflow that
+produced them. Consumers must instead trust access to the Actions run and its
+retained release artifact, and independently confirm that the manifest's image
+digests match GHCR. The public health endpoint reports release identity so
+deployment automation can compare environments without application-data
+access.
 
 Download that run's `release-<sha>` artifact onto the host. Keep the project's
 production configuration in `deploy/.env.prod`, then deploy without building:
@@ -126,8 +145,8 @@ bake period, and returns a prioritized promotion action only when staging is
 actually ahead. Optional CA-file settings support separately owned local TLS
 boundaries without duplicating status URLs.
 
-Verify a published image's signed SBOM attestation against the repository that
-built it:
+For repositories where attestations are enabled, verify a published image's
+signed SBOM attestation against the repository that built it:
 
 ```bash
 gh attestation verify oci://ghcr.io/<owner>/<repo>-backend@<digest> \
