@@ -92,9 +92,17 @@ the repository's GHCR namespace. A successful `main` run publishes an ordinary
 workflow artifact containing digest-pinned image references, release identity
 metadata, and an SPDX JSON SBOM for each image. When GitHub artifact
 attestations are available, the workflow also signs each SBOM and attaches the
-attestation to the corresponding image digest in GHCR. User-owned private
-repositories automatically skip only those attestation steps; they do not need
-to become public or move to an organization.
+attestation to the corresponding image digest in GHCR. Public repositories
+enable attestations automatically. Private and internal repositories use the
+fallback by default, regardless of whether a user or organization owns them;
+they do not need to become public or move to an organization.
+
+GitHub Enterprise Cloud can provide artifact attestations to eligible private
+and internal repositories, but that plan capability cannot be inferred
+reliably from repository visibility or owner type. After confirming support,
+set the repository Actions variable `ENABLE_NONPUBLIC_ATTESTATIONS` to the
+exact value `true` to opt in. Leave it unset or set it to `false` everywhere
+else.
 
 The private-repository fallback preserves exact digest selection and both
 downloadable SBOMs, but it provides a reduced provenance guarantee: the SBOMs

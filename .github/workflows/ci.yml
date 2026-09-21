@@ -140,7 +140,8 @@ jobs:
         run: |
           supported="$(scripts/release-attestation-support \
             --visibility '${{ github.event.repository.visibility }}' \
-            --owner-type '${{ github.event.repository.owner.type }}')"
+            --owner-type '${{ github.event.repository.owner.type }}' \
+            --nonpublic-opt-in '${{ vars.ENABLE_NONPUBLIC_ATTESTATIONS }}')"
           echo "supported=${supported}" >> "$GITHUB_OUTPUT"
 
       - name: Configure project-owned release packages

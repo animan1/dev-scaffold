@@ -13,17 +13,20 @@ def _repository_root() -> Path:
 
 
 @pytest.mark.parametrize(
-    ("visibility", "owner_type", "supported"),
+    ("visibility", "owner_type", "nonpublic_opt_in", "supported"),
     [
-        ("private", "User", False),
-        ("public", "User", True),
-        ("private", "Organization", True),
-        ("internal", "Organization", True),
+        ("public", "User", "", True),
+        ("public", "Organization", "", True),
+        ("private", "User", "", False),
+        ("private", "Organization", "", False),
+        ("private", "Organization", "true", True),
+        ("internal", "Organization", "true", True),
     ],
 )
 def test_release_attestation_support_policy(
     visibility: str,
     owner_type: str,
+    nonpublic_opt_in: str,
     supported: bool,
 ) -> None:
     result = subprocess.run(
@@ -33,6 +36,8 @@ def test_release_attestation_support_policy(
             visibility,
             "--owner-type",
             owner_type,
+            "--nonpublic-opt-in",
+            nonpublic_opt_in,
         ],
         check=True,
         capture_output=True,
@@ -52,6 +57,7 @@ def test_release_workflow_uploads_before_optional_attestations() -> None:
     upload_step = release_job[upload:fallback]
 
     assert "scripts/release-attestation-support" in release_job
+    assert "vars.ENABLE_NONPUBLIC_ATTESTATIONS" in release_job
     assert release_job.count("steps.provenance.outputs.supported == 'true'") == 2
     assert "steps.provenance.outputs.supported != 'true'" in release_job
     assert "${{ env.RELEASE_FILE }}" in upload_step
