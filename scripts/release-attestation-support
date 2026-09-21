@@ -38,7 +38,9 @@ def main() -> int:
         print("Non-public attestation opt-in must be true or false", file=sys.stderr)
         return 1
 
-    supported = arguments.visibility == "public" or opt_in == "true"
+    supported = arguments.visibility == "public" or (
+        arguments.owner_type == "Organization" and opt_in == "true"
+    )
     print(str(supported).lower())
     return 0
 

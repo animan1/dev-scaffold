@@ -18,6 +18,7 @@ def _repository_root() -> Path:
         ("public", "User", "", True),
         ("public", "Organization", "", True),
         ("private", "User", "", False),
+        ("private", "User", "true", False),
         ("private", "Organization", "", False),
         ("private", "Organization", "true", True),
         ("internal", "Organization", "true", True),

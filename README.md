@@ -100,9 +100,10 @@ they do not need to become public or move to an organization.
 GitHub Enterprise Cloud can provide artifact attestations to eligible private
 and internal repositories, but that plan capability cannot be inferred
 reliably from repository visibility or owner type. After confirming support,
-set the repository Actions variable `ENABLE_NONPUBLIC_ATTESTATIONS` to the
-exact value `true` to opt in. Leave it unset or set it to `false` everywhere
-else.
+an organization-owned repository can set the Actions variable
+`ENABLE_NONPUBLIC_ATTESTATIONS` to the exact value `true` to opt in. The opt-in
+does not enable attestations for user-owned private repositories. Leave it
+unset or set it to `false` everywhere else.
 
 The private-repository fallback preserves exact digest selection and both
 downloadable SBOMs, but it provides a reduced provenance guarantee: the SBOMs
