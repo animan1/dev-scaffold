@@ -10,3 +10,6 @@
 - Use the existing operator/developer commands for that environment. If its
   location or configuration is unclear, locate it or ask the user before
   provisioning a replacement.
+- Apply this rule to PR descriptions, documentation, and copy-paste review
+  commands too. Do not embed feature-specific Compose project names or image
+  prefixes that recreate a separate stack when a reviewer follows them.
