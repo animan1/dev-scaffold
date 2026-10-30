@@ -255,15 +255,35 @@ installation, assess application migration compatibility and available database
 backups through the existing tenant operational procedure. If schema/data
 recovery is required, use the separately tested database restore procedure.
 
-## Local acceptance
+## Development/staging review and automated tests
 
 ```bash
-make release-bundle-test
-make release-transport-test
-make release-bundle-exercise
+make be.sync
+make test
 ```
 
-The exercise prepares three test images, then starts two disposable privileged
+`make test` discovers the release transport and bundle boundary tests through
+the existing developer interface. For acceptance, use the actual capture,
+hotfix, validate and install commands documented above against separate
+development/staging build and destination environments, with their existing
+project/configuration inputs. Verify the application reports each selected
+revision, existing data/configuration survives, and damaged/wrong-platform
+bundles fail before changing services. Do not use production for review.
+
+The optional isolated-Docker regression test runs through the same test target:
+
+```bash
+make test RUN_EMERGENCY_INTEGRATION=1
+```
+
+It is opt-in because it starts privileged disposable Docker engines, needs
+initial Docker Hub access, and cannot run in the ordinary Docker-free unit-test
+environment. It calls the shared `release-bundle-capture`,
+`release-bundle-hotfix`, and `release-bundle-install` operator targets; there is
+no separate acceptance Make target. Its deterministic GitHub responses test
+error handling; use a real selected successful main run for staging acceptance.
+
+This automated test prepares three test images, then starts two disposable privileged
 Docker-in-Docker engines with `--network none`. It seeds only the build engine,
 captures a release through a real local OCI registry, stops that registry, and
 installs into the empty destination engine. GitHub run/artifact responses are

@@ -190,6 +190,9 @@ def main():
             shutil.copy(
                 ROOT / "scripts/release_bundle.py", source / "scripts/release_bundle.py"
             )
+            commands = source / "profiles/emergency-release/commands.mk"
+            commands.parent.mkdir(parents=True)
+            shutil.copy(ROOT / "profiles/emergency-release/commands.mk", commands)
             env = os.environ.copy()
             for key in ("MAKEFLAGS", "MAKEOVERRIDES", "MFLAGS", "RELEASE_REVISION"):
                 env.pop(key, None)
@@ -223,6 +226,7 @@ def main():
                 "revision.txt",
                 "release-bundle.json",
                 "scripts/release_bundle.py",
+                "profiles/emergency-release/commands.mk",
                 cwd=source,
                 env=env,
             )
@@ -234,6 +238,16 @@ def main():
             env["EXERCISE_REVISION"] = first
             tenant = work / "destination"
             tenant.mkdir()
+            (tenant / "profiles/emergency-release").mkdir(parents=True)
+            (tenant / "scripts").mkdir()
+            shutil.copy(commands, tenant / "profiles/emergency-release/commands.mk")
+            shutil.copy(
+                source / "scripts/release_bundle.py",
+                tenant / "scripts/release_bundle.py",
+            )
+            (tenant / "Makefile").write_text(
+                "include profiles/emergency-release/commands.mk\n"
+            )
             config = tenant / "production.env"
             config.write_text("PRIVATE_SETTING=existing-env-value\n")
             config.chmod(0o600)
@@ -312,9 +326,8 @@ def main():
             captured = work / "captured.tar"
             env["BUNDLE"] = str(captured)
             run(
-                sys.executable,
-                str(source / "scripts/release_bundle.py"),
-                "capture",
+                "make",
+                "release-bundle-capture",
                 cwd=source,
                 env=env,
             )
@@ -330,9 +343,8 @@ def main():
                 }
             )
             run(
-                sys.executable,
-                str(source / "scripts/release_bundle.py"),
-                "install",
+                "make",
+                "release-bundle-install",
                 cwd=tenant,
                 env=env,
             )
@@ -355,9 +367,8 @@ def main():
                 bad_env = {**env, "BUNDLE": str(bad), "BUNDLE_SHA256": bad_sha}
                 assert (
                     run(
-                        sys.executable,
-                        str(source / "scripts/release_bundle.py"),
-                        "install",
+                        "make",
+                        "release-bundle-install",
                         cwd=tenant,
                         env=bad_env,
                         check=False,
@@ -388,9 +399,8 @@ def main():
             )
             # No registry, GitHub or external network is available for this build.
             run(
-                sys.executable,
-                str(source / "scripts/release_bundle.py"),
-                "hotfix",
+                "make",
+                "release-bundle-hotfix",
                 cwd=source,
                 env=env,
             )
@@ -401,9 +411,8 @@ def main():
                 }
             )
             run(
-                sys.executable,
-                str(source / "scripts/release_bundle.py"),
-                "install",
+                "make",
+                "release-bundle-install",
                 cwd=tenant,
                 env=env,
             )

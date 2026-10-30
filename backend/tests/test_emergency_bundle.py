@@ -4,17 +4,18 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
+import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location(
-    "release_bundle", ROOT / "scripts/release_bundle.py"
-)
+SPEC = importlib.util.spec_from_file_location("release_bundle", ROOT / "scripts/release_bundle.py")
 bundle = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bundle)
 
@@ -34,9 +35,7 @@ class BoundaryTests(unittest.TestCase):
         self.config = {
             "os": "linux",
             "architecture": "arm64",
-            "rootfs": {
-                "diff_ids": ["sha256:" + hashlib.sha256(self.layer).hexdigest()]
-            },
+            "rootfs": {"diff_ids": ["sha256:" + hashlib.sha256(self.layer).hexdigest()]},
             "config": {"Labels": {"org.opencontainers.image.revision": "a" * 40}},
         }
         self.config_bytes = json.dumps(self.config).encode()
@@ -140,9 +139,7 @@ class BoundaryTests(unittest.TestCase):
                     "RELEASE_REVISION": "a" * 40,
                 },
             ),
-            patch.object(
-                bundle.urllib.request, "urlopen", side_effect=replies
-            ) as urlopen,
+            patch.object(bundle.urllib.request, "urlopen", side_effect=replies) as urlopen,
         ):
             bundle.smoke()
         request = urlopen.call_args_list[0].args[0]
@@ -213,12 +210,8 @@ class BoundaryTests(unittest.TestCase):
         self.assertEqual(service["image"], self.identity)
         self.assertEqual(service["pull_policy"], "never")
         self.assertNotIn("build", service)
-        self.assertEqual(
-            service["volumes"][1]["source"], str(source / "committed.conf")
-        )
-        self.assertEqual(
-            service["volumes"][2]["source"], str(self.root / "private.conf")
-        )
+        self.assertEqual(service["volumes"][1]["source"], str(source / "committed.conf"))
+        self.assertEqual(service["volumes"][2]["source"], str(self.root / "private.conf"))
         self.assertEqual(actual["volumes"]["data"]["name"], "existing-project_data")
 
     def test_changed_service_set_or_image_reference_is_rejected(self):
@@ -270,17 +263,11 @@ class BoundaryTests(unittest.TestCase):
             cwd=source,
             output=True,
         )
-        revision = (
-            bundle.run("git", "rev-parse", "HEAD", cwd=source, output=True)
-            .decode()
-            .strip()
-        )
+        revision = bundle.run("git", "rev-parse", "HEAD", cwd=source, output=True).decode().strip()
         payload = self.root / "payload"
         payload.mkdir()
         (payload / "source.tar").write_bytes(
-            bundle.run(
-                "git", "archive", "--format=tar", revision, cwd=source, output=True
-            )
+            bundle.run("git", "archive", "--format=tar", revision, cwd=source, output=True)
         )
         bundle.run(
             "git",
@@ -333,9 +320,7 @@ class BoundaryTests(unittest.TestCase):
     def test_unpacks_exact_source_and_self_contained_hotfix_history(self):
         data, _, source = bundle.unpack(*self.committed_bundle())
         self.assertEqual(data["mode"], "hotfix")
-        self.assertEqual(
-            (source / "deployment.conf").read_text(), "exact committed configuration"
-        )
+        self.assertEqual((source / "deployment.conf").read_text(), "exact committed configuration")
 
     def test_rejects_revision_inconsistent_manifest(self):
         def change(payload, data):
@@ -364,3 +349,11 @@ class BoundaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.skipif(
+    os.environ.get("RUN_EMERGENCY_INTEGRATION") != "1",
+    reason="opt-in: privileged Docker engines and initial registry access required",
+)
+def test_isolated_emergency_operator_workflows():
+    subprocess.run([sys.executable, str(ROOT / "tests/emergency_release/exercise.py")], check=True)

@@ -4,6 +4,7 @@ RELEASE_WEB_TAG = $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
 COMPOSE_RELEASE = PROD_ENV_FILE=$(PROD_ENV_FILE) docker compose -p $(RELEASE_COMPOSE_PROJECT) -f compose.yml --env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
 RELEASE_PULL ?= $(COMPOSE_RELEASE) pull
 export RELEASE_REVISION BUNDLE_SMOKE_URL
+include profiles/emergency-release/commands.mk
 
 build-release-images:
 	docker build --network none --platform $(RELEASE_PLATFORM) --label org.opencontainers.image.revision=$(RELEASE_REVISION) -t $(RELEASE_BACKEND_TAG) -t $(RELEASE_WEB_TAG) .
