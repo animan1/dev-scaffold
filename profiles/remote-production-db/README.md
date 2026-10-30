@@ -110,21 +110,16 @@ This topology provides transport privacy, not staging isolation:
 - Tunnel latency or interruption can reset staging connections and transactions.
   Staging load and locks can still affect production performance.
 
-## Local exercise
+## Verify an adopted environment
 
-The exercise creates separate Compose projects and networks for simulated
-remote production and laptop staging. PostgreSQL uses the profile's exact
-loopback-only publication; the staging probe reaches it through a separately
-loopback-published SSH service and the tunnel. All generated keys and state stay under
-`.tmp/remote-production-db-exercise`.
+Use the same production and staging commands used during normal operation. On
+the remote host, confirm the selected production Compose configuration publishes
+PostgreSQL only on the expected `127.0.0.1` port and that production remains
+healthy. On the laptop, use `up-staging-db-tunnel`,
+`status-staging-db-tunnel`, and the consuming project's normal staging startup
+and smoke commands. Then run `down-staging-db-tunnel`; staging database access
+must fail while the remote production health check continues to pass.
 
-```bash
-make -f profiles/remote-production-db/profile.mk exercise-remote-db-tunnel
-make -f profiles/remote-production-db/profile.mk status-remote-db-tunnel-exercise
-make -f profiles/remote-production-db/profile.mk logs-remote-db-tunnel-exercise
-make -f profiles/remote-production-db/profile.mk down-remote-db-tunnel-exercise
-```
-
-The exercise proves that staging reads the remote sentinel through SSH, loses
-database access after the tunnel stops, and leaves the remote database healthy
-and readable.
+Do not add a separate acceptance-only Make target or run destructive writes to
+prove the shared database identity. Inspect an existing, non-sensitive record
+through the application's normal staging behavior.

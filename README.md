@@ -202,8 +202,8 @@ a Compose-managed SSH tunnel to make that socket available inside the laptop's
 staging network. Production has no dependency on the laptop or tunnel.
 
 The profile does not deploy releases or run migrations. Its documentation
-describes the required SSH restrictions, operator Make targets, isolated local
-exercise, and the substantial compatibility and data-safety limitations of
+describes the required SSH restrictions, operator Make targets, production-facing
+verification, and the substantial compatibility and data-safety limitations of
 running newer staging code against live production data. Cuplr-specific import
 steps are recorded separately in
 [`docs/cuplr-remote-staging-database.md`](docs/cuplr-remote-staging-database.md).
