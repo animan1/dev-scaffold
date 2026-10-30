@@ -1,0 +1,15 @@
+services:
+  app:
+    image: "${RELEASE_BACKEND_IMAGE:?}"
+    env_file: ["${PROD_ENV_FILE:?}"]
+    environment:
+      RELEASE_REVISION: "${RELEASE_REVISION:?}"
+    volumes:
+      - data:/data
+      - ./private.conf:/config/private.conf:ro
+  web:
+    image: "${RELEASE_WEB_IMAGE:?}"
+    environment:
+      RELEASE_REVISION: "${RELEASE_REVISION:?}"
+volumes:
+  data:
