@@ -263,7 +263,13 @@ make test
 ```
 
 `make test` discovers the release transport and bundle boundary tests through
-the existing developer interface. For acceptance, use the actual capture,
+the existing developer interface. Manual runtime review uses the existing
+dummy application in this checkout: run `make up` and `make smoke` with its
+selected profile and normal configuration. Retain its existing Compose project
+identity and volumes; do not create or select a separate review/release-CI stack.
+These development smoke checks do not establish emergency-install acceptance.
+Extend this same dummy application's adapter for those additional scenarios.
+For emergency-install acceptance, use the actual capture,
 hotfix, validate and install commands documented above against separate
 development/staging build and destination environments, with their existing
 project/configuration inputs. Verify the application reports each selected
