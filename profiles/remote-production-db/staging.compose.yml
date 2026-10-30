@@ -1,0 +1,34 @@
+services:
+  production-db-tunnel:
+    image: ${REMOTE_DB_TUNNEL_IMAGE:-local/remote-production-db-tunnel:dev}
+    environment:
+      REMOTE_DB_HOST: ${REMOTE_DB_HOST:-127.0.0.1}
+      REMOTE_DB_PORT: ${REMOTE_DB_PORT:-15432}
+      SSH_HOST: ${STAGING_DB_SSH_HOST:?Set STAGING_DB_SSH_HOST}
+      SSH_PORT: ${STAGING_DB_SSH_PORT:-22}
+      SSH_SERVER_ALIVE_COUNT_MAX: ${STAGING_DB_SSH_SERVER_ALIVE_COUNT_MAX:-3}
+      SSH_SERVER_ALIVE_INTERVAL: ${STAGING_DB_SSH_SERVER_ALIVE_INTERVAL:-15}
+      SSH_USER: ${STAGING_DB_SSH_USER:?Set STAGING_DB_SSH_USER}
+      TUNNEL_PORT: 5432
+    volumes:
+      - type: bind
+        source: ${STAGING_DB_SSH_IDENTITY_FILE:?Set STAGING_DB_SSH_IDENTITY_FILE}
+        target: /run/secrets/ssh_identity
+        read_only: true
+      - type: bind
+        source: ${STAGING_DB_SSH_KNOWN_HOSTS_FILE:?Set STAGING_DB_SSH_KNOWN_HOSTS_FILE}
+        target: /run/secrets/ssh_known_hosts
+        read_only: true
+    cap_drop:
+      - ALL
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --host 127.0.0.1 --port 5432"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+      start_period: 3s
+    restart: unless-stopped

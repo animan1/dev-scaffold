@@ -1,0 +1,11 @@
+AuthorizedKeysFile /run/secrets/authorized_keys
+AllowTcpForwarding local
+GatewayPorts no
+PasswordAuthentication no
+PermitEmptyPasswords no
+PermitOpen host.docker.internal:15432
+PermitRootLogin no
+PidFile /run/sshd.pid
+PubkeyAuthentication yes
+StrictModes no
+X11Forwarding no
