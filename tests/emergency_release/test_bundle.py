@@ -123,6 +123,32 @@ class BoundaryTests(unittest.TestCase):
                 bundle.destination("install")
             run.assert_not_called()
 
+    def test_default_smoke_checks_revision_through_trusted_loopback_headers(self):
+        class Response(io.BytesIO):
+            status = 200
+
+        replies = [
+            Response(json.dumps({"revision": "a" * 40}).encode()),
+            Response(b"root"),
+            Response(b"static"),
+        ]
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "BUNDLE_SMOKE_URL": "http://127.0.0.1:18080",
+                    "RELEASE_REVISION": "a" * 40,
+                },
+            ),
+            patch.object(
+                bundle.urllib.request, "urlopen", side_effect=replies
+            ) as urlopen,
+        ):
+            bundle.smoke()
+        request = urlopen.call_args_list[0].args[0]
+        self.assertEqual(request.get_header("X-forwarded-proto"), "https")
+        self.assertEqual(request.full_url, "http://127.0.0.1:18080/api/healthz")
+
     def test_missing_runtime_bind_rejected_before_load(self):
         config = {
             "services": {

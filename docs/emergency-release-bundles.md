@@ -21,6 +21,9 @@ minutes, GitHub API, registry login, or image publication. An outage does not ma
 uncached base images or dependency downloads magically available: prepare those
 caches ahead of time. Destination Docker architecture must match `linux/amd64`
 or `linux/arm64`; emulation does not satisfy the destination architecture check.
+Hotfix packaging requires every non-application runtime image already present
+in the build daemon's cache for that platform; it never pulls these during the
+hotfix operation. Routine capture populates those caches while registries work.
 
 ## Adopt into an application
 

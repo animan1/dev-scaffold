@@ -564,7 +564,7 @@ def package(mode):
         for definition in config["services"].values():
             reference = definition.get("image")
             require(reference, "runtime service has no image")
-            if mode == "capture" or reference not in roles.values():
+            if mode == "capture":
                 run("docker", "pull", "--platform", target, reference, env=env)
         data["images"] = inspect_roles(config, spec, rev, target, env, mode == "hotfix")
         # Local content IDs survive docker save/load without any repository tag lookup.
@@ -826,6 +826,17 @@ def destination(operation):
                             env=env,
                             output=True,
                         )
+            for group, resource in (("secrets", "secret"), ("configs", "config")):
+                for name, definition in config.get(group, {}).items():
+                    if definition.get("external"):
+                        run(
+                            "docker",
+                            resource,
+                            "inspect",
+                            definition.get("name", name),
+                            env=env,
+                            output=True,
+                        )
             write_json(work / "compose.json", config)
             # Validate with the engine's Compose implementation before loading or changing services.
             command = [
@@ -906,15 +917,25 @@ def destination(operation):
 def smoke():
     url = os.environ["BUNDLE_SMOKE_URL"]
     expected = os.environ["RELEASE_REVISION"]
+    headers = {
+        "Host": os.environ.get(
+            "PRODUCTION_SMOKE_HOST", os.environ.get("RELEASE_HOST", "localhost")
+        ),
+        "X-Forwarded-Proto": "https",
+    }
     for attempt in range(60):
         try:
-            with urllib.request.urlopen(url + "/api/healthz", timeout=2) as response:
+            with urllib.request.urlopen(
+                urllib.request.Request(url + "/api/healthz", headers=headers), timeout=2
+            ) as response:
                 health = json.load(response)
             require(
                 health["revision"] == expected, "deployed revision differs from bundle"
             )
             for path in ("/", "/static/smoketest.txt"):
-                with urllib.request.urlopen(url + path, timeout=2) as response:
+                with urllib.request.urlopen(
+                    urllib.request.Request(url + path, headers=headers), timeout=2
+                ) as response:
                     require(response.status == 200, "smoke request failed")
             print(
                 "PASS: application reports exact bundled revision; root/static respond"

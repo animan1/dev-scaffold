@@ -275,6 +275,14 @@ def main():
             )
             artifacts = work / "artifacts"
             artifacts.mkdir()
+            run(
+                str(wrapper),
+                "tag",
+                "python:3.12-alpine",
+                "ghcr.io/exercise/runtime:cached",
+                env=env,
+            )
+            run(str(wrapper), "push", "ghcr.io/exercise/runtime:cached", env=env)
             lines = {
                 "SCAFFOLD_PROFILE": "exercise",
                 "RELEASE_REVISION": first,
