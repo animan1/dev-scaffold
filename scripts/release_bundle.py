@@ -510,33 +510,7 @@ def package(mode):
     require(not output.exists(), "refusing to replace existing bundle")
     with tempfile.TemporaryDirectory(prefix="release-bundle-") as temporary:
         work = Path(temporary)
-        # Bundle HEAD in an isolated bare repository so no refs/checkouts are changed.
-        bare = work / "history.git"
-        run(
-            "git",
-            "clone",
-            "--bare",
-            "--no-hardlinks",
-            str(root),
-            str(bare),
-            output=True,
-        )
-        run("git", "update-ref", "refs/heads/emergency-release", rev, cwd=bare)
-        run(
-            "git",
-            "bundle",
-            "create",
-            str(work / "history.bundle"),
-            "refs/heads/emergency-release",
-            cwd=bare,
-        )
-        source_tar = run("git", "archive", "--format=tar", rev, cwd=root, output=True)
-        (work / "source.tar").write_bytes(source_tar)
-        with tarfile.open(work / "source.tar") as archive:
-            members(archive)
-        source = work / "source"
-        run("git", "clone", str(work / "history.bundle"), str(source), output=True)
-        run("git", "checkout", "--detach", rev, cwd=source, output=True)
+        source = preserve_source(root, rev, work)
         spec = adapter(source, selected)
         data = {
             "schema": 1,
@@ -643,6 +617,30 @@ def verify_source(work, rev):
         hashlib.sha256(committed).hexdigest() == digest(work / "source.tar"),
         "source archive differs from preserved commit",
     )
+
+
+def preserve_source(root, rev, work):
+    """Package one committed source tree and its local Git history without changing refs."""
+    revision(rev)
+    bare = work / "history.git"
+    run("git", "clone", "--bare", "--no-hardlinks", str(root), str(bare), output=True)
+    run("git", "update-ref", "refs/heads/emergency-release", rev, cwd=bare)
+    run(
+        "git",
+        "bundle",
+        "create",
+        str(work / "history.bundle"),
+        "refs/heads/emergency-release",
+        cwd=bare,
+    )
+    source_tar = run("git", "archive", "--format=tar", rev, cwd=bare, output=True)
+    (work / "source.tar").write_bytes(source_tar)
+    with tarfile.open(work / "source.tar") as archive:
+        members(archive)
+    source = work / "source"
+    run("git", "clone", str(work / "history.bundle"), str(source), output=True)
+    run("git", "checkout", "--detach", rev, cwd=source, output=True)
+    return source
 
 
 def unpack(bundle, expected, work):
