@@ -188,6 +188,10 @@ build-release-images: ## Build commit-addressed Django and application Nginx ima
 		--label org.opencontainers.image.revision=$(RELEASE_REVISION) .
 	@test "$$(docker image inspect --format='{{.Config.User}}' $(RELEASE_BACKEND_TAG))" = "app"
 	@test "$$(docker image inspect --format='{{.Config.User}}' $(RELEASE_WEB_TAG))" = "nginx"
+	python3 scripts/record_local_release.py --revision $(RELEASE_REVISION) \
+		--profile $(SCAFFOLD_PROFILE) --prefix $(RELEASE_IMAGE_PREFIX) \
+		--backend $(RELEASE_BACKEND_TAG) --web $(RELEASE_WEB_TAG) \
+		$(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) --output $(RELEASE_FILE)
 
 .PHONY: prepare-release-ci
 prepare-release-ci: ## Prepare isolated, non-secret server-rendered release configuration

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import argparse
+import importlib.util
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -35,7 +38,8 @@ def test_release_build_targets_platform_and_labels_exact_revision(profile: str) 
         "RELEASE_PLATFORM=linux/arm64",
         f"RELEASE_REVISION={revision}",
     )
-    assert output.count("--platform linux/arm64") == 2
+    build_commands = output.split("python3 scripts/record_local_release.py", 1)[0]
+    assert build_commands.count("--platform linux/arm64") == 2
     assert output.count(f"--label org.opencontainers.image.revision={revision}") == 2
 
 
@@ -64,3 +68,48 @@ def test_runtime_inventory_includes_optional_services(profile: str) -> None:
     output = dry_run(profile, "release-bundle-config", "PROD_ENV_FILE=/tmp/private-production.env")
     assert "--profile '*' config --format json" in output
     assert "PROD_ENV_FILE=/tmp/private-production.env" in output
+
+
+@pytest.mark.parametrize("failure", [None, "revision", "platform"])
+def test_local_manifest_pins_verified_images_or_preserves_previous_manifest(
+    tmp_path, monkeypatch, failure
+):
+    spec = importlib.util.spec_from_file_location(
+        "record_local_release", ROOT / "scripts/record_local_release.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    revision = "a" * 40
+    image = {
+        "Id": "sha256:" + "b" * 64,
+        "Os": "linux",
+        "Architecture": "arm64",
+        "Config": {"Labels": {"org.opencontainers.image.revision": revision}},
+    }
+    if failure == "revision":
+        image["Config"]["Labels"]["org.opencontainers.image.revision"] = "c" * 40
+    if failure == "platform":
+        image["Architecture"] = "amd64"
+    monkeypatch.setattr(
+        module.subprocess, "check_output", lambda *args, **kwargs: json.dumps([image])
+    )
+    output = tmp_path / "release.env"
+    output.write_text("previous release\n")
+    options = argparse.Namespace(
+        revision=revision,
+        profile="react-vite",
+        prefix="local/dev-scaffold",
+        backend="backend:commit",
+        web="web:commit",
+        platform="linux/arm64",
+        output=str(output),
+    )
+    if failure:
+        with pytest.raises(ValueError):
+            module.record(options)
+        assert output.read_text() == "previous release\n"
+    else:
+        module.record(options)
+        assert f"RELEASE_BACKEND_IMAGE={image['Id']}" in output.read_text()
+        assert f"RELEASE_WEB_IMAGE={image['Id']}" in output.read_text()
+        assert output.stat().st_mode & 0o077 == 0

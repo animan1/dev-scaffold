@@ -121,6 +121,19 @@ production configuration in `deploy/.env.prod`, then deploy without building:
 make deploy-release RELEASE_FILE=/path/to/release-<sha>.env
 ```
 
+The same workflow can run on a development laptop using production images.
+`make build-release-images RELEASE_PLATFORM=linux/arm64` builds both images and
+records their verified content IDs in `RELEASE_FILE`, without publishing them.
+Use the machine's destination platform. Deploy that manifest with
+`make deploy-release RELEASE_PULL=true` and the existing application's project,
+configuration and loopback ingress settings. `RELEASE_PULL=true` uses the local
+images; the initialization, migrations and service startup are the same recipe
+used for a registry release. `make up` remains the development-server workflow.
+
+`release-bundle-config` is machine-readable and can contain resolved credentials.
+For a local review, pass `RELEASE_CONFIG_FILE=/absolute/private-compose.json` to
+save it privately instead of displaying it. Keep that file out of version control.
+
 For `server-rendered-django`, the `deploy-release` recipe depends on the
 profile's explicit `initialize-release` operation. That operation pulls the
 recorded digests, starts PostgreSQL and the recorded backend image with

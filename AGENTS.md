@@ -4,10 +4,12 @@
 
 - Reuse and extend the existing dev-scaffold dummy project for manual validation,
   deployment checks, and review walkthroughs.
-- That project is this repository's existing stack started by `make up`, using
-  its selected profile, normal configuration, Compose identity, and volumes.
-  Use `make smoke` for its existing runtime checks; do not override the project
-  name or switch to a release/CI stack for manual review.
+- That project is this repository's existing application normally started by
+  `make up`. Preserve its established Compose identity, configuration and data.
+  For release changes, run production images through the real release
+  initialization/deployment workflow on that same project. `make up` and
+  development smoke alone do not validate release behavior. Do not create a
+  separate release/CI project for manual review.
 - Add scenarios to that project's existing application and services. Do not
   create another dummy application, test service, or separately named Compose
   project for a feature or PR unless the user explicitly requests one.
