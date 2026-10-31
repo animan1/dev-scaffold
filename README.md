@@ -71,6 +71,11 @@ make down-prod       # stop stack
 
 ### Optional immutable releases
 
+For captured-release recovery and locally validated hotfixes during outages, see
+[emergency release bundles](docs/emergency-release-bundles.md). The bundle path
+reuses the existing release migration/deployment hooks and runs without GitHub
+or registry access on the destination.
+
 The default local-production workflow remains intentionally simple and builds
 from the checkout. Projects that need a pull-only host can opt into the
 immutable-release profile.

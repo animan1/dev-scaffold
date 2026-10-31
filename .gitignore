@@ -27,6 +27,7 @@ coverage/
 # Docker
 *.log
 .tmp/
+.local/
 
 # OS
 .DS_Store

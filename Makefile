@@ -585,3 +585,4 @@ SELECTED_OPTIONAL_PROFILE_MAKEFILES := $(SELECTED_OPTIONAL_PROFILE_MAKEFILES) $(
 endif
 
 include $(SCAFFOLD_ROOT)profiles/release-transport.mk
+include $(SCAFFOLD_ROOT)profiles/emergency-release/profile.mk
