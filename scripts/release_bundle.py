@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import re
+import subprocess
 import tarfile
 
 
@@ -271,3 +272,33 @@ def frozen_config(config, data, spec, destination, source):
                 require(path.is_file(), "required config/secret missing")
                 value["file"] = str(path)
     return config
+
+
+def run(*args, cwd=None, env=None, output=False):
+    return subprocess.run(
+        args, cwd=cwd, env=env, check=True, stdout=subprocess.PIPE if output else None
+    ).stdout
+
+
+def digest(path):
+    with Path(path).open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def verify_source(work, rev):
+    """Match the deployment archive to its exact preserved commit, entirely offline."""
+    revision(rev)
+    history = work / "verify.git"
+    run(
+        "git",
+        "clone",
+        "--bare",
+        str(work / "history.bundle"),
+        str(history),
+        output=True,
+    )
+    committed = run("git", "archive", "--format=tar", rev, cwd=history, output=True)
+    require(
+        hashlib.sha256(committed).hexdigest() == digest(work / "source.tar"),
+        "source archive differs from preserved commit",
+    )
