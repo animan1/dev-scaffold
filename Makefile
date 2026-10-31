@@ -172,9 +172,9 @@ ci: up be.wait be.ci fe.ci smoke
 	@echo "CI checks passed"
 
 # Prod
-.PHONY: bootstrap-prod
-bootstrap-prod: ## Generate prod env/certs and start prod stack
-	@echo "🔧 Bootstrapping prod-local (env + certs + compose up + migrate + smoke)..."
+LOCAL_TLS ?= 0
+.PHONY: prepare-prod
+prepare-prod: ## Prepare private production inputs; LOCAL_TLS=1 permits localhost certificate creation/renewal
 	# Ensure env file exists (generate if missing)
 	@if [ ! -f deploy/.env.prod ]; then \
 		echo "→ Generating deploy/.env.prod"; \
@@ -183,20 +183,27 @@ bootstrap-prod: ## Generate prod env/certs and start prod stack
 	else \
 		echo "✓ deploy/.env.prod exists"; \
 	fi
-	# Ensure TLS certs exist (generate if missing)
+	# Self-signed certificate renewal is explicitly local-only.
 	@if [ "$(HOST_INGRESS)" = "1" ]; then \
 		echo "Host ingress owns TLS; skipping application certificate generation"; \
-	elif [ ! -f deploy/nginx/certs/server.crt ] || [ ! -f deploy/nginx/certs/server.key ]; then \
-		echo "→ Generating self-signed TLS certs under deploy/nginx/certs"; \
-		mkdir -p deploy/nginx/certs; \
-		openssl req -x509 -nodes -newkey rsa:2048 \
-		  -keyout deploy/nginx/certs/server.key \
-		  -out deploy/nginx/certs/server.crt \
-		  -days 365 \
-		  -subj "/CN=localhost"; \
+	elif [ "$(LOCAL_TLS)" = "1" ]; then \
+		if [ ! -f deploy/nginx/certs/server.key ] || \
+			! openssl x509 -in deploy/nginx/certs/server.crt -noout -checkend 86400 >/dev/null 2>&1; then \
+			umask 077; mkdir -p deploy/nginx/certs; \
+			openssl req -x509 -nodes -newkey rsa:2048 \
+				-keyout deploy/nginx/certs/server.key -out deploy/nginx/certs/server.crt \
+				-days 365 -subj '/CN=localhost' \
+				-addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' || exit 1; \
+		fi; \
+		echo 'Local TLS certificate ready for localhost and 127.0.0.1'; \
 	else \
-		echo "✓ TLS certs exist in deploy/nginx/certs"; \
+		test -f deploy/nginx/certs/server.key && \
+			openssl x509 -in deploy/nginx/certs/server.crt -noout -checkend 0 >/dev/null || \
+			{ echo 'Install valid production TLS inputs, or use LOCAL_TLS=1 for the laptop dummy'; exit 1; }; \
 	fi
+
+.PHONY: bootstrap-prod
+bootstrap-prod: prepare-prod ## Prepare inputs and start the production stack
 	# Bring up stack, run migrations, and smoke test
 	$(COMPOSE_PROD) up -d --build
 	$(COMPOSE_PROD) run --rm backend bash -lc "cd /app && python -m app.manage migrate"

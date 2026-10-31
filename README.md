@@ -128,10 +128,11 @@ Use the machine's destination platform. For this repository's existing laptop
 dummy, use the actual production workflow without a second Compose project:
 
 ```bash
+make prepare-prod LOCAL_TLS=1
 make build-release-images RELEASE_PLATFORM=linux/arm64
-make release-bundle-config RELEASE_COMPOSE_PROJECT=dev-scaffold HOST_INGRESS=1 HOST_INGRESS_PORT=18080 RELEASE_CONFIG_FILE=.tmp/private-release-compose.json
-make deploy-release RELEASE_COMPOSE_PROJECT=dev-scaffold HOST_INGRESS=1 HOST_INGRESS_PORT=18080 RELEASE_PULL=true
-make smoke-prod HOST_INGRESS=1 HOST_INGRESS_HOST=localhost HOST_INGRESS_PORT=18080
+make release-bundle-config RELEASE_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_CONFIG_FILE=.tmp/private-release-compose.json
+make deploy-release RELEASE_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_PULL=true
+make smoke-prod CURL_FLAGS='--cacert deploy/nginx/certs/server.crt'
 ```
 
 Run from the existing `dev-scaffold` checkout, with its private `deploy/.env.prod`
@@ -140,7 +141,16 @@ backend/proxy are replaced by production images under the same project; this
 is an intentional deployment, not ordinary development smoke. Existing
 PostgreSQL volumes remain in place. The development SQLite file remains on
 disk; switching to production PostgreSQL does not migrate SQLite data.
-Port 18080 avoids the laptop's existing Cuplr listener on 8080. These commands
+Port 18080 avoids the laptop's existing Cuplr listener on 8080 and redirects to
+the same Nginx service's HTTPS listener on loopback port 443. The browser health
+URL is `https://127.0.0.1/api/healthz` (`/api/health` is not a route).
+`prepare-prod LOCAL_TLS=1` creates or renews a self-signed certificate for
+localhost and 127.0.0.1 without replacing the private env file. A browser needs
+a one-time local certificate trust decision. The smoke command verifies the
+certificate explicitly; it does not bypass TLS validation or supply a fake
+forwarded-HTTPS header. For production domains, install the real TLS certificate
+and run `prepare-prod` without `LOCAL_TLS=1`; it rejects missing/expired inputs.
+These commands
 leave the dummy running; do not use volume-deleting CI cleanup on it.
 Downstream applications supply their own existing project name, private
 configuration and ingress settings. `RELEASE_PULL=true` uses the local
