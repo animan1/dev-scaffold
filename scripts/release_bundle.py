@@ -6,7 +6,8 @@ content checks detect damage, not authorship. Uses only the Python standard libr
 
 import hashlib
 import json
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
+import re
 import tarfile
 
 
@@ -80,3 +81,83 @@ def validate_images(path, images, target):
             "incomplete/extra image archive",
         )
         return configs
+
+
+def read_json(path):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result, "duplicate JSON key")
+            result[key] = value
+        return result
+
+    return json.loads(Path(path).read_text(), object_pairs_hook=unique)
+
+
+def inputs(path):
+    value = read_json(path)
+    require(
+        set(value) == {"project", "env_file", "variables", "smoke_url"},
+        "invalid inputs fields",
+    )
+    require(
+        re.fullmatch("[a-z0-9][a-z0-9_-]+", value["project"]),
+        "explicit Compose project required",
+    )
+    config = Path(value["env_file"])
+    require(
+        config.is_absolute() and config.is_file(), "absolute existing env_file required"
+    )
+    require(
+        re.fullmatch("[a-zA-Z0-9_./-]+", str(config)),
+        "env_file path must be shell/Make safe",
+    )
+    require(config.stat().st_mode & 0o077 == 0, "env_file must be private (mode 600)")
+    # Make command-line values execute Make expansion and later shell recipes.
+    for key, content in value["variables"].items():
+        require(re.fullmatch("[A-Z][A-Z0-9_]*", key), "invalid input variable name")
+        require(
+            key
+            not in {
+                "COMPOSE_RELEASE",
+                "RELEASE_PULL",
+                "SHELL",
+                "MAKE",
+                "MAKEFLAGS",
+                "MAKEFILES",
+                "SCAFFOLD_ROOT",
+                "SCAFFOLD_PROFILE",
+                "RELEASE_REVISION",
+                "RELEASE_FILE",
+                "RELEASE_PLATFORM",
+                "PROD_ENV_FILE",
+                "RELEASE_COMPOSE_PROJECT",
+            },
+            "reserved input variable",
+        )
+        require(
+            key
+            in {
+                "HOST_INGRESS",
+                "HOST_INGRESS_HOST",
+                "HOST_INGRESS_PORT",
+                "MONITORING",
+                "RELEASE_HTTP_PORT",
+                "RELEASE_BIND_ADDRESS",
+                "RELEASE_HTTPS_PORT",
+                "RELEASE_HOST",
+                "PRODUCTION_COMPOSE_PROJECT",
+                "PRODUCTION_HTTP_PORT",
+                "PRODUCTION_SMOKE_HOST",
+            },
+            "unsupported input variable",
+        )
+        require(
+            isinstance(content, str) and re.fullmatch("[a-zA-Z0-9_./:@,+-]*", content),
+            "input variables must be non-secret simple Make values",
+        )
+    require(
+        re.fullmatch(r"https?://(?:localhost|127\.0\.0\.1):[0-9]+", value["smoke_url"]),
+        "smoke_url must be a loopback HTTP(S) origin",
+    )
+    return value
