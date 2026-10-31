@@ -192,6 +192,22 @@ the trust boundary, so do not republish the origin port on a public interface.
 The smoke target supplies synthetic routing headers and does not require or
 prescribe a particular ingress product.
 
+### Optional remote production database for laptop staging
+
+Projects that deliberately exercise laptop-hosted staging against a remotely
+hosted production PostgreSQL database can adopt the
+[`remote-production-db` profile](profiles/remote-production-db/README.md). It
+publishes PostgreSQL only on the production host's loopback interface and uses
+a Compose-managed SSH tunnel to make that socket available inside the laptop's
+staging network. Production has no dependency on the laptop or tunnel.
+
+The profile does not deploy releases or run migrations. Its documentation
+describes the required SSH restrictions, operator Make targets, production-facing
+verification, and the substantial compatibility and data-safety limitations of
+running newer staging code against live production data. Cuplr-specific import
+steps are recorded separately in
+[`docs/cuplr-remote-staging-database.md`](docs/cuplr-remote-staging-database.md).
+
 ### Optional operational and dead-man monitoring
 
 The scaffold's Django `app.monitoring` architecture provides persisted check
