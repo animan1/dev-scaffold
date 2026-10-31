@@ -352,6 +352,77 @@ def digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def capture_evidence(work, rev, target, env, spec):
+    repo = os.environ.get("BUNDLE_REPO", "")
+    run_id = os.environ.get("BUNDLE_RUN_ID", "")
+    artifact = os.environ.get("BUNDLE_ARTIFACT", "")
+    require(
+        re.fullmatch("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo), "BUNDLE_REPO required"
+    )
+    require(
+        run_id.isdigit()
+        and artifact in (f"release-{rev}", f"release-{rev}-{target.split('/')[1]}"),
+        "explicit BUNDLE_RUN_ID and BUNDLE_ARTIFACT required",
+    )
+    require(
+        artifact != f"release-{rev}" or target == "linux/amd64",
+        "legacy artifacts are AMD64 only",
+    )
+    evidence = json.loads(
+        run("gh", "api", f"repos/{repo}/actions/runs/{run_id}", env=env, output=True)
+    )
+    require(
+        evidence["head_sha"] == rev
+        and evidence["head_branch"] == "main"
+        and evidence["event"] == "push"
+        and evidence["status"] == "completed"
+        and evidence["conclusion"] == "success"
+        and evidence["repository"]["full_name"] == repo,
+        "specified run is not a successful main release of this revision/repository",
+    )
+    comparison = json.loads(
+        run("gh", "api", f"repos/{repo}/compare/{rev}...main", env=env, output=True)
+    )
+    require(
+        comparison["merge_base_commit"]["sha"] == rev, "release is no longer on main"
+    )
+    artifacts = work / "artifacts"
+    run(
+        "gh",
+        "run",
+        "download",
+        run_id,
+        "--repo",
+        repo,
+        "--name",
+        artifact,
+        "--dir",
+        str(artifacts),
+        env=env,
+    )
+    manifest = artifacts / (rev + ".env")
+    require(manifest.is_file(), "selected artifact has no release manifest")
+    roles = {
+        name.removeprefix("RELEASE_").removesuffix("_IMAGE").lower()
+        for name in spec["images"].values()
+    }
+    for role in roles:
+        read_json(artifacts / f"{rev}-{role}.spdx.json")
+    with tarfile.open(work / "artifacts.tar", "w") as archive:
+        for path in sorted(artifacts.iterdir()):
+            require(
+                path.is_file() and not path.is_symlink(), "unexpected artifact entry"
+            )
+            archive.add(path, arcname=path.name)
+    return manifest, {
+        "source": "github-main",
+        "repository": repo,
+        "run_id": run_id,
+        "artifact": artifact,
+        "run": evidence,
+    }
+
+
 def verify_source(work, rev):
     """Match the deployment archive to its exact preserved commit, entirely offline."""
     revision(rev)
