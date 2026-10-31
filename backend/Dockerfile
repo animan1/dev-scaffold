@@ -20,8 +20,8 @@ FROM base AS dev
 # For dev, allow lock to drift; for prod we'll use --frozen in the image build stage
 RUN uv sync --all-extras
 # COPY src ./src
-# Install tools needed by CI targets that invoke bash and make
-RUN apt-get update && apt-get install -y --no-install-recommends bash make && rm -rf /var/lib/apt/lists/*
+# Install tools needed by CI and committed-release history validation
+RUN apt-get update && apt-get install -y --no-install-recommends bash git make && rm -rf /var/lib/apt/lists/*
 # Default command is the dev server (overridden in compose as needed)
 CMD ["python", "-m", "app.manage", "runserver", "0.0.0.0:8000"]
 
