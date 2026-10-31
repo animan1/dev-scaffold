@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(os.environ.get("REPO_DIR", Path(__file__).resolve().parents[2]))
 SPEC = importlib.util.spec_from_file_location("release_bundle", ROOT / "scripts/release_bundle.py")
 assert SPEC is not None and SPEC.loader is not None
 bundle = importlib.util.module_from_spec(SPEC)
