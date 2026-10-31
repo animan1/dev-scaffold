@@ -27,7 +27,7 @@ hotfix operation. Routine capture populates those caches while registries work.
 
 ## Adopt into an application
 
-1. Adopt `scripts/release_bundle.py`, `profiles/release-transport.mk`,
+1. Adopt `scripts/release_bundle.py`, `scripts/record_local_release.py`, `profiles/release-transport.mk`,
    `profiles/emergency-release/`, and the Make includes. Apply the small existing
    profile changes: `RELEASE_PLATFORM`, revision labels on **both** builds,
    `PROD_ENV_FILE`, and the `RELEASE_PULL` seam. Merge through a normal PR first.
@@ -263,12 +263,19 @@ make test
 ```
 
 `make test` discovers the release transport and bundle boundary tests through
-the existing developer interface. Manual runtime review uses the existing
-dummy application in this checkout: run `make up` and `make smoke` with its
-selected profile and normal configuration. Retain its existing Compose project
-identity and volumes; do not create or select a separate review/release-CI stack.
-These development smoke checks do not establish emergency-install acceptance.
-Extend this same dummy application's adapter for those additional scenarios.
+the existing developer interface. Laptop production review uses the existing
+dummy application and the normal production release recipe, as documented in
+the root README: `build-release-images` now records a content-pinned local
+manifest, `release-bundle-config` resolves its runtime configuration, and
+`deploy-release RELEASE_PULL=true` invokes `initialize-release` with those exact
+local images. Retain `RELEASE_COMPOSE_PROJECT=dev-scaffold`, the existing private
+configuration and volumes, and use loopback port 18080. `smoke-prod HOST_INGRESS=1
+HOST_INGRESS_HOST=localhost HOST_INGRESS_PORT=18080` checks the deployed app.
+Save machine-readable Compose output privately with `RELEASE_CONFIG_FILE`;
+it contains resolved credentials. `make up`/development smoke alone do not
+exercise these release paths. The local manifest deployment covers the shared
+build/config/init/deploy path; it does not by itself establish offline bundle
+installation acceptance.
 For emergency-install acceptance, use the actual capture,
 hotfix, validate and install commands documented above against separate
 development/staging build and destination environments, with their existing
