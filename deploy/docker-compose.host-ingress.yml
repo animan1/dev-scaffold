@@ -1,7 +1,10 @@
 services:
   nginx:
+    environment:
+      BACKEND_HOST: "${BACKEND_HOST:-backend}"
+      NGINX_ENVSUBST_FILTER: "^BACKEND_HOST$"
     ports: !override
       - "127.0.0.1:${HOST_INGRESS_PORT:-18080}:80"
     volumes: !override
-      - ./nginx/default.host-ingress.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/default.host-ingress.conf:/etc/nginx/templates/default.conf.template:ro
       - staticfiles:/static:ro
