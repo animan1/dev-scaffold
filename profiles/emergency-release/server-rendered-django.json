@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "profile": "server-rendered-django",
+  "images": {"app": "RELEASE_BACKEND_IMAGE", "web": "RELEASE_WEB_IMAGE", "monitor": "RELEASE_BACKEND_IMAGE"},
+  "check_targets": ["release-bundle-check"]
+}

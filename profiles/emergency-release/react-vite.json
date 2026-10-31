@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "profile": "react-vite",
+  "images": {"backend": "RELEASE_BACKEND_IMAGE", "nginx": "RELEASE_WEB_IMAGE", "monitor": "RELEASE_BACKEND_IMAGE"},
+  "check_targets": ["release-bundle-check"]
+}

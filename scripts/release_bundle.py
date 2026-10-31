@@ -161,3 +161,70 @@ def inputs(path):
         "smoke_url must be a loopback HTTP(S) origin",
     )
     return value
+
+
+def revision(value):
+    require(
+        re.fullmatch("[0-9a-f]{40}", value or ""), "require full 40-character revision"
+    )
+    return value
+
+
+def platform(value):
+    require(
+        value in ("linux/amd64", "linux/arm64"),
+        "supported platforms: linux/amd64, linux/arm64",
+    )
+    return value
+
+
+def image_id(value):
+    require(
+        re.fullmatch("sha256:[0-9a-f]{64}", value or ""), "invalid image content ID"
+    )
+    return value
+
+
+def adapter(root, profile_name):
+    path = root / "release-bundle.json"
+    if not path.exists():
+        path = root / "profiles/emergency-release" / (profile_name + ".json")
+    value = read_json(path)
+    require(
+        set(value) == {"schema", "profile", "images", "check_targets"},
+        "invalid adapter fields",
+    )
+    require(
+        value["schema"] == 1 and value["profile"] == profile_name,
+        "adapter/profile mismatch",
+    )
+    require(
+        value["images"]
+        and all(
+            re.fullmatch("[a-z][a-z0-9_-]*", key)
+            and re.fullmatch("RELEASE_[A-Z_]+_IMAGE", name)
+            for key, name in value["images"].items()
+        ),
+        "invalid image role mapping",
+    )
+    require(
+        value["check_targets"]
+        and all(
+            re.fullmatch("[a-z][a-z0-9_.-]*", name) for name in value["check_targets"]
+        ),
+        "invalid validation targets",
+    )
+    return value
+
+
+def manifest_values(path):
+    values = {}
+    for line in path.read_text().splitlines():
+        key, separator, value = line.partition("=")
+        require(
+            separator and key not in values and re.fullmatch("[A-Z_]+", key),
+            "malformed release manifest",
+        )
+        require(re.fullmatch("[a-zA-Z0-9_./:@+-]+", value), "unsafe manifest value")
+        values[key] = value
+    return values
