@@ -302,3 +302,99 @@ def verify_source(work, rev):
         hashlib.sha256(committed).hexdigest() == digest(work / "source.tar"),
         "source archive differs from preserved commit",
     )
+
+
+def write_json(path, value):
+    Path(path).write_text(json.dumps(value, sort_keys=True, indent=2) + "\n")
+
+
+def unpack(bundle, expected, work):
+    require(
+        re.fullmatch("[0-9a-f]{64}", expected or ""),
+        "independently supplied BUNDLE_SHA256 required",
+    )
+    require(digest(bundle) == expected, "bundle SHA256 mismatch")
+    extract(bundle, work)
+    data = read_json(work / "bundle.json")
+    require(
+        set(data)
+        == {"schema", "mode", "revision", "platform", "profile", "images", "files"},
+        "unexpected bundle fields",
+    )
+    require(
+        data["schema"] == 1 and data["mode"] in ("capture", "hotfix"),
+        "unsupported bundle schema/mode",
+    )
+    revision(data["revision"])
+    platform(data["platform"])
+    names = {
+        "source.tar",
+        "history.bundle",
+        "release.env",
+        "images.tar",
+        "evidence.json",
+    }
+    if data["mode"] == "capture":
+        names.add("artifacts.tar")
+    require(
+        set(data["files"]) == names
+        and {p.name for p in work.iterdir()} == names | {"bundle.json"},
+        "incomplete or unexpected bundle contents",
+    )
+    for name, expected_digest in data["files"].items():
+        require(
+            digest(work / name) == expected_digest, "bundle payload checksum mismatch"
+        )
+    source = work / "source"
+    source.mkdir()
+    extract(work / "source.tar", source)
+    spec = adapter(source, data["profile"])
+    saved = validate_images(work / "images.tar", data["images"], data["platform"])
+    evidence = read_json(work / "evidence.json")
+    manifest = manifest_values(work / "release.env")
+    require(
+        manifest.get("RELEASE_REVISION") == data["revision"],
+        "manifest revision mismatch",
+    )
+    require(
+        manifest.get("SCAFFOLD_PROFILE", "react-vite") == data["profile"],
+        "manifest profile mismatch",
+    )
+    for service, name in spec["images"].items():
+        item = data["images"][service]
+        if data["mode"] == "hotfix":
+            require(manifest[name] == item["id"], "hotfix manifest image mismatch")
+            require(
+                (saved[item["id"]].get("config", {}).get("Labels") or {}).get(
+                    "org.opencontainers.image.revision"
+                )
+                == data["revision"],
+                "saved image revision mismatch",
+            )
+        else:
+            require(
+                manifest[name] == item["reference"] and "@sha256:" in item["reference"],
+                "captured manifest image mismatch",
+            )
+    if data["mode"] == "hotfix":
+        require(
+            evidence["source"] == "local-checks"
+            and evidence["targets"] == spec["check_targets"]
+            and evidence["passed_at"] >= evidence["started_at"],
+            "missing local validation evidence",
+        )
+        require(
+            set(evidence["images"].values())
+            == {data["images"][s]["id"] for s in spec["images"]},
+            "validation evidence images mismatch",
+        )
+    else:
+        require(
+            evidence["source"] == "github-main"
+            and evidence["run"]["head_sha"] == data["revision"]
+            and evidence["run"]["head_branch"] == "main"
+            and evidence["run"]["conclusion"] == "success",
+            "missing successful main evidence",
+        )
+    verify_source(work, data["revision"])
+    return data, spec, source
