@@ -1,6 +1,7 @@
 .git
 .github
 .tmp
+.local
 backend/.coverage
 backend/.mypy_cache
 backend/.pytest_cache

@@ -1,318 +1,249 @@
 # Emergency release bundles
 
-This extends the existing image build, release verification, migration and smoke
-workflows. Normal deployment still selects a successful GitHub main release.
-Nothing here deploys through SSH or changes ingress. Frappe is excluded.
+Emergency deployment uses the same application build, release checks, migrations,
+deployment and smoke workflows as normal GHCR deployment. It replaces the image
+transport with a portable bundle. SSH, host selection and file transfer belong to
+the deployment coordinator; this repository owns packaging and tenant-side
+installation. Each child application owns its configuration and release checks.
+Applications with a separate deployment adapter, such as Frappe, are outside this
+implementation.
 
-## Ownership and prerequisites
+## Operator commands
 
-- **dev-scaffold** owns the portable format, packaging, preflight, and installer.
-- **cranescastle-infra** owns explicit release selection, trusted bundle/checksum
-  transfer, operator/host selection, and invoking the tenant's installer.
-- **Applications** own their committed adapter, local checks, required runtime
-  configuration, migration compatibility, and production/smoke hooks.
+From a child application's checkout, with its normal deployment configuration
+already prepared:
 
-Use Python 3.11+, Git, Make, Docker Engine, and current Compose v2 with JSON
-configuration and `pull_policy: never` support. Packaging additionally needs space
-for a complete source/history bundle and a Docker save archive. Capture needs
-`gh`, repository/artifact read access and registry read access **before** an outage.
-Hotfix builds need cached or reachable build dependencies, but no GitHub Actions
-minutes, GitHub API, registry login, or image publication. An outage does not make
-uncached base images or dependency downloads magically available: prepare those
-caches ahead of time. Destination Docker architecture must match `linux/amd64`
-or `linux/arm64`; emulation does not satisfy the destination architecture check.
-Hotfix packaging requires every non-application runtime image already present
-in the build daemon's cache for that platform; it never pulls these during the
-hotfix operation. Routine capture populates those caches while registries work.
+```bash
+# Before an outage: save the latest successful main release.
+make release-bundle-capture
 
-## Adopt into an application
+# During a CI outage: commit the hotfix on a feature branch, then build it locally.
+make release-bundle-hotfix
 
-1. Adopt `scripts/release_bundle.py`, `scripts/record_local_release.py`, `profiles/release-transport.mk`,
-   `profiles/emergency-release/`, and the Make includes. Apply the small existing
-   profile changes: `RELEASE_PLATFORM`, revision labels on **both** builds,
-   `PROD_ENV_FILE`, and the `RELEASE_PULL` seam. Merge through a normal PR first.
-   Older releases without the committed adapter/hooks cannot be packaged by this
-   contract. Start routine capture with the first adopted successful release.
-2. Keep the production Compose project name and volumes exactly as deployed.
-   Make every runtime service declare an `image`, including PostgreSQL, workers,
-   monitors, static initializers and any application-owned sidecar. The inventory
-   hook resolves **all** profiles so optional services are captured too. External
-   infrastructure (such as the separately owned Caddy ingress) stays external.
-3. For an unmodified scaffold profile, the supplied adapter works directly. For a
-   tenant topology, commit `release-bundle.json` with the following shape (example
-   for a server-rendered tenant; include monitor if the tenant defines it):
+# On the destination, after trusted transfer of the bundle and checksum file:
+make release-bundle-validate
+make release-bundle-install EMERGENCY=1
+```
 
-   ```json
-   {
-     "schema": 1,
-     "profile": "server-rendered-django",
-     "images": {
-       "app": "RELEASE_BACKEND_IMAGE",
-       "web": "RELEASE_WEB_IMAGE"
-     },
-     "check_targets": ["release-bundle-check"]
-   }
-   ```
+Capture and hotfix both print `PASS`, the selected full revision, bundle path and
+checksum. Hotfix builds run in the current clean checkout; no clone or checkout
+switch is needed. Validation prints `PASS: bundle, destination architecture and
+required inputs; no deployment changes`. Installation repeats validation, loads
+the saved images, and invokes the application's existing deployment and smoke
+hooks. Success means the application reports the bundled full revision.
 
-   Image roles map Compose services to manifest variables. Multiple services may
-   use the same variable. A custom adapter can declare another profile name;
-   the same name must select the tenant Make implementation. Every application
-   image must carry `org.opencontainers.image.revision=<full commit SHA>`.
-4. Implement these hooks using the existing application workflows. Do not copy
-   migrations into a new installer:
+`EMERGENCY=1` is required on **each installation invocation**. It is not saved as
+a standing authorization. Neither validation nor installation fetches Git,
+queries GitHub, authenticates to a registry, pulls images or rebuilds them.
 
-   | Hook | Contract |
-   | --- | --- |
-   | `build-release-images` | Build `<RELEASE_IMAGE_PREFIX>-backend:<RELEASE_REVISION>` and `-web:<RELEASE_REVISION>` for `RELEASE_PLATFORM`; no publication. Other role variables follow the corresponding lower-case suffix. |
-   | `release-bundle-config` | Print only `$(COMPOSE_RELEASE) --profile '*' config --format json` to stdout. Use the supplied absolute `PROD_ENV_FILE` and `RELEASE_FILE`, explicit project and port inputs. Never fetch, pull or build. |
-   | `release-bundle-check` | Required local quality, test, migration-drift and exact-image smoke checks. Respect `PROJECT_NAME`, `COMPOSE_PROJECT_NAME`, `RELEASE_COMPOSE_PROJECT`, and supplied image prefix. Use disposable databases. Fail on any gate failure; do not rebuild verified images. |
-   | `release-bundle-deploy` | Invoke existing production initialization/deployment, preserving migration ordering. All Compose actions must use the supplied `COMPOSE_RELEASE`. Pull steps must go through `RELEASE_PULL` (normal default pulls, installer supplies `true`). Never build/fetch/login. |
-   | `release-bundle-smoke` | Invoke existing application smoke checks **and verify the reported full revision**. Respect `COMPOSE_RELEASE` and production host/port inputs. Fail on mismatch. |
+## Defaults and overrides
 
-   Keep an application-specific hook file included **after** scaffold's defaults
-   when overriding recipes. Audit all target prerequisites for hidden fetches,
-   builds, alternate Compose commands or implicit pulls. The installer pins and
-   disables pulls for `COMPOSE_RELEASE`; it cannot enforce offline behavior in
-   arbitrary application shell code that ignores that interface.
+The Make commands reuse the selected profile's normal deployment settings:
+`PROD_ENV_FILE`, `RELEASE_COMPOSE_PROJECT`, host/port settings, ingress and
+monitoring options. There is no required emergency input JSON file or second
+credentials file. A previously recorded deployment project is reused unless a
+project override is explicit; conflicting project records still reject the
+operation. Existing credentials, volumes and application data stay on the host.
 
-5. **cranescastle-web:** preserve its `PRODUCTION_COMPOSE_PROJECT`, production env,
-   loopback port, and prelaunch host. Wire the deploy hook to `deploy-production`
-   and smoke hook to the existing prelaunch/release smoke target plus revision
-   comparison. Ensure those wrappers forward the supplied Compose command and
-   production env rather than independently reconstructing it.
-6. **cuplr:** map its actual backend/frontend/static-init services explicitly.
-   Its existing image suffix is `-frontend`, whereas the scaffold default is
-   `-web`. Use `RELEASE_FRONTEND_IMAGE` consistently in the tenant adapter, build,
-   capture manifest and production Compose. Retain application-owned integration,
-   static-file, migration and prelaunch checks; do not replace them with generic
-   scaffold smoke. These are adoption instructions, not a claim either tenant
-   has already adopted the changes.
+Use the same Make overrides that normal deployment needs when the destination
+deviates from the application's defaults. For example, a host with an alternate
+env file uses `PROD_ENV_FILE=/absolute/existing.env` for both normal and emergency
+deployment. Store recurring host settings in the application's existing Make
+configuration or deployment wrapper rather than retyping them for emergencies.
+The private env file must already exist and have mode 600.
 
-## Inputs and routine capture
+| Input | Default | Override purpose |
+| --- | --- | --- |
+| `RELEASE_REVISION` | Capture: latest successful main run's SHA. Hotfix: current committed HEAD. | Select a particular captured revision; a hotfix override must still equal HEAD. |
+| `RELEASE_PLATFORM` | Current Docker daemon's OS/architecture. | Build or capture for a different destination, e.g. `linux/amd64`. |
+| `BUNDLE_REPO` | GitHub repository from Git's `origin` URL. | Capture from another repository. |
+| `BUNDLE_WORKFLOW` | `ci.yml`, the scaffold release workflow. | Child application's differently named release workflow file. |
+| `BUNDLE_RUN_ID` | Latest successful main push run of that workflow. | Select a particular successful run. |
+| `BUNDLE_ARTIFACT` | Selected run's `release-<sha>-<arch>` artifact; legacy `release-<sha>` only on AMD64. | Explicit artifact selection, still checked against revision and platform. |
+| `BUNDLE` | `.local/emergency-release/bundle.tar` in the checkout. | Alternate output or transferred bundle location. |
+| `BUNDLE_SHA256` | Contents of `<BUNDLE>.sha256`. | A checksum supplied directly through a trusted channel. |
+| `BUNDLE_INPUTS` | Normal Make deployment settings. | Optional existing host JSON configuration, described below. |
+| `BUNDLE_SMOKE_URL` | Loopback HTTP origin using the normal production/release HTTP port. | An application's different smoke origin; custom routing/TLS should use its smoke hook. |
 
-Create a host-local JSON file outside the source repository (or under ignored
-`.local/`). It contains paths and non-secret options, **not credentials**:
+Capture prints the selected run, revision, platform and artifact before packaging.
+It checks that the run succeeded on main and the revision remains on main. If
+necessary it fetches that exact commit during this online preparation step,
+without switching the working checkout. It never falls back to an older release
+if the selected artifact/images are unavailable. A laptop's current architecture
+may differ from its CI image architecture: override `RELEASE_PLATFORM` explicitly
+in that case; there is no automatic architecture substitution.
+
+The conventional bundle path is refreshed only after packaging and checks pass.
+Starting a refresh invalidates the previous default checksum selection, so a
+failed attempt cannot cause a later bare install to select the previous bundle.
+An explicitly supplied `BUNDLE` path must not already exist. Installation reads
+only the selected path; it does not scan for an older usable bundle.
+
+## Build prerequisites and hotfix follow-up
+
+Use Python 3.12+, Git, Make, Docker Engine and Compose v2 with JSON configuration
+and `pull_policy: never` support. Prepare enough storage for the source/history
+and all saved runtime images. Supported destinations are `linux/amd64` and
+`linux/arm64`; destination emulation does not satisfy the architecture check.
+
+Capture requires GitHub/artifact and registry access **before** an outage.
+Hotfixes require cached or reachable build dependencies and all non-application
+runtime images already in the build daemon's cache for the selected architecture.
+The hotfix command does not pull those runtime images or publish application
+images. Prewarm base images/dependency caches for a completely offline build.
+
+For a hotfix, first commit the intended changes on a feature branch. Packaging
+rejects tracked or untracked uncommitted changes and any revision other than
+HEAD before building. It builds for the selected platform, runs the adapter's
+local checks through the existing Make workflows, and verifies the checks did
+not change committed source or the application image IDs. These normal checks
+may start and stop their usual development/release verification services; run
+build-side validation in the development environment, not on production data.
+
+Keep the original feature branch and bundle. After recovery, push the preserved
+commit and reconcile it with current main through the normal PR/CI workflow.
+Emergency installation does not waive that follow-up. `history.bundle` preserves
+the commit if the original checkout is lost; restore the preserved tip from that
+Git bundle before opening the normal PR.
+
+## Child application integration
+
+New applications forked from this scaffold already contain the common script,
+Make includes and supplied profile adapters. Existing derived applications get
+them by merging the scaffold update through their normal PR workflow. Resolve
+application-owned Make/Compose customizations as part of that update; there is
+no separate scaffold installation step.
+
+Keep `.local/` and host-owned credentials excluded from each application's
+Docker build context, as in the scaffold's `.dockerignore`.
+
+An unchanged scaffold profile needs no `release-bundle.json` configuration.
+`.scaffold-profile` selects its supplied adapter under
+`profiles/emergency-release/`. The selected release commit must contain these
+hooks; releases predating the update cannot be retroactively packaged by this
+contract. Begin routine capture with the first successful adopted release.
+
+For a customized topology, commit `release-bundle.json` in the application root:
 
 ```json
 {
-  "project": "cranescastle-production",
-  "env_file": "/home/operator/services/cranescastle-web/deploy/.env.prod",
-  "variables": {
-    "RELEASE_HTTP_PORT": "18080",
-    "PRODUCTION_COMPOSE_PROJECT": "cranescastle-production",
-    "PRODUCTION_HTTP_PORT": "18080",
-    "PRODUCTION_SMOKE_HOST": "preview.example.com"
-  },
-  "smoke_url": "http://127.0.0.1:18080"
+  "schema": 1,
+  "profile": "server-rendered-django",
+  "images": {"app": "RELEASE_BACKEND_IMAGE", "web": "RELEASE_WEB_IMAGE"},
+  "check_targets": ["release-bundle-check"]
 }
 ```
 
-`env_file` must exist, be absolute, and have mode 600. Supported non-secret
-variables are `HOST_INGRESS`, `HOST_INGRESS_HOST`, `HOST_INGRESS_PORT`, `MONITORING`,
-`RELEASE_HTTP_PORT`, `RELEASE_HTTPS_PORT`, `RELEASE_BIND_ADDRESS`, `RELEASE_HOST`,
-`PRODUCTION_COMPOSE_PROJECT`, `PRODUCTION_HTTP_PORT`, `PRODUCTION_SMOKE_HOST`.
-Paths and Make values must use the simple safe characters accepted by preflight.
-Custom adapters needing additional variables require an explicit installer
-contract update; arbitrary Make command overrides are deliberately rejected.
+These values come from the application's existing configuration:
 
-Use a separate build-input file with existing **non-production** validation env
-and available loopback ports. Packaging does not deploy; it only renders the
-runtime inventory. Local hotfix gates use `emergency-check-<revision>` projects,
-never the destination project's volumes. Do not use production credentials for
-build-side validation. The default smoke hook uses trusted TLS or HTTP loopback;
-applications with a private CA or special routing should supply their existing
-application smoke hook rather than disable certificate verification.
+- `schema` is the bundle adapter format version, currently the literal `1`.
+- `profile` is the `SCAFFOLD_PROFILE` value in committed `.scaffold-profile`.
+- `images` keys are application service names from the release Compose files
+  used by `COMPOSE_RELEASE`. Values are the manifest variables referenced by
+  those services' `image:` definitions. The supplied profiles use
+  `RELEASE_BACKEND_IMAGE` and `RELEASE_WEB_IMAGE`. Include workers/monitors that
+  share application images; multiple services can map to the same variable.
+- `check_targets` lists existing application Make targets that perform its local
+  release validation. The supplied `release-bundle-check` hook calls the selected
+  profile's quality, test, migration-drift and exact-image release checks.
 
-Capture the specifically selected successful main run while GitHub/GHCR are
-available. Source revision must be present locally. Use the exact artifact name;
-there is no latest-release selection or fallback:
+Every runtime service must declare an image, including databases, workers,
+initializers and optional monitors. Runtime inventory includes all Compose
+profiles. The application-role map excludes external infrastructure and stock
+database images, which are still captured automatically as runtime dependencies.
+Application images must carry `org.opencontainers.image.revision=<full SHA>`.
 
-```bash
-make release-bundle-capture \
-  RELEASE_REVISION=<full-commit-sha> RELEASE_PLATFORM=linux/arm64 \
-  BUNDLE_REPO=animan1/cranescastle-web BUNDLE_RUN_ID=<successful-main-run-id> \
-  BUNDLE_ARTIFACT=release-<full-commit-sha>-arm64 \
-  BUNDLE_INPUTS=/absolute/build-inputs.json BUNDLE=/absolute/captured-release.tar
-```
+Keep application-specific hook overrides included after the scaffold defaults.
+Use the existing workflows rather than copying migration/deployment logic:
 
-Expected: the specified run is confirmed successful and on main, its manifest
-and SBOMs are downloaded, every runtime image is pulled for that architecture,
-and the command prints `PASS: capture bundle` and `BUNDLE_SHA256=<64 hex>`.
-Historical unsuffixed artifacts are accepted only for AMD64. No older run is
-selected if this run/artifact is unavailable. Copy the printed checksum through
-an independently trusted channel; internal checksums alone do not establish
-authorship. A bundle contains executable deployment source and must be trusted.
-
-## Hotfix when CI is unavailable
-
-Create and preserve a feature-branch commit with the intended fix. Do not build
-from an uncommitted working tree. Run from that exact clean HEAD:
-
-```bash
-make release-bundle-hotfix \
-  RELEASE_REVISION=<full-hotfix-commit-sha> RELEASE_PLATFORM=linux/arm64 \
-  BUNDLE_INPUTS=/absolute/build-inputs.json BUNDLE=/absolute/hotfix-release.tar
-```
-
-Expected: the committed source is cloned locally into an isolated build tree,
-images are built for the destination architecture with revision labels, all
-adapter-declared checks pass against the same application image IDs, and the
-command prints `PASS: hotfix bundle` plus the independent SHA256. Any failed
-check, changed source/image, missing runtime image or wrong architecture fails
-packaging. Full check evidence identifies the targets, passing time and image
-IDs; it is local validation, not a GitHub attestation. Application-specific
-checks must be substantive: the adapter determines their coverage.
-
-The bundle preserves reachable commit history in `history.bundle`. Keep the
-original branch and bundle until reconciliation is complete. After service
-recovery, push the preserved hotfix branch and open a normal PR; resolve changes
-against current main and run ordinary CI once capacity returns. If the original
-checkout is lost, restore the branch locally from the trusted bundle's
-`history.bundle` before doing that PR work. Do not rewrite it as an untraceable
-working-tree patch. Emergency installation does not waive this follow-up.
-
-## Destination commands and infra handoff
-
-Infra transfers the complete tar file without extraction, verifies the trusted
-checksum, and invokes these Make targets **as the tenant operator from its
-existing checkout**, with an explicit destination inputs file. It must bypass
-its normal GitHub selection, Git fetch, registry-auth and pull sequence for this
-mode. No SSH behavior belongs in this repository.
-
-```bash
-make release-bundle-validate \
-  BUNDLE=/absolute/transferred-release.tar BUNDLE_SHA256=<trusted-64-hex> \
-  BUNDLE_INPUTS=/absolute/destination-inputs.json
-
-make release-bundle-install EMERGENCY=1 \
-  BUNDLE=/absolute/transferred-release.tar BUNDLE_SHA256=<trusted-64-hex> \
-  BUNDLE_INPUTS=/absolute/destination-inputs.json
-```
-
-Validation must print `PASS: bundle, destination architecture and required
-inputs; no deployment changes`. Installation repeats preflight under a
-tenant-local lock. Missing `EMERGENCY=1` rejects that invocation. It checks:
-
-- Trusted outer checksum, complete payload checksums, safe archive members,
-  exact source/history/manifest revision, and applicable validation evidence.
-- Image config identities, uncompressed layer digests and target architecture
-  before any image load; destination daemon architecture must match.
-- Every runtime service, every manifest role and reference, env file, required
-  bind inputs, external secrets/configs/networks/volumes, and project identity
-  against existing scaffold/infra deployment records where present.
-
-Then it loads images by content ID, freezes the runtime configuration to those
-IDs with `pull_policy: never` and no build definitions, and calls the existing
-deployment/migration and smoke hooks. Neither the installer nor bundled history
-verification calls GitHub, Git fetch, registry login or image pull. No mutable
-tag selects an installed image. Registry manifest digests remain recorded in
-captured release metadata; locally built hotfixes are pinned by config content
-ID because they have not been published to a registry.
-
-The inputs must name the **existing** project; guessing a new project can select
-a different dataset. Existing named volumes/data are retained, untracked bind
-configuration resolves against the tenant checkout, and committed deployment
-files come from the exact bundled source. Credentials are resolved on the host,
-never packed. Resolved Compose configuration is private local state, not printed
-or included in the audit. Keep `.local/emergency-release/` private and backed up
-as appropriate. Do not delete retained deployment directories while containers
-may bind their committed files. The installer does not change checkout HEAD.
-
-Expected success: the existing app reports the bundled full revision and its
-normal smoke passes. `.local/emergency-release/deployment.json` records status,
-revision, image identities, validation source, emergency mode, checksum, project,
-time and retained directory. Each retained directory also has its own audit.
-A failure after deployment starts is recorded and may leave migrations applied;
-inspect the actual service/schema state before another attempt. There is no
-automatic rollback or silent fallback.
-
-## Bundle v1 transfer contract
-
-One uncompressed portable tar file, with these regular-file members:
-
-| File | Purpose |
+| Hook | Contract |
 | --- | --- |
-| `bundle.json` | Schema 1; mode `capture`/`hotfix`; full revision; profile; platform; service-to-image identities/references; SHA256 of each payload. |
-| `source.tar` | Exact `git archive` of the selected commit. |
-| `history.bundle` | Self-contained Git history reachable from `emergency-release`; preserves hotfix reconciliation. |
-| `release.env` | Original captured release manifest, or hotfix manifest with application content IDs. |
-| `images.tar` | Docker save of every distinct runtime image ID, including data services and optional profiles. |
-| `evidence.json` | Selected successful main run/artifact identity, or locally passing declared checks and exact image IDs. |
-| `artifacts.tar` | Capture only: original release manifest and SPDX SBOM artifacts. |
+| `build-release-images` | Build locally for `RELEASE_PLATFORM`, label the revision, and respect `RELEASE_FILE`/`RELEASE_IMAGE_PREFIX`. Role suffixes correspond to the manifest variables, e.g. `RELEASE_WEB_IMAGE` uses `-web`. Do not publish. |
+| `release-bundle-config` | Print only `$(COMPOSE_RELEASE) --profile '*' config --format json`. Respect the supplied env file, release manifest, project and host/port settings; no fetch/pull/build. |
+| `release-bundle-check` | Invoke the application's normal local quality and exact-image release checks. Respect the selected build/project settings and use the normal disposable validation databases. Fail on any gate failure and do not rebuild release images. |
+| `release-bundle-deploy` | Invoke the normal production initialization/deployment target with its existing migration ordering. All Compose actions use the supplied `COMPOSE_RELEASE`; pulls go through `RELEASE_PULL`, which the installer supplies as `true`. No build/fetch/login. |
+| `release-bundle-smoke` | Invoke normal application smoke checks and verify the reported full revision, respecting `COMPOSE_RELEASE` and host/port settings. |
 
-Reject incomplete bundles rather than trying the registry. Integrity checks are
-not signatures; the independent outer checksum must arrive through a trusted
-channel. Source/archive symlinks, hardlinks and device entries are rejected in
-v1 rather than followed. Applications using committed symlinks need a deliberate
-format extension before adoption. Format v1 is intentionally single-architecture.
+If a child app uses a different frontend suffix, map its actual manifest variable
+and image build suffix consistently. Keep application-owned static, migration,
+integration and prelaunch checks. Audit wrappers for hidden network calls or
+alternate Compose commands; an installer cannot enforce offline behavior in
+arbitrary application code that ignores the supplied interface.
 
-## Release recovery is not database rollback
+## Destination and deployment-coordinator contract
 
-This restores an application release and runs that release's normal migration
-workflow. Selecting an older bundle does not reverse an already-applied schema
-migration, recover deleted data, or prove compatibility. Before an emergency
-installation, assess application migration compatibility and available database
-backups through the existing tenant operational procedure. If schema/data
-recovery is required, use the separately tested database restore procedure.
+Transfer the complete `.local/emergency-release/bundle.tar` to that same path
+under the destination's existing application checkout. Install its matching
+`.local/emergency-release/bundle.tar.sha256` through an independently trusted
+channel. The checksum file is created by packaging; operators do not need to
+look up or type SHA values. Internal checksums detect damage but do not prove
+authorship, so an untrusted tar and checksum arriving together are insufficient.
 
-## Development/staging review and automated tests
+The coordinator then runs, as the existing application operator:
+
+```bash
+make release-bundle-validate
+make release-bundle-install EMERGENCY=1
+```
+
+It must bypass normal GitHub selection, Git fetch, registry authentication and
+pull steps for emergency installation. To transfer elsewhere, override `BUNDLE`
+and keep the checksum at `<BUNDLE>.sha256`, or supply a trusted `BUNDLE_SHA256`.
+No transfer/SSH behavior is implemented here.
+
+Validation checks the outer checksum, complete payload checksums, safe archive
+members, exact source/history/manifest revision, validation evidence, image
+config/layer digests and platform. It also checks the destination architecture,
+project records, env file, bind files and external Compose resources before
+loading images or changing services. Installation repeats preflight under a
+local lock. It freezes all services to content IDs with `pull_policy: never` and
+no build definitions, then calls the existing deploy/migration/smoke hooks.
+
+Host credentials are never packed. Named volumes retain their normal identity;
+untracked bind configuration resolves against the destination checkout and
+committed deployment source comes from the bundle. The installer leaves the
+checkout HEAD unchanged. Private state in `.local/emergency-release/` contains
+resolved Compose configuration and retained source paths; do not print or delete
+those paths while containers may bind files from them.
+
+The private `deployment.json` audit records status, revision, image identities,
+validation source, emergency mode, checksum, project and retained directory.
+It does not record credentials. A failure after deployment starts can leave
+migrations applied; inspect service/schema state before attempting recovery.
+
+An optional existing `BUNDLE_INPUTS` JSON file has fields `project`, `env_file`,
+`variables` and `smoke_url`. `env_file` is an absolute private existing file;
+`variables` contains only supported non-secret Make overrides. This compatibility
+override is useful for a coordinator already managing host input records; it is
+not needed for ordinary operators and does not duplicate credentials.
+
+## Bundle v1 and database recovery
+
+The portable tar contains `bundle.json` (mode/revision/platform/profile, every
+runtime image identity/reference, payload SHA256s), `source.tar` (exact committed
+source), `history.bundle` (preserved Git history), `release.env` (manifest),
+`images.tar` (all distinct runtime image IDs) and `evidence.json` (successful main
+run or locally passing checks). Capture also includes `artifacts.tar` with the
+original manifest and SPDX SBOMs. V1 is single-architecture and rejects source
+symlinks/hardlinks/devices; applications requiring those need a format extension.
+
+Release recovery runs the selected release's normal migrations. It does not
+reverse an already applied schema migration or recover deleted data. Assess
+migration compatibility and backups using the application's existing procedure;
+use the separately tested database restore workflow when schema/data recovery
+is necessary. There is no automatic rollback or older-release fallback.
+
+## Development review
 
 ```bash
 make be.sync
-make test
+make be.verify
 ```
 
-`make test` discovers the release transport and bundle boundary tests through
-the existing developer interface. Laptop production review uses the existing
-dummy application and the normal production release recipe, as documented in
-the root README: `build-release-images` now records a content-pinned local
-manifest, `release-bundle-config` resolves its runtime configuration, and
-`deploy-release RELEASE_PULL=true` invokes `initialize-release` with those exact
-local images. Retain `RELEASE_COMPOSE_PROJECT=dev-scaffold`, the existing private
-configuration and volumes. Run `prepare-prod LOCAL_TLS=1` for the laptop's
-localhost/127.0.0.1 certificate, then deploy with
-`RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443`.
-`smoke-prod CURL_FLAGS='--cacert deploy/nginx/certs/server.crt'` checks the
-actual TLS listener without bypassing certificate validation or spoofing
-forwarded headers. HTTP redirects to `https://127.0.0.1/api/healthz`; a browser
-needs a one-time trust decision for the local self-signed certificate.
-`HOST_INGRESS=1` is instead for a real separately owned TLS proxy; it is not
-a browser-ready laptop setup without that proxy.
-Save machine-readable Compose output privately with `RELEASE_CONFIG_FILE`;
-it contains resolved credentials. `make up`/development smoke alone do not
-exercise these release paths. The local manifest deployment covers the shared
-build/config/init/deploy path; it does not by itself establish offline bundle
-installation acceptance.
-For emergency-install acceptance, use the actual capture,
-hotfix, validate and install commands documented above against separate
-development/staging build and destination environments, with their existing
-project/configuration inputs. Verify the application reports each selected
-revision, existing data/configuration survives, and damaged/wrong-platform
-bundles fail before changing services. Do not use production for review.
-
-The optional isolated-Docker regression test runs through the same test target:
-
-```bash
-make test RUN_EMERGENCY_INTEGRATION=1
-```
-
-It is opt-in because it starts privileged disposable Docker engines, needs
-initial Docker Hub access, and cannot run in the ordinary Docker-free unit-test
-environment. It calls the shared `release-bundle-capture`,
-`release-bundle-hotfix`, and `release-bundle-install` operator targets; there is
-no separate acceptance Make target. Its deterministic GitHub responses test
-error handling; use a real selected successful main run for staging acceptance.
-
-This automated test prepares three test images, then starts two disposable privileged
-Docker-in-Docker engines with `--network none`. It seeds only the build engine,
-captures a release through a real local OCI registry, stops that registry, and
-installs into the empty destination engine. GitHub run/artifact responses are
-deterministic synthetic fixtures; the exercise creates no Actions runs. All
-GitHub calls fail after the outage boundary. It rejects incomplete and
-wrong-platform bundles without changing destination container IDs, builds and
-checks an exact committed hotfix without external access, and installs it on the
-same destination project. The app visibly changes from `release-one` to
-`hotfix-two`; both revision SHAs are checked. An existing SQLite row, private
-bind configuration and env value must survive. Test engines/volumes are removed
-afterward; no production daemon resources are selected. This tests the reusable
-adapter contract, not either tenant's application-specific acceptance suite.
+Use the existing dev-scaffold dummy application, its normal release deployment
+recipe in the root README, and its established project/configuration/data for
+manual review. Development `make up` alone does not exercise release transport.
+Use the capture/hotfix/validate/install operator commands above; do not introduce
+another review application or Compose project. Confirm each deployed revision,
+preserved data/configuration and fail-before-mutation rejection for incomplete
+or wrong-platform bundles. Do not use production.

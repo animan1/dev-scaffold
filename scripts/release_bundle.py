@@ -21,6 +21,22 @@ import time
 import urllib.request
 
 
+RUNTIME_VARIABLES = {
+    "HOST_INGRESS",
+    "HOST_INGRESS_HOST",
+    "HOST_INGRESS_PORT",
+    "MONITORING",
+    "RELEASE_HTTP_PORT",
+    "RELEASE_BIND_ADDRESS",
+    "RELEASE_HTTPS_PORT",
+    "RELEASE_HOST",
+    "PRODUCTION_COMPOSE_PROJECT",
+    "PRODUCTION_HTTP_PORT",
+    "PRODUCTION_SMOKE_HOST",
+}
+DEFAULT_BUNDLE = ".local/emergency-release/bundle.tar"
+
+
 class Rejected(Exception):
     pass
 
@@ -137,8 +153,37 @@ def adapter(root, profile_name):
     return value
 
 
-def inputs(path):
-    value = read_json(path)
+def inputs(path=None):
+    # Make exports the same resolved settings used by normal release deployment.
+    value = (
+        read_json(path)
+        if path
+        else {
+            "project": os.environ.get("RELEASE_COMPOSE_PROJECT")
+            or Path.cwd().name + "-release",
+            "env_file": str(
+                Path(os.environ.get("PROD_ENV_FILE") or "deploy/.env.prod").resolve()
+            ),
+            "variables": {
+                key: os.environ[key] for key in RUNTIME_VARIABLES if os.environ.get(key)
+            },
+            "smoke_url": os.environ.get("BUNDLE_SMOKE_URL")
+            or "http://127.0.0.1:"
+            + (
+                os.environ.get("PRODUCTION_HTTP_PORT")
+                or os.environ.get("RELEASE_HTTP_PORT")
+                or "18080"
+            ),
+        }
+    )
+    if not path and not os.environ.get("BUNDLE_EXPLICIT_PROJECT", "1"):
+        for record in (
+            ".local/emergency-release/deployment.json",
+            ".git/tenant-deployment.json",
+        ):
+            if Path(record).is_file():
+                value["project"] = read_json(record)["project"]
+                break
     require(
         set(value) == {"project", "env_file", "variables", "smoke_url"},
         "invalid inputs fields",
@@ -179,20 +224,7 @@ def inputs(path):
             "reserved input variable",
         )
         require(
-            key
-            in {
-                "HOST_INGRESS",
-                "HOST_INGRESS_HOST",
-                "HOST_INGRESS_PORT",
-                "MONITORING",
-                "RELEASE_HTTP_PORT",
-                "RELEASE_BIND_ADDRESS",
-                "RELEASE_HTTPS_PORT",
-                "RELEASE_HOST",
-                "PRODUCTION_COMPOSE_PROJECT",
-                "PRODUCTION_HTTP_PORT",
-                "PRODUCTION_SMOKE_HOST",
-            },
+            key in RUNTIME_VARIABLES,
             "unsupported input variable",
         )
         require(
@@ -253,7 +285,7 @@ def build_hotfix(root, source, rev, target, selected, values, env, spec):
     )
 
     env["DOCKER_DEFAULT_PLATFORM"] = target
-    prefix = "local/emergency-" + rev
+    prefix = os.environ.get("RELEASE_IMAGE_PREFIX") or "local/" + root.name
     build_values = {
         **values,
         "SCAFFOLD_PROFILE": selected,
@@ -270,7 +302,7 @@ def build_hotfix(root, source, rev, target, selected, values, env, spec):
         + rev
         for name in spec["images"].values()
     }
-    manifest = source / "release.env"
+    manifest = Path(values.get("RELEASE_FILE", source / "release.env"))
     manifest.write_text(
         "".join(
             f"{key}={value}\n"
@@ -284,15 +316,8 @@ def build_hotfix(root, source, rev, target, selected, values, env, spec):
     )
     before = {name: image_id(inspect(tag, env)["Id"]) for name, tag in roles.items()}
     started = time.time()
-    check_project = "emergency-check-" + rev[:16]
-    check_values = {
-        **build_values,
-        "PROJECT_NAME": check_project,
-        "COMPOSE_PROJECT_NAME": check_project,
-        "RELEASE_COMPOSE_PROJECT": check_project + "-release",
-    }
     for check in spec["check_targets"]:
-        make(source, check, check_values, env)
+        make(source, check, build_values, env)
     require(
         not run("git", "diff", "--exit-code", rev, cwd=source, output=True),
         "checks changed committed source",
@@ -428,10 +453,108 @@ def manifest_values(path):
     return values
 
 
-def capture_evidence(work, rev, target, env, spec):
-    repo = os.environ.get("BUNDLE_REPO", "")
-    run_id = os.environ.get("BUNDLE_RUN_ID", "")
-    artifact = os.environ.get("BUNDLE_ARTIFACT", "")
+def current_platform(env):
+    value = run(
+        "docker",
+        "info",
+        "--format",
+        "{{.OSType}}/{{.Architecture}}",
+        env=env,
+        output=True,
+    )
+    return platform(
+        value.decode().strip().replace("x86_64", "amd64").replace("aarch64", "arm64")
+    )
+
+
+def capture_selection(root, target, env):
+    repo = os.environ.get("BUNDLE_REPO")
+    if not repo:
+        remote = (
+            run("git", "remote", "get-url", "origin", cwd=root, output=True)
+            .decode()
+            .strip()
+        )
+        match = re.fullmatch(
+            r"(?:git@github\.com:|https://github\.com/|ssh://git@github\.com/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?",
+            remote,
+        )
+        require(match, "origin must identify a GitHub repository, or set BUNDLE_REPO")
+        repo = match[1]
+    require(
+        re.fullmatch("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo), "invalid BUNDLE_REPO"
+    )
+    run_id = os.environ.get("BUNDLE_RUN_ID")
+    rev = os.environ.get("RELEASE_REVISION")
+    if rev:
+        revision(rev)
+    if run_id:
+        require(run_id.isdigit(), "invalid BUNDLE_RUN_ID")
+        selected = json.loads(
+            run(
+                "gh", "api", f"repos/{repo}/actions/runs/{run_id}", env=env, output=True
+            )
+        )
+    else:
+        workflow = os.environ.get("BUNDLE_WORKFLOW") or "ci.yml"
+        require(re.fullmatch(r"[A-Za-z0-9_.-]+", workflow), "invalid BUNDLE_WORKFLOW")
+        query = f"repos/{repo}/actions/workflows/{workflow}/runs?branch=main&event=push&status=success&per_page=1"
+        if rev:
+            query += "&head_sha=" + rev
+        runs = json.loads(run("gh", "api", query, env=env, output=True))[
+            "workflow_runs"
+        ]
+        require(runs, "no successful main release run found")
+        selected = runs[0]
+        run_id = str(selected["id"])
+    require(
+        not rev or rev == selected["head_sha"],
+        "selected run revision differs from RELEASE_REVISION",
+    )
+    rev = revision(selected["head_sha"])
+    require(
+        selected["head_branch"] == "main"
+        and selected["event"] == "push"
+        and selected["status"] == "completed"
+        and selected["conclusion"] == "success"
+        and selected["repository"]["full_name"].lower() == repo.lower(),
+        "selected run is not a successful main release",
+    )
+    artifact = os.environ.get("BUNDLE_ARTIFACT")
+    if not artifact:
+        artifacts = json.loads(
+            run(
+                "gh",
+                "api",
+                f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100",
+                env=env,
+                output=True,
+            )
+        )["artifacts"]
+        names = {item["name"] for item in artifacts if not item["expired"]}
+        artifact = f"release-{rev}-{target.split('/')[1]}"
+        if artifact not in names and target == "linux/amd64":
+            artifact = f"release-{rev}"
+        require(
+            artifact in names,
+            "selected run has no unexpired release artifact for this architecture; no older release selected",
+        )
+    print(
+        f"Selected {repo} main run {run_id}, revision {rev}, platform {target}, artifact {artifact}"
+    )
+    return {
+        "BUNDLE_REPO": repo,
+        "BUNDLE_RUN_ID": run_id,
+        "BUNDLE_ARTIFACT": artifact,
+        "RELEASE_REVISION": rev,
+    }
+
+
+def capture_evidence(work, rev, target, env, spec, selection=None):
+    selection = os.environ if selection is None else selection
+    repo = selection.get("BUNDLE_REPO", "")
+    run_id = selection.get("BUNDLE_RUN_ID", "")
+    artifact = selection.get("BUNDLE_ARTIFACT", "")
     require(
         re.fullmatch("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo), "BUNDLE_REPO required"
     )
@@ -453,7 +576,7 @@ def capture_evidence(work, rev, target, env, spec):
         and evidence["event"] == "push"
         and evidence["status"] == "completed"
         and evidence["conclusion"] == "success"
-        and evidence["repository"]["full_name"] == repo,
+        and evidence["repository"]["full_name"].lower() == repo.lower(),
         "specified run is not a successful main release of this revision/repository",
     )
     comparison = json.loads(
@@ -502,15 +625,54 @@ def capture_evidence(work, rev, target, env, spec):
 def package(mode):
     env = environment()
     root = Path.cwd()
-    rev = revision(os.environ.get("RELEASE_REVISION"))
-    target = platform(os.environ.get("RELEASE_PLATFORM"))
+    explicit_output = os.environ.get("BUNDLE")
+    output = Path(explicit_output or DEFAULT_BUNDLE).resolve()
+    require(
+        not explicit_output or not output.exists(),
+        "refusing to replace existing bundle",
+    )
+    if not explicit_output:
+        # A failed refresh must not leave the previous release selected for bare install.
+        Path(str(output) + ".sha256").unlink(missing_ok=True)
+    rev = os.environ.get("RELEASE_REVISION")
+    if mode == "hotfix":
+        require(
+            not run("git", "status", "--porcelain", cwd=root, output=True),
+            "commit all hotfix changes first",
+        )
+        head = run("git", "rev-parse", "HEAD", cwd=root, output=True).decode().strip()
+        rev = revision(rev or head)
+        require(head == rev, "hotfix revision must equal committed HEAD")
+    target = (
+        platform(os.environ["RELEASE_PLATFORM"])
+        if os.environ.get("RELEASE_PLATFORM")
+        else current_platform(env)
+    )
+    if mode == "hotfix":
+        print(
+            f"Selected hotfix revision {rev}, platform {target}; local build and checks"
+        )
+    selection = capture_selection(root, target, env) if mode == "capture" else None
+    if selection:
+        rev = selection["RELEASE_REVISION"]
+        try:
+            run("git", "cat-file", "-e", rev + "^{commit}", cwd=root, output=True)
+        except subprocess.CalledProcessError:
+            # Capture is online preparation; installation never fetches.
+            run(
+                "git",
+                "fetch",
+                "--no-tags",
+                "origin",
+                rev,
+                cwd=root,
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            )
     selected = os.environ.get("SCAFFOLD_PROFILE", "")
-    settings = inputs(os.environ["BUNDLE_INPUTS"])
-    output = Path(os.environ["BUNDLE"]).resolve()
-    require(not output.exists(), "refusing to replace existing bundle")
+    settings = inputs(os.environ.get("BUNDLE_INPUTS"))
     with tempfile.TemporaryDirectory(prefix="release-bundle-") as temporary:
         work = Path(temporary)
-        source = preserve_source(root, rev, work)
+        source = preserve_source(root, rev, work, checkout=mode != "hotfix")
         spec = adapter(source, selected)
         data = {
             "schema": 1,
@@ -519,11 +681,13 @@ def package(mode):
             "platform": target,
             "profile": selected,
         }
-        release = source / "release.env" if mode == "hotfix" else work / "release.env"
+        release = work / "release.env"
         values = options(data, settings, release)
         env["DOCKER_DEFAULT_PLATFORM"] = target
         if mode == "capture":
-            captured, evidence = capture_evidence(work, rev, target, env, spec)
+            captured, evidence = capture_evidence(
+                work, rev, target, env, spec, selection
+            )
             release.write_bytes(captured.read_bytes())
             recorded = manifest_values(release)
             require(
@@ -553,9 +717,10 @@ def package(mode):
             hotfix_manifest, values, roles, evidence = build_hotfix(
                 root, source, rev, target, selected, values, env, spec
             )
-            release = work / "release.env"
-            release.write_bytes(hotfix_manifest.read_bytes())
-            values["RELEASE_FILE"] = str(release)
+            require(
+                hotfix_manifest == release,
+                "hotfix manifest must use the selected release path",
+            )
         config = compose(source, values, env)
         for definition in config["services"].values():
             reference = definition.get("image")
@@ -593,11 +758,24 @@ def package(mode):
             names.append("artifacts.tar")
         data["files"] = {name: digest(work / name) for name in names}
         write_json(work / "bundle.json", data)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(output, "x") as archive:
-            for name in ["bundle.json", *names]:
-                archive.add(work / name, arcname=name)
-        print(f"PASS: {mode} bundle {output}\nBUNDLE_SHA256={digest(output)}")
+        output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # Refresh the conventional transfer path only after the complete build/checks pass.
+        with tempfile.TemporaryDirectory(
+            dir=output.parent, prefix=".bundle-"
+        ) as staging_path:
+            staged = Path(staging_path) / "bundle.tar"
+            with tarfile.open(staged, "x") as archive:
+                for name in ["bundle.json", *names]:
+                    archive.add(work / name, arcname=name)
+            checksum = digest(staged)
+            checksum_path = Path(str(output) + ".sha256")
+            staged_checksum = Path(staging_path) / "bundle.tar.sha256"
+            staged_checksum.write_text(checksum + "\n")
+            os.replace(staged, output)
+            os.replace(staged_checksum, checksum_path)
+        print(
+            f"PASS: {mode} bundle {output}\nBUNDLE_SHA256={checksum}\nChecksum file: {checksum_path}"
+        )
 
 
 def verify_source(work, rev):
@@ -619,9 +797,17 @@ def verify_source(work, rev):
     )
 
 
-def preserve_source(root, rev, work):
+def preserve_source(root, rev, work, checkout=True):
     """Package one committed source tree and its local Git history without changing refs."""
     revision(rev)
+    if not checkout:
+        run("git", "bundle", "create", str(work / "history.bundle"), "HEAD", cwd=root)
+        (work / "source.tar").write_bytes(
+            run("git", "archive", "--format=tar", rev, cwd=root, output=True)
+        )
+        with tarfile.open(work / "source.tar") as archive:
+            members(archive)
+        return root
     bare = work / "history.git"
     run("git", "clone", "--bare", "--no-hardlinks", str(root), str(bare), output=True)
     run("git", "update-ref", "refs/heads/emergency-release", rev, cwd=bare)
@@ -795,9 +981,12 @@ def destination(operation):
         "installation requires EMERGENCY=1 on each invocation",
     )
     env = environment()
-    settings = inputs(os.environ["BUNDLE_INPUTS"])
-    bundle = Path(os.environ["BUNDLE"]).resolve()
-    expected = os.environ.get("BUNDLE_SHA256")
+    settings = inputs(os.environ.get("BUNDLE_INPUTS"))
+    bundle = Path(os.environ.get("BUNDLE") or DEFAULT_BUNDLE).resolve()
+    expected = (
+        os.environ.get("BUNDLE_SHA256")
+        or Path(str(bundle) + ".sha256").read_text().strip()
+    )
     root = Path.cwd()
     state = root / ".local/emergency-release"
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -805,22 +994,9 @@ def destination(operation):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         with staging(state) as work:
             data, spec, source = unpack(bundle, expected, work)
-            actual = run(
-                "docker",
-                "info",
-                "--format",
-                "{{.OSType}}/{{.Architecture}}",
-                env=env,
-                output=True,
-            )
-            host = (
-                actual.decode()
-                .strip()
-                .replace("x86_64", "amd64")
-                .replace("aarch64", "arm64")
-            )
             require(
-                host == data["platform"], "bundle architecture differs from destination"
+                current_platform(env) == data["platform"],
+                "bundle architecture differs from destination",
             )
             record = state / "deployment.json"
             if record.exists():
