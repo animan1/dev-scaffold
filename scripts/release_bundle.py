@@ -519,6 +519,30 @@ def verify_source(work, rev):
     )
 
 
+def preserve_source(root, rev, work):
+    """Package one committed source tree and its local Git history without changing refs."""
+    revision(rev)
+    bare = work / "history.git"
+    run("git", "clone", "--bare", "--no-hardlinks", str(root), str(bare), output=True)
+    run("git", "update-ref", "refs/heads/emergency-release", rev, cwd=bare)
+    run(
+        "git",
+        "bundle",
+        "create",
+        str(work / "history.bundle"),
+        "refs/heads/emergency-release",
+        cwd=bare,
+    )
+    source_tar = run("git", "archive", "--format=tar", rev, cwd=bare, output=True)
+    (work / "source.tar").write_bytes(source_tar)
+    with tarfile.open(work / "source.tar") as archive:
+        members(archive)
+    source = work / "source"
+    run("git", "clone", str(work / "history.bundle"), str(source), output=True)
+    run("git", "checkout", "--detach", rev, cwd=source, output=True)
+    return source
+
+
 def write_json(path, value):
     Path(path).write_text(json.dumps(value, sort_keys=True, indent=2) + "\n")
 
