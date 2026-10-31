@@ -239,6 +239,82 @@ def make(root, target, values, env, output=False):
     )
 
 
+def build_hotfix(root, source, rev, target, selected, values, env, spec):
+    """Build and locally validate one clean committed hotfix for its target platform."""
+    revision(rev)
+    platform(target)
+    require(
+        not run("git", "status", "--porcelain", cwd=root, output=True),
+        "commit all hotfix changes first",
+    )
+    require(
+        run("git", "rev-parse", "HEAD", cwd=root, output=True).decode().strip() == rev,
+        "hotfix revision must equal committed HEAD",
+    )
+
+    env["DOCKER_DEFAULT_PLATFORM"] = target
+    prefix = "local/emergency-" + rev
+    build_values = {
+        **values,
+        "SCAFFOLD_PROFILE": selected,
+        "RELEASE_REVISION": rev,
+        "RELEASE_PLATFORM": target,
+        "RELEASE_IMAGE_PREFIX": prefix,
+    }
+    make(source, "build-release-images", build_values, env)
+    roles = {
+        name: prefix
+        + "-"
+        + name.removeprefix("RELEASE_").removesuffix("_IMAGE").lower()
+        + ":"
+        + rev
+        for name in spec["images"].values()
+    }
+    manifest = source / "release.env"
+    manifest.write_text(
+        "".join(
+            f"{key}={value}\n"
+            for key, value in {
+                "RELEASE_REVISION": rev,
+                "SCAFFOLD_PROFILE": selected,
+                "RELEASE_IMAGE_PREFIX": prefix,
+                **roles,
+            }.items()
+        )
+    )
+    before = {name: image_id(inspect(tag, env)["Id"]) for name, tag in roles.items()}
+    started = time.time()
+    check_project = "emergency-check-" + rev[:16]
+    check_values = {
+        **build_values,
+        "PROJECT_NAME": check_project,
+        "COMPOSE_PROJECT_NAME": check_project,
+        "RELEASE_COMPOSE_PROJECT": check_project + "-release",
+    }
+    for check in spec["check_targets"]:
+        make(source, check, check_values, env)
+    require(
+        not run("git", "diff", "--exit-code", rev, cwd=source, output=True),
+        "checks changed committed source",
+    )
+    require(
+        before
+        == {name: image_id(inspect(tag, env)["Id"]) for name, tag in roles.items()},
+        "checks changed the built application images",
+    )
+    evidence = {
+        "source": "local-checks",
+        "revision": rev,
+        "platform": target,
+        "targets": spec["check_targets"],
+        "started_at": started,
+        "passed_at": time.time(),
+        "images": before,
+        "follow_up": "Preserve this commit and reconcile through the normal PR workflow.",
+    }
+    return manifest, build_values, roles, evidence
+
+
 def options(data, settings, manifest):
     require(
         "PRODUCTION_COMPOSE_PROJECT" not in settings["variables"]
@@ -432,16 +508,6 @@ def package(mode):
     settings = inputs(os.environ["BUNDLE_INPUTS"])
     output = Path(os.environ["BUNDLE"]).resolve()
     require(not output.exists(), "refusing to replace existing bundle")
-    if mode == "hotfix":
-        require(
-            not run("git", "status", "--porcelain", cwd=root, output=True),
-            "commit all hotfix changes first",
-        )
-        require(
-            run("git", "rev-parse", "HEAD", cwd=root, output=True).decode().strip()
-            == rev,
-            "hotfix revision must equal committed HEAD",
-        )
     with tempfile.TemporaryDirectory(prefix="release-bundle-") as temporary:
         work = Path(temporary)
         # Bundle HEAD in an isolated bare repository so no refs/checkouts are changed.
@@ -479,7 +545,7 @@ def package(mode):
             "platform": target,
             "profile": selected,
         }
-        release = work / "release.env"
+        release = source / "release.env" if mode == "hotfix" else work / "release.env"
         values = options(data, settings, release)
         env["DOCKER_DEFAULT_PLATFORM"] = target
         if mode == "capture":
@@ -510,57 +576,12 @@ def package(mode):
                     "release application reference must pin this repository by digest",
                 )
         else:
-            prefix = "local/emergency-" + rev
-            values["RELEASE_IMAGE_PREFIX"] = prefix
-            make(source, "build-release-images", values, env)
-            roles = {
-                name: prefix
-                + "-"
-                + name.removeprefix("RELEASE_").removesuffix("_IMAGE").lower()
-                + ":"
-                + rev
-                for name in spec["images"].values()
-            }
-            # Adapters with different tag naming override build-release-images consistently.
-            release.write_text(
-                "".join(
-                    f"{key}={value}\n"
-                    for key, value in {
-                        "RELEASE_REVISION": rev,
-                        "SCAFFOLD_PROFILE": selected,
-                        "RELEASE_IMAGE_PREFIX": prefix,
-                        **roles,
-                    }.items()
-                )
+            hotfix_manifest, values, roles, evidence = build_hotfix(
+                root, source, rev, target, selected, values, env, spec
             )
-            before = {name: inspect(tag, env)["Id"] for name, tag in roles.items()}
-            started = time.time()
-            check_project = "emergency-check-" + rev[:16]
-            check_values = {
-                **values,
-                "PROJECT_NAME": check_project,
-                "COMPOSE_PROJECT_NAME": check_project,
-                "RELEASE_COMPOSE_PROJECT": check_project + "-release",
-            }
-            for check in spec["check_targets"]:
-                make(source, check, check_values, env)
-            require(
-                not run("git", "diff", "--exit-code", rev, cwd=source, output=True),
-                "checks changed committed source",
-            )
-            require(
-                before
-                == {name: inspect(tag, env)["Id"] for name, tag in roles.items()},
-                "checks changed the built application images",
-            )
-            evidence = {
-                "source": "local-checks",
-                "targets": spec["check_targets"],
-                "started_at": started,
-                "passed_at": time.time(),
-                "images": before,
-                "follow_up": "Preserve this commit and reconcile through the normal PR workflow.",
-            }
+            release = work / "release.env"
+            release.write_bytes(hotfix_manifest.read_bytes())
+            values["RELEASE_FILE"] = str(release)
         config = compose(source, values, env)
         for definition in config["services"].values():
             reference = definition.get("image")
