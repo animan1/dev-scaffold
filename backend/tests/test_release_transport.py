@@ -72,22 +72,24 @@ def test_runtime_inventory_includes_optional_services(profile: str) -> None:
 
 @pytest.mark.parametrize("failure", [None, "revision", "platform"])
 def test_local_manifest_pins_verified_images_or_preserves_previous_manifest(
-    tmp_path, monkeypatch, failure
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None
+) -> None:
     spec = importlib.util.spec_from_file_location(
         "record_local_release", ROOT / "scripts/record_local_release.py"
     )
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     revision = "a" * 40
+    labels = {"org.opencontainers.image.revision": revision}
     image = {
         "Id": "sha256:" + "b" * 64,
         "Os": "linux",
         "Architecture": "arm64",
-        "Config": {"Labels": {"org.opencontainers.image.revision": revision}},
+        "Config": {"Labels": labels},
     }
     if failure == "revision":
-        image["Config"]["Labels"]["org.opencontainers.image.revision"] = "c" * 40
+        labels["org.opencontainers.image.revision"] = "c" * 40
     if failure == "platform":
         image["Architecture"] = "amd64"
     monkeypatch.setattr(
