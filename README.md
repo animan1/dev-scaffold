@@ -71,6 +71,11 @@ make down-prod       # stop stack
 
 ### Optional immutable releases
 
+For captured-release recovery and locally validated hotfixes during outages, see
+[emergency release bundles](docs/emergency-release-bundles.md). The bundle path
+reuses the existing release migration/deployment hooks and runs without GitHub
+or registry access on the destination.
+
 The default local-production workflow remains intentionally simple and builds
 from the checkout. Projects that need a pull-only host can opt into the
 immutable-release profile.
@@ -141,7 +146,7 @@ backend/proxy are replaced by production images under the same project; this
 is an intentional deployment, not ordinary development smoke. Existing
 PostgreSQL volumes remain in place. The development SQLite file remains on
 disk; switching to production PostgreSQL does not migrate SQLite data.
-Port 18080 avoids the laptop's existing Cuplr listener on 8080 and redirects to
+Port 18080 avoids other common local listeners on 8080 and redirects to
 the same Nginx service's HTTPS listener on loopback port 443. The browser health
 URL is `https://127.0.0.1/api/healthz` (`/api/health` is not a route).
 `prepare-prod LOCAL_TLS=1` creates or renews a self-signed certificate for

@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "profile": "exercise",
+  "images": {"app": "RELEASE_BACKEND_IMAGE", "web": "RELEASE_WEB_IMAGE"},
+  "check_targets": ["release-bundle-check"]
+}
