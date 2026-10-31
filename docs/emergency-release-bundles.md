@@ -109,7 +109,7 @@ Create a host-local JSON file outside the source repository (or under ignored
 
 `env_file` must exist, be absolute, and have mode 600. Supported non-secret
 variables are `HOST_INGRESS`, `HOST_INGRESS_HOST`, `HOST_INGRESS_PORT`, `MONITORING`,
-`RELEASE_HTTP_PORT`, `RELEASE_HTTPS_PORT`, `RELEASE_HOST`,
+`RELEASE_HTTP_PORT`, `RELEASE_HTTPS_PORT`, `RELEASE_BIND_ADDRESS`, `RELEASE_HOST`,
 `PRODUCTION_COMPOSE_PROJECT`, `PRODUCTION_HTTP_PORT`, `PRODUCTION_SMOKE_HOST`.
 Paths and Make values must use the simple safe characters accepted by preflight.
 Custom adapters needing additional variables require an explicit installer
@@ -269,8 +269,15 @@ the root README: `build-release-images` now records a content-pinned local
 manifest, `release-bundle-config` resolves its runtime configuration, and
 `deploy-release RELEASE_PULL=true` invokes `initialize-release` with those exact
 local images. Retain `RELEASE_COMPOSE_PROJECT=dev-scaffold`, the existing private
-configuration and volumes, and use loopback port 18080. `smoke-prod HOST_INGRESS=1
-HOST_INGRESS_HOST=localhost HOST_INGRESS_PORT=18080` checks the deployed app.
+configuration and volumes. Run `prepare-prod LOCAL_TLS=1` for the laptop's
+localhost/127.0.0.1 certificate, then deploy with
+`RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443`.
+`smoke-prod CURL_FLAGS='--cacert deploy/nginx/certs/server.crt'` checks the
+actual TLS listener without bypassing certificate validation or spoofing
+forwarded headers. HTTP redirects to `https://127.0.0.1/api/healthz`; a browser
+needs a one-time trust decision for the local self-signed certificate.
+`HOST_INGRESS=1` is instead for a real separately owned TLS proxy; it is not
+a browser-ready laptop setup without that proxy.
 Save machine-readable Compose output privately with `RELEASE_CONFIG_FILE`;
 it contains resolved credentials. `make up`/development smoke alone do not
 exercise these release paths. The local manifest deployment covers the shared
