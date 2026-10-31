@@ -228,3 +228,46 @@ def manifest_values(path):
         require(re.fullmatch("[a-zA-Z0-9_./:@+-]+", value), "unsafe manifest value")
         values[key] = value
     return values
+
+
+def frozen_config(config, data, spec, destination, source):
+    require(
+        set(config["services"]) == set(data["images"]),
+        "runtime service set differs from bundle",
+    )
+    for service, definition in config["services"].items():
+        item = data["images"][service]
+        require(item["platform"] == data["platform"], "service platform mismatch")
+        expected = (
+            item["id"]
+            if data["mode"] == "hotfix" and service in spec["images"]
+            else item["reference"]
+        )
+        require(
+            definition.get("image") == expected,
+            "runtime image reference differs from bundle",
+        )
+        definition["image"] = image_id(item["id"])
+        definition["platform"] = data["platform"]
+        definition["pull_policy"] = "never"
+        definition.pop("build", None)
+        for volume in definition.get("volumes", []):
+            if volume["type"] == "bind":
+                path = Path(volume["source"])
+                if path.is_relative_to(source):
+                    if not path.exists():
+                        path = destination / path.relative_to(source)
+                require(path.exists(), "required bind input missing: " + str(path))
+                volume["source"] = str(path)
+                volume.setdefault("bind", {})["create_host_path"] = False
+    # configs/secrets file paths are also host-owned inputs, never bundle material.
+    for group in ("configs", "secrets"):
+        for value in config.get(group, {}).values():
+            if "file" in value:
+                path = Path(value["file"])
+                if path.is_relative_to(source):
+                    if not path.exists():
+                        path = destination / path.relative_to(source)
+                require(path.is_file(), "required config/secret missing")
+                value["file"] = str(path)
+    return config
