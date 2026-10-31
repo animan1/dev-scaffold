@@ -605,6 +605,25 @@ def package(mode):
         print(f"PASS: {mode} bundle {output}\nBUNDLE_SHA256={digest(output)}")
 
 
+def verify_source(work, rev):
+    """Match the deployment archive to its exact preserved commit, entirely offline."""
+    revision(rev)
+    history = work / "verify.git"
+    run(
+        "git",
+        "clone",
+        "--bare",
+        str(work / "history.bundle"),
+        str(history),
+        output=True,
+    )
+    committed = run("git", "archive", "--format=tar", rev, cwd=history, output=True)
+    require(
+        hashlib.sha256(committed).hexdigest() == digest(work / "source.tar"),
+        "source archive differs from preserved commit",
+    )
+
+
 def unpack(bundle, expected, work):
     require(
         re.fullmatch("[0-9a-f]{64}", expected or ""),
@@ -693,23 +712,7 @@ def unpack(bundle, expected, work):
             and evidence["run"]["conclusion"] == "success",
             "missing successful main evidence",
         )
-    # Verify the preserved commit object and exact source independently of the working checkout.
-    history = work / "verify.git"
-    run(
-        "git",
-        "clone",
-        "--bare",
-        str(work / "history.bundle"),
-        str(history),
-        output=True,
-    )
-    committed = run(
-        "git", "archive", "--format=tar", data["revision"], cwd=history, output=True
-    )
-    require(
-        hashlib.sha256(committed).hexdigest() == data["files"]["source.tar"],
-        "source archive differs from preserved commit",
-    )
+    verify_source(work, data["revision"])
     return data, spec, source
 
 
