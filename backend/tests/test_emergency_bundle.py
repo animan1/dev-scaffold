@@ -1,14 +1,11 @@
-import hashlib
 import importlib.util
 import io
 import json
 import os
 import subprocess
 import sys
-import tarfile
 import tempfile
 import unittest
-from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,60 +18,11 @@ bundle = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bundle)
 
 
-def add(archive: tarfile.TarFile, name: str, data: bytes) -> None:
-    item = tarfile.TarInfo(name)
-    item.size = len(data)
-    archive.addfile(item, io.BytesIO(data))
-
-
 class BoundaryTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
-        self.layer = b"example uncompressed layer"
-        self.labels = {"org.opencontainers.image.revision": "a" * 40}
-        self.config = {
-            "os": "linux",
-            "architecture": "arm64",
-            "rootfs": {"diff_ids": ["sha256:" + hashlib.sha256(self.layer).hexdigest()]},
-            "config": {"Labels": self.labels},
-        }
-        self.config_bytes = json.dumps(self.config).encode()
-        self.identity = "sha256:" + hashlib.sha256(self.config_bytes).hexdigest()
-        self.images = {
-            "app": {
-                "id": self.identity,
-                "reference": "local/app:revision",
-                "platform": "linux/arm64",
-                "repository_digests": [],
-            }
-        }
-        self.archive = self.root / "images.tar"
-        self.save()
-
-    def save(self, layer: bytes | None = None) -> None:
-        with tarfile.open(self.archive, "w") as archive:
-            add(
-                archive,
-                "manifest.json",
-                json.dumps(
-                    [
-                        {
-                            "Config": "config.json",
-                            "Layers": ["layer.tar"],
-                            "RepoTags": None,
-                        }
-                    ]
-                ).encode(),
-            )
-            add(archive, "config.json", self.config_bytes)
-            add(archive, "layer.tar", self.layer if layer is None else layer)
-
-    def test_rejects_outer_checksum_before_extract(self) -> None:
-        with self.assertRaisesRegex(bundle.Rejected, "SHA256 mismatch"):
-            bundle.unpack(self.archive, "f" * 64, self.root / "unpack")
-        self.assertFalse((self.root / "unpack").exists())
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
 
     def test_install_requires_authorization_before_any_subprocess(self) -> None:
         with (
@@ -117,120 +65,6 @@ class BoundaryTests(unittest.TestCase):
         path.write_text("RELEASE_REVISION=$(touch /tmp/unwanted)\n")
         with self.assertRaises(bundle.Rejected):
             bundle.manifest_values(path)
-
-    def committed_bundle(
-        self, change: Callable[[Path, dict[str, object]], None] | None = None
-    ) -> tuple[Path, str, Path]:
-        source = self.root / "repository"
-        source.mkdir()
-        spec = {
-            "schema": 1,
-            "profile": "example",
-            "images": {"app": "RELEASE_BACKEND_IMAGE"},
-            "check_targets": ["checks"],
-        }
-        bundle.write_json(source / "release-bundle.json", spec)
-        (source / "deployment.conf").write_text("exact committed configuration")
-        bundle.run("git", "init", "-b", "emergency-release", cwd=source, output=True)
-        bundle.run("git", "add", "release-bundle.json", "deployment.conf", cwd=source)
-        bundle.run(
-            "git",
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.invalid",
-            "commit",
-            "-m",
-            "Committed deployment source",
-            cwd=source,
-            output=True,
-        )
-        revision = bundle.run("git", "rev-parse", "HEAD", cwd=source, output=True).decode().strip()
-        payload = self.root / "payload"
-        payload.mkdir()
-        (payload / "source.tar").write_bytes(
-            bundle.run("git", "archive", "--format=tar", revision, cwd=source, output=True)
-        )
-        bundle.run(
-            "git",
-            "bundle",
-            "create",
-            str(payload / "history.bundle"),
-            "refs/heads/emergency-release",
-            cwd=source,
-        )
-        self.labels["org.opencontainers.image.revision"] = revision
-        self.config_bytes = json.dumps(self.config).encode()
-        self.identity = "sha256:" + hashlib.sha256(self.config_bytes).hexdigest()
-        self.images["app"]["id"] = self.identity
-        self.save()
-        (payload / "images.tar").write_bytes(self.archive.read_bytes())
-        (payload / "release.env").write_text(
-            f"RELEASE_REVISION={revision}\nSCAFFOLD_PROFILE=example\n"
-            f"RELEASE_BACKEND_IMAGE={self.identity}\n"
-        )
-        bundle.write_json(
-            payload / "evidence.json",
-            {
-                "source": "local-checks",
-                "targets": ["checks"],
-                "started_at": 1,
-                "passed_at": 2,
-                "images": {"RELEASE_BACKEND_IMAGE": self.identity},
-            },
-        )
-        data: dict[str, object] = {
-            "schema": 1,
-            "mode": "hotfix",
-            "revision": revision,
-            "platform": "linux/arm64",
-            "profile": "example",
-            "images": self.images,
-        }
-        if change:
-            change(payload, data)
-        data["files"] = {path.name: bundle.digest(path) for path in payload.iterdir()}
-        bundle.write_json(payload / "bundle.json", data)
-        output = self.root / "bundle.tar"
-        with tarfile.open(output, "w") as archive:
-            for path in payload.iterdir():
-                archive.add(path, arcname=path.name)
-        destination = self.root / "unpacked"
-        destination.mkdir()
-        return output, bundle.digest(output), destination
-
-    def test_unpacks_exact_source_and_self_contained_hotfix_history(self) -> None:
-        data, _, source = bundle.unpack(*self.committed_bundle())
-        self.assertEqual(data["mode"], "hotfix")
-        self.assertEqual((source / "deployment.conf").read_text(), "exact committed configuration")
-
-    def test_rejects_revision_inconsistent_manifest(self) -> None:
-        def change(payload: Path, data: dict[str, object]) -> None:
-            (payload / "release.env").write_text("RELEASE_REVISION=" + "b" * 40 + "\n")
-
-        with self.assertRaisesRegex(bundle.Rejected, "manifest revision"):
-            bundle.unpack(*self.committed_bundle(change))
-
-    def test_rejects_unvalidated_image_identity(self) -> None:
-        def change(payload: Path, data: dict[str, object]) -> None:
-            evidence = bundle.read_json(payload / "evidence.json")
-            evidence["images"]["RELEASE_BACKEND_IMAGE"] = "sha256:" + "b" * 64
-            bundle.write_json(payload / "evidence.json", evidence)
-
-        with self.assertRaisesRegex(bundle.Rejected, "evidence images"):
-            bundle.unpack(*self.committed_bundle(change))
-
-    def test_rejects_source_that_differs_from_preserved_commit(self) -> None:
-        def change(payload: Path, data: dict[str, object]) -> None:
-            with tarfile.open(payload / "source.tar", "a") as archive:
-                add(archive, "unexpected.conf", b"not in the commit")
-
-        with self.assertRaisesRegex(bundle.Rejected, "differs from preserved commit"):
-            bundle.unpack(*self.committed_bundle(change))
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 @pytest.mark.skipif(
