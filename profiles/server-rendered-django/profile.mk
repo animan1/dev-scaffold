@@ -22,6 +22,8 @@ RELEASE_REVISION ?= $(shell git rev-parse HEAD)
 RELEASE_BACKEND_TAG ?= $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG ?= $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
 RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
+RELEASE_PLATFORM ?=
+RELEASE_PULL ?= $(COMPOSE_RELEASE) pull app web
 RELEASE_HTTP_PORT ?= 18080
 PROD_ENV_FILE ?= deploy/.env.prod
 RELEASE_CI_ENV_FILE ?= .tmp/server-rendered-release-ci.env
@@ -179,11 +181,17 @@ build-production: ## Build the multi-stage non-root production image
 .PHONY: build-release-images
 build-release-images: ## Build commit-addressed Django and application Nginx images once
 	docker build -f profiles/server-rendered-django/backend.Dockerfile \
-		--target production -t $(RELEASE_BACKEND_TAG) .
+		--target production -t $(RELEASE_BACKEND_TAG) $(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) \
+		--label org.opencontainers.image.revision=$(RELEASE_REVISION) .
 	docker build -f profiles/server-rendered-django/release-nginx.Dockerfile \
-		-t $(RELEASE_WEB_TAG) .
+		-t $(RELEASE_WEB_TAG) $(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) \
+		--label org.opencontainers.image.revision=$(RELEASE_REVISION) .
 	@test "$$(docker image inspect --format='{{.Config.User}}' $(RELEASE_BACKEND_TAG))" = "app"
 	@test "$$(docker image inspect --format='{{.Config.User}}' $(RELEASE_WEB_TAG))" = "nginx"
+	python3 scripts/record_local_release.py --revision $(RELEASE_REVISION) \
+		--profile $(SCAFFOLD_PROFILE) --prefix $(RELEASE_IMAGE_PREFIX) \
+		--backend $(RELEASE_BACKEND_TAG) --web $(RELEASE_WEB_TAG) \
+		$(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) --output $(RELEASE_FILE)
 
 .PHONY: prepare-release-ci
 prepare-release-ci: ## Prepare isolated, non-secret server-rendered release configuration
@@ -272,7 +280,7 @@ push-release-images: ## Publish verified images and record immutable digests
 initialize-release: ## Initialize the database and static volume with recorded images
 	@test -f $(RELEASE_FILE) || { echo 'Set RELEASE_FILE to a recorded release manifest'; exit 1; }
 	$(COMPOSE_RELEASE) config --quiet
-	$(COMPOSE_RELEASE) pull app web
+	$(RELEASE_PULL)
 	$(COMPOSE_RELEASE) up -d --no-build db
 	$(RUN_RELEASE) python -m app.manage check --deploy
 	$(RUN_RELEASE) python -m app.manage migrate

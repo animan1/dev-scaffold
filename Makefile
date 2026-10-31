@@ -51,11 +51,15 @@ RELEASE_REVISION ?= $(shell git rev-parse HEAD)
 RELEASE_BACKEND_TAG = $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG = $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
 RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
+PROD_ENV_FILE ?= deploy/.env.prod
+RELEASE_PLATFORM ?=
+RELEASE_PULL ?= $(COMPOSE_RELEASE) pull backend nginx
 RELEASE_HTTP_PORT ?= 18080
 RELEASE_HTTPS_PORT ?= 18443
-COMPOSE_RELEASE = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) docker compose \
+COMPOSE_RELEASE = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) docker compose \
 	$(RELEASE_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) \
-	--env-file deploy/.env.prod --env-file $(RELEASE_FILE)
+	--env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
+RUN_RELEASE = $(COMPOSE_RELEASE) run --rm --no-deps backend
 COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
 	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
@@ -168,9 +172,9 @@ ci: up be.wait be.ci fe.ci smoke
 	@echo "CI checks passed"
 
 # Prod
-.PHONY: bootstrap-prod
-bootstrap-prod: ## Generate prod env/certs and start prod stack
-	@echo "🔧 Bootstrapping prod-local (env + certs + compose up + migrate + smoke)..."
+LOCAL_TLS ?= 0
+.PHONY: prepare-prod
+prepare-prod: ## Prepare private production inputs; LOCAL_TLS=1 permits localhost certificate creation/renewal
 	# Ensure env file exists (generate if missing)
 	@if [ ! -f deploy/.env.prod ]; then \
 		echo "→ Generating deploy/.env.prod"; \
@@ -179,20 +183,27 @@ bootstrap-prod: ## Generate prod env/certs and start prod stack
 	else \
 		echo "✓ deploy/.env.prod exists"; \
 	fi
-	# Ensure TLS certs exist (generate if missing)
+	# Self-signed certificate renewal is explicitly local-only.
 	@if [ "$(HOST_INGRESS)" = "1" ]; then \
 		echo "Host ingress owns TLS; skipping application certificate generation"; \
-	elif [ ! -f deploy/nginx/certs/server.crt ] || [ ! -f deploy/nginx/certs/server.key ]; then \
-		echo "→ Generating self-signed TLS certs under deploy/nginx/certs"; \
-		mkdir -p deploy/nginx/certs; \
-		openssl req -x509 -nodes -newkey rsa:2048 \
-		  -keyout deploy/nginx/certs/server.key \
-		  -out deploy/nginx/certs/server.crt \
-		  -days 365 \
-		  -subj "/CN=localhost"; \
+	elif [ "$(LOCAL_TLS)" = "1" ]; then \
+		if [ ! -f deploy/nginx/certs/server.key ] || \
+			! openssl x509 -in deploy/nginx/certs/server.crt -noout -checkend 86400 >/dev/null 2>&1; then \
+			umask 077; mkdir -p deploy/nginx/certs; \
+			openssl req -x509 -nodes -newkey rsa:2048 \
+				-keyout deploy/nginx/certs/server.key -out deploy/nginx/certs/server.crt \
+				-days 365 -subj '/CN=localhost' \
+				-addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' || exit 1; \
+		fi; \
+		echo 'Local TLS certificate ready for localhost and 127.0.0.1'; \
 	else \
-		echo "✓ TLS certs exist in deploy/nginx/certs"; \
+		test -f deploy/nginx/certs/server.key && \
+			openssl x509 -in deploy/nginx/certs/server.crt -noout -checkend 0 >/dev/null || \
+			{ echo 'Install valid production TLS inputs, or use LOCAL_TLS=1 for the laptop dummy'; exit 1; }; \
 	fi
+
+.PHONY: bootstrap-prod
+bootstrap-prod: prepare-prod ## Prepare inputs and start the production stack
 	# Bring up stack, run migrations, and smoke test
 	$(COMPOSE_PROD) up -d --build
 	$(COMPOSE_PROD) run --rm backend bash -lc "cd /app && python -m app.manage migrate"
@@ -277,8 +288,14 @@ smoke-host-ingress:
 # Optional immutable-release profile
 .PHONY: build-release-images
 build-release-images: ## Build SHA-tagged production images once
-	docker build --target prod -t $(RELEASE_BACKEND_TAG) backend
-	docker build -f deploy/nginx/Dockerfile -t $(RELEASE_WEB_TAG) .
+	docker build --target prod -t $(RELEASE_BACKEND_TAG) $(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) \
+		--label org.opencontainers.image.revision=$(RELEASE_REVISION) backend
+	docker build -f deploy/nginx/Dockerfile -t $(RELEASE_WEB_TAG) $(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) \
+		--label org.opencontainers.image.revision=$(RELEASE_REVISION) .
+	python3 scripts/record_local_release.py --revision $(RELEASE_REVISION) \
+		--profile $(SCAFFOLD_PROFILE) --prefix $(RELEASE_IMAGE_PREFIX) \
+		--backend $(RELEASE_BACKEND_TAG) --web $(RELEASE_WEB_TAG) \
+		$(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) --output $(RELEASE_FILE)
 
 .PHONY: prepare-release-ci
 prepare-release-ci: ## Prepare isolated, non-secret release smoke-test configuration
@@ -375,14 +392,18 @@ push-release-images: ## Push verified images and record their immutable digests
 		'$(RELEASE_REVISION)' '$(RELEASE_IMAGE_PREFIX)' "$$backend" "$$web" > $(RELEASE_FILE); \
 	echo "Recorded $(RELEASE_FILE)"
 
-.PHONY: deploy-release
-deploy-release: ## Pull and deploy the digest-pinned images in RELEASE_FILE
+.PHONY: initialize-release
+initialize-release: ## Initialize the database/static volume with the recorded backend image
 	@test -f $(RELEASE_FILE) || { echo 'Set RELEASE_FILE to a recorded release manifest'; exit 1; }
 	$(COMPOSE_RELEASE) config --quiet
-	$(COMPOSE_RELEASE) pull backend nginx
-	$(COMPOSE_RELEASE) up -d --no-build db backend
-	$(COMPOSE_RELEASE) exec -T backend python -m app.manage migrate
-	$(COMPOSE_RELEASE) exec -T backend python -m app.manage collectstatic --noinput
+	$(RELEASE_PULL)
+	$(COMPOSE_RELEASE) up -d --no-build db
+	$(RUN_RELEASE) python -m app.manage check --deploy
+	$(RUN_RELEASE) python -m app.manage migrate
+	$(RUN_RELEASE) python -m app.manage collectstatic --noinput
+
+.PHONY: deploy-release
+deploy-release: initialize-release ## Deploy the recorded images through normal production initialization
 	$(COMPOSE_RELEASE) up -d --no-build
 
 .PHONY: rollback-release
@@ -541,5 +562,7 @@ shell: ## Open the Django shell (development only)
 
 ifneq ($(SCAFFOLD_BACKUP_PROFILE),none)
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_BACKUP_PROFILE)/profile.mk
-SELECTED_OPTIONAL_PROFILE_MAKEFILES += $(lastword $(MAKEFILE_LIST))
+SELECTED_OPTIONAL_PROFILE_MAKEFILES := $(SELECTED_OPTIONAL_PROFILE_MAKEFILES) $(lastword $(MAKEFILE_LIST))
 endif
+
+include $(SCAFFOLD_ROOT)profiles/release-transport.mk
