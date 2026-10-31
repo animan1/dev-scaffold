@@ -124,9 +124,26 @@ make deploy-release RELEASE_FILE=/path/to/release-<sha>.env
 The same workflow can run on a development laptop using production images.
 `make build-release-images RELEASE_PLATFORM=linux/arm64` builds both images and
 records their verified content IDs in `RELEASE_FILE`, without publishing them.
-Use the machine's destination platform. Deploy that manifest with
-`make deploy-release RELEASE_PULL=true` and the existing application's project,
-configuration and loopback ingress settings. `RELEASE_PULL=true` uses the local
+Use the machine's destination platform. For this repository's existing laptop
+dummy, use the actual production workflow without a second Compose project:
+
+```bash
+make build-release-images RELEASE_PLATFORM=linux/arm64
+make release-bundle-config RELEASE_COMPOSE_PROJECT=dev-scaffold HOST_INGRESS=1 HOST_INGRESS_PORT=18080 RELEASE_CONFIG_FILE=.tmp/private-release-compose.json
+make deploy-release RELEASE_COMPOSE_PROJECT=dev-scaffold HOST_INGRESS=1 HOST_INGRESS_PORT=18080 RELEASE_PULL=true
+make smoke-prod HOST_INGRESS=1 HOST_INGRESS_HOST=localhost HOST_INGRESS_PORT=18080
+```
+
+Run from the existing `dev-scaffold` checkout, with its private `deploy/.env.prod`
+prepared for the laptop and `localhost` in its allowed hosts. The existing
+backend/proxy are replaced by production images under the same project; this
+is an intentional deployment, not ordinary development smoke. Existing
+PostgreSQL volumes remain in place. The development SQLite file remains on
+disk; switching to production PostgreSQL does not migrate SQLite data.
+Port 18080 avoids the laptop's existing Cuplr listener on 8080. These commands
+leave the dummy running; do not use volume-deleting CI cleanup on it.
+Downstream applications supply their own existing project name, private
+configuration and ingress settings. `RELEASE_PULL=true` uses the local
 images; the initialization, migrations and service startup are the same recipe
 used for a registry release. `make up` remains the development-server workflow.
 
