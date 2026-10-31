@@ -1,17 +1,40 @@
-"""Validate portable release image archives before loading or deploying them.
+"""Portable emergency releases. No third-party Python dependencies.
 
-The independently transferred bundle SHA256 remains the trust boundary;
-content checks detect damage, not authorship. Uses only the Python standard library.
+The bundle is trusted executable deployment source. Its independently transferred
+SHA256 is the trust boundary; internal checksums detect damage, not authorship.
 """
 
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shlex
+import shutil
 import subprocess
+import sys
 import tarfile
+import tempfile
 import time
+import urllib.request
+
+
+RUNTIME_VARIABLES = {
+    "HOST_INGRESS",
+    "HOST_INGRESS_HOST",
+    "HOST_INGRESS_PORT",
+    "MONITORING",
+    "RELEASE_HTTP_PORT",
+    "RELEASE_BIND_ADDRESS",
+    "RELEASE_HTTPS_PORT",
+    "RELEASE_HOST",
+    "PRODUCTION_COMPOSE_PROJECT",
+    "PRODUCTION_HTTP_PORT",
+    "PRODUCTION_SMOKE_HOST",
+}
+DEFAULT_BUNDLE = ".local/emergency-release/bundle.tar"
 
 
 class Rejected(Exception):
@@ -23,8 +46,199 @@ def require(condition, message):
         raise Rejected(message)
 
 
+def run(*args, cwd=None, env=None, output=False):
+    return subprocess.run(
+        args, cwd=cwd, env=env, check=True, stdout=subprocess.PIPE if output else None
+    ).stdout
+
+
+def digest(path):
+    with Path(path).open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def read_json(path):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result, "duplicate JSON key")
+            result[key] = value
+        return result
+
+    return json.loads(Path(path).read_text(), object_pairs_hook=unique)
+
+
+def write_json(path, value):
+    Path(path).write_text(json.dumps(value, sort_keys=True, indent=2) + "\n")
+
+
+def revision(value):
+    require(
+        re.fullmatch("[0-9a-f]{40}", value or ""), "require full 40-character revision"
+    )
+    return value
+
+
+def platform(value):
+    require(
+        value in ("linux/amd64", "linux/arm64"),
+        "supported platforms: linux/amd64, linux/arm64",
+    )
+    return value
+
+
+def image_id(value):
+    require(
+        re.fullmatch("sha256:[0-9a-f]{64}", value or ""), "invalid image content ID"
+    )
+    return value
+
+
+def members(archive):
+    seen = set()
+    for item in archive.getmembers():
+        path = PurePosixPath(item.name)
+        require(
+            not path.is_absolute() and ".." not in path.parts and item.name not in seen,
+            "unsafe or duplicate archive path",
+        )
+        require(item.isfile() or item.isdir(), "archive links/devices are unsupported")
+        seen.add(item.name)
+    return archive.getmembers()
+
+
+def extract(path, destination):
+    with tarfile.open(path) as archive:
+        for item in members(archive):
+            target = destination / item.name
+            if item.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.extractfile(item) as source, target.open("wb") as output:
+                    while block := source.read(1024 * 1024):
+                        output.write(block)
+                target.chmod(item.mode & 0o755)
+
+
+def adapter(root, profile_name):
+    path = root / "release-bundle.json"
+    if not path.exists():
+        path = root / "profiles/emergency-release" / (profile_name + ".json")
+    value = read_json(path)
+    require(
+        set(value) == {"schema", "profile", "images", "check_targets"},
+        "invalid adapter fields",
+    )
+    require(
+        value["schema"] == 1 and value["profile"] == profile_name,
+        "adapter/profile mismatch",
+    )
+    require(
+        value["images"]
+        and all(
+            re.fullmatch("[a-z][a-z0-9_-]*", key)
+            and re.fullmatch("RELEASE_[A-Z_]+_IMAGE", name)
+            for key, name in value["images"].items()
+        ),
+        "invalid image role mapping",
+    )
+    require(
+        value["check_targets"]
+        and all(
+            re.fullmatch("[a-z][a-z0-9_.-]*", name) for name in value["check_targets"]
+        ),
+        "invalid validation targets",
+    )
+    return value
+
+
+def inputs(path=None):
+    # Make exports the same resolved settings used by normal release deployment.
+    value = (
+        read_json(path)
+        if path
+        else {
+            "project": os.environ.get("RELEASE_COMPOSE_PROJECT")
+            or Path.cwd().name + "-release",
+            "env_file": str(
+                Path(os.environ.get("PROD_ENV_FILE") or "deploy/.env.prod").resolve()
+            ),
+            "variables": {
+                key: os.environ[key] for key in RUNTIME_VARIABLES if os.environ.get(key)
+            },
+            "smoke_url": os.environ.get("BUNDLE_SMOKE_URL")
+            or "http://127.0.0.1:"
+            + (
+                os.environ.get("PRODUCTION_HTTP_PORT")
+                or os.environ.get("RELEASE_HTTP_PORT")
+                or "18080"
+            ),
+        }
+    )
+    if not path and not os.environ.get("BUNDLE_EXPLICIT_PROJECT", "1"):
+        for record in (
+            ".local/emergency-release/deployment.json",
+            ".git/tenant-deployment.json",
+        ):
+            if Path(record).is_file():
+                value["project"] = read_json(record)["project"]
+                break
+    require(
+        set(value) == {"project", "env_file", "variables", "smoke_url"},
+        "invalid inputs fields",
+    )
+    require(
+        re.fullmatch("[a-z0-9][a-z0-9_-]+", value["project"]),
+        "explicit Compose project required",
+    )
+    config = Path(value["env_file"])
+    require(
+        config.is_absolute() and config.is_file(), "absolute existing env_file required"
+    )
+    require(
+        re.fullmatch("[a-zA-Z0-9_./-]+", str(config)),
+        "env_file path must be shell/Make safe",
+    )
+    require(config.stat().st_mode & 0o077 == 0, "env_file must be private (mode 600)")
+    # Make command-line values execute Make expansion and later shell recipes.
+    for key, content in value["variables"].items():
+        require(re.fullmatch("[A-Z][A-Z0-9_]*", key), "invalid input variable name")
+        require(
+            key
+            not in {
+                "COMPOSE_RELEASE",
+                "RELEASE_PULL",
+                "SHELL",
+                "MAKE",
+                "MAKEFLAGS",
+                "MAKEFILES",
+                "SCAFFOLD_ROOT",
+                "SCAFFOLD_PROFILE",
+                "RELEASE_REVISION",
+                "RELEASE_FILE",
+                "RELEASE_PLATFORM",
+                "PROD_ENV_FILE",
+                "RELEASE_COMPOSE_PROJECT",
+            },
+            "reserved input variable",
+        )
+        require(
+            key in RUNTIME_VARIABLES,
+            "unsupported input variable",
+        )
+        require(
+            isinstance(content, str) and re.fullmatch("[a-zA-Z0-9_./:@,+-]*", content),
+            "input variables must be non-secret simple Make values",
+        )
+    require(
+        re.fullmatch(r"https?://(?:localhost|127\.0\.0\.1):[0-9]+", value["smoke_url"]),
+        "smoke_url must be a loopback HTTP(S) origin",
+    )
+    return value
+
+
 def environment():
-    """Remove inherited Make/Compose selectors before invoking tenant workflows."""
     env = os.environ.copy()
     for key in (
         "MAKEFLAGS",
@@ -45,20 +259,16 @@ def environment():
 
 
 def make(root, target, values, env, output=False):
-    result = subprocess.run(
-        (
-            "make",
-            "--no-print-directory",
-            "-s",
-            target,
-            *(f"{key}={value}" for key, value in values.items()),
-        ),
+    return run(
+        "make",
+        "--no-print-directory",
+        "-s",
+        target,
+        *(f"{key}={value}" for key, value in values.items()),
         cwd=root,
         env=env,
-        check=True,
-        stdout=subprocess.PIPE if output else None,
+        output=output,
     )
-    return result.stdout
 
 
 def build_hotfix(root, source, rev, target, selected, values, env, spec):
@@ -75,7 +285,7 @@ def build_hotfix(root, source, rev, target, selected, values, env, spec):
     )
 
     env["DOCKER_DEFAULT_PLATFORM"] = target
-    prefix = "local/emergency-" + rev
+    prefix = os.environ.get("RELEASE_IMAGE_PREFIX") or "local/" + root.name
     build_values = {
         **values,
         "SCAFFOLD_PROFILE": selected,
@@ -92,7 +302,7 @@ def build_hotfix(root, source, rev, target, selected, values, env, spec):
         + rev
         for name in spec["images"].values()
     }
-    manifest = source / "release.env"
+    manifest = Path(values.get("RELEASE_FILE", source / "release.env"))
     manifest.write_text(
         "".join(
             f"{key}={value}\n"
@@ -106,15 +316,8 @@ def build_hotfix(root, source, rev, target, selected, values, env, spec):
     )
     before = {name: image_id(inspect(tag, env)["Id"]) for name, tag in roles.items()}
     started = time.time()
-    check_project = "emergency-check-" + rev[:16]
-    check_values = {
-        **build_values,
-        "PROJECT_NAME": check_project,
-        "COMPOSE_PROJECT_NAME": check_project,
-        "RELEASE_COMPOSE_PROJECT": check_project + "-release",
-    }
     for check in spec["check_targets"]:
-        make(source, check, check_values, env)
+        make(source, check, build_values, env)
     require(
         not run("git", "diff", "--exit-code", rev, cwd=source, output=True),
         "checks changed committed source",
@@ -165,31 +368,40 @@ def compose(root, values, env):
     return config
 
 
-def members(archive):
-    seen = set()
-    for item in archive.getmembers():
-        path = PurePosixPath(item.name)
+def inspect(reference, env):
+    return json.loads(
+        run("docker", "image", "inspect", reference, env=env, output=True)
+    )[0]
+
+
+def inspect_roles(config, spec, rev, target, env, require_labels):
+    require(
+        set(spec["images"]) <= set(config["services"]), "adapter image service missing"
+    )
+    images = {}
+    for service, definition in config["services"].items():
+        reference = definition.get("image")
+        require(reference, "every runtime service must declare an image")
+        info = inspect(reference, env)
         require(
-            not path.is_absolute() and ".." not in path.parts and item.name not in seen,
-            "unsafe or duplicate archive path",
+            info["Os"] + "/" + info["Architecture"] == target,
+            "runtime image architecture mismatch",
         )
-        require(item.isfile() or item.isdir(), "archive links/devices are unsupported")
-        seen.add(item.name)
-    return archive.getmembers()
-
-
-def extract(path, destination):
-    with tarfile.open(path) as archive:
-        for item in members(archive):
-            target = destination / item.name
-            if item.isdir():
-                target.mkdir(parents=True, exist_ok=True)
-            else:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with archive.extractfile(item) as source, target.open("wb") as output:
-                    while block := source.read(1024 * 1024):
-                        output.write(block)
-                target.chmod(item.mode & 0o755)
+        if service in spec["images"] and require_labels:
+            require(
+                (info["Config"].get("Labels") or {}).get(
+                    "org.opencontainers.image.revision"
+                )
+                == rev,
+                "application image revision label mismatch",
+            )
+        images[service] = {
+            "id": image_id(info["Id"]),
+            "reference": reference,
+            "repository_digests": info.get("RepoDigests", []),
+            "platform": target,
+        }
+    return images
 
 
 def validate_images(path, images, target):
@@ -228,140 +440,6 @@ def validate_images(path, images, target):
         return configs
 
 
-def read_json(path):
-    def unique(pairs):
-        result = {}
-        for key, value in pairs:
-            require(key not in result, "duplicate JSON key")
-            result[key] = value
-        return result
-
-    return json.loads(Path(path).read_text(), object_pairs_hook=unique)
-
-
-def inputs(path):
-    value = read_json(path)
-    require(
-        set(value) == {"project", "env_file", "variables", "smoke_url"},
-        "invalid inputs fields",
-    )
-    require(
-        re.fullmatch("[a-z0-9][a-z0-9_-]+", value["project"]),
-        "explicit Compose project required",
-    )
-    config = Path(value["env_file"])
-    require(
-        config.is_absolute() and config.is_file(), "absolute existing env_file required"
-    )
-    require(
-        re.fullmatch("[a-zA-Z0-9_./-]+", str(config)),
-        "env_file path must be shell/Make safe",
-    )
-    require(config.stat().st_mode & 0o077 == 0, "env_file must be private (mode 600)")
-    # Make command-line values execute Make expansion and later shell recipes.
-    for key, content in value["variables"].items():
-        require(re.fullmatch("[A-Z][A-Z0-9_]*", key), "invalid input variable name")
-        require(
-            key
-            not in {
-                "COMPOSE_RELEASE",
-                "RELEASE_PULL",
-                "SHELL",
-                "MAKE",
-                "MAKEFLAGS",
-                "MAKEFILES",
-                "SCAFFOLD_ROOT",
-                "SCAFFOLD_PROFILE",
-                "RELEASE_REVISION",
-                "RELEASE_FILE",
-                "RELEASE_PLATFORM",
-                "PROD_ENV_FILE",
-                "RELEASE_COMPOSE_PROJECT",
-            },
-            "reserved input variable",
-        )
-        require(
-            key
-            in {
-                "HOST_INGRESS",
-                "HOST_INGRESS_HOST",
-                "HOST_INGRESS_PORT",
-                "MONITORING",
-                "RELEASE_HTTP_PORT",
-                "RELEASE_BIND_ADDRESS",
-                "RELEASE_HTTPS_PORT",
-                "RELEASE_HOST",
-                "PRODUCTION_COMPOSE_PROJECT",
-                "PRODUCTION_HTTP_PORT",
-                "PRODUCTION_SMOKE_HOST",
-            },
-            "unsupported input variable",
-        )
-        require(
-            isinstance(content, str) and re.fullmatch("[a-zA-Z0-9_./:@,+-]*", content),
-            "input variables must be non-secret simple Make values",
-        )
-    require(
-        re.fullmatch(r"https?://(?:localhost|127\.0\.0\.1):[0-9]+", value["smoke_url"]),
-        "smoke_url must be a loopback HTTP(S) origin",
-    )
-    return value
-
-
-def revision(value):
-    require(
-        re.fullmatch("[0-9a-f]{40}", value or ""), "require full 40-character revision"
-    )
-    return value
-
-
-def platform(value):
-    require(
-        value in ("linux/amd64", "linux/arm64"),
-        "supported platforms: linux/amd64, linux/arm64",
-    )
-    return value
-
-
-def image_id(value):
-    require(
-        re.fullmatch("sha256:[0-9a-f]{64}", value or ""), "invalid image content ID"
-    )
-    return value
-
-
-def adapter(root, profile_name):
-    path = root / "release-bundle.json"
-    if not path.exists():
-        path = root / "profiles/emergency-release" / (profile_name + ".json")
-    value = read_json(path)
-    require(
-        set(value) == {"schema", "profile", "images", "check_targets"},
-        "invalid adapter fields",
-    )
-    require(
-        value["schema"] == 1 and value["profile"] == profile_name,
-        "adapter/profile mismatch",
-    )
-    require(
-        value["images"]
-        and all(
-            re.fullmatch("[a-z][a-z0-9_-]*", key)
-            and re.fullmatch("RELEASE_[A-Z_]+_IMAGE", name)
-            for key, name in value["images"].items()
-        ),
-        "invalid image role mapping",
-    )
-    require(
-        value["check_targets"]
-        and all(
-            re.fullmatch("[a-z][a-z0-9_.-]*", name) for name in value["check_targets"]
-        ),
-        "invalid validation targets",
-    )
-    return value
-
-
 def manifest_values(path):
     values = {}
     for line in path.read_text().splitlines():
@@ -375,64 +453,108 @@ def manifest_values(path):
     return values
 
 
-def frozen_config(config, data, spec, destination, source):
-    require(
-        set(config["services"]) == set(data["images"]),
-        "runtime service set differs from bundle",
+def current_platform(env):
+    value = run(
+        "docker",
+        "info",
+        "--format",
+        "{{.OSType}}/{{.Architecture}}",
+        env=env,
+        output=True,
     )
-    for service, definition in config["services"].items():
-        item = data["images"][service]
-        require(item["platform"] == data["platform"], "service platform mismatch")
-        expected = (
-            item["id"]
-            if data["mode"] == "hotfix" and service in spec["images"]
-            else item["reference"]
+    return platform(
+        value.decode().strip().replace("x86_64", "amd64").replace("aarch64", "arm64")
+    )
+
+
+def capture_selection(root, target, env):
+    repo = os.environ.get("BUNDLE_REPO")
+    if not repo:
+        remote = (
+            run("git", "remote", "get-url", "origin", cwd=root, output=True)
+            .decode()
+            .strip()
         )
+        match = re.fullmatch(
+            r"(?:git@github\.com:|https://github\.com/|ssh://git@github\.com/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?",
+            remote,
+        )
+        require(match, "origin must identify a GitHub repository, or set BUNDLE_REPO")
+        repo = match[1]
+    require(
+        re.fullmatch("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo), "invalid BUNDLE_REPO"
+    )
+    run_id = os.environ.get("BUNDLE_RUN_ID")
+    rev = os.environ.get("RELEASE_REVISION")
+    if rev:
+        revision(rev)
+    if run_id:
+        require(run_id.isdigit(), "invalid BUNDLE_RUN_ID")
+        selected = json.loads(
+            run(
+                "gh", "api", f"repos/{repo}/actions/runs/{run_id}", env=env, output=True
+            )
+        )
+    else:
+        workflow = os.environ.get("BUNDLE_WORKFLOW") or "ci.yml"
+        require(re.fullmatch(r"[A-Za-z0-9_.-]+", workflow), "invalid BUNDLE_WORKFLOW")
+        query = f"repos/{repo}/actions/workflows/{workflow}/runs?branch=main&event=push&status=success&per_page=1"
+        if rev:
+            query += "&head_sha=" + rev
+        runs = json.loads(run("gh", "api", query, env=env, output=True))[
+            "workflow_runs"
+        ]
+        require(runs, "no successful main release run found")
+        selected = runs[0]
+        run_id = str(selected["id"])
+    require(
+        not rev or rev == selected["head_sha"],
+        "selected run revision differs from RELEASE_REVISION",
+    )
+    rev = revision(selected["head_sha"])
+    require(
+        selected["head_branch"] == "main"
+        and selected["event"] == "push"
+        and selected["status"] == "completed"
+        and selected["conclusion"] == "success"
+        and selected["repository"]["full_name"].lower() == repo.lower(),
+        "selected run is not a successful main release",
+    )
+    artifact = os.environ.get("BUNDLE_ARTIFACT")
+    if not artifact:
+        artifacts = json.loads(
+            run(
+                "gh",
+                "api",
+                f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100",
+                env=env,
+                output=True,
+            )
+        )["artifacts"]
+        names = {item["name"] for item in artifacts if not item["expired"]}
+        artifact = f"release-{rev}-{target.split('/')[1]}"
+        if artifact not in names and target == "linux/amd64":
+            artifact = f"release-{rev}"
         require(
-            definition.get("image") == expected,
-            "runtime image reference differs from bundle",
+            artifact in names,
+            "selected run has no unexpired release artifact for this architecture; no older release selected",
         )
-        definition["image"] = image_id(item["id"])
-        definition["platform"] = data["platform"]
-        definition["pull_policy"] = "never"
-        definition.pop("build", None)
-        for volume in definition.get("volumes", []):
-            if volume["type"] == "bind":
-                path = Path(volume["source"])
-                if path.is_relative_to(source):
-                    if not path.exists():
-                        path = destination / path.relative_to(source)
-                require(path.exists(), "required bind input missing: " + str(path))
-                volume["source"] = str(path)
-                volume.setdefault("bind", {})["create_host_path"] = False
-    # configs/secrets file paths are also host-owned inputs, never bundle material.
-    for group in ("configs", "secrets"):
-        for value in config.get(group, {}).values():
-            if "file" in value:
-                path = Path(value["file"])
-                if path.is_relative_to(source):
-                    if not path.exists():
-                        path = destination / path.relative_to(source)
-                require(path.is_file(), "required config/secret missing")
-                value["file"] = str(path)
-    return config
+    print(
+        f"Selected {repo} main run {run_id}, revision {rev}, platform {target}, artifact {artifact}"
+    )
+    return {
+        "BUNDLE_REPO": repo,
+        "BUNDLE_RUN_ID": run_id,
+        "BUNDLE_ARTIFACT": artifact,
+        "RELEASE_REVISION": rev,
+    }
 
 
-def run(*args, cwd=None, env=None, output=False):
-    return subprocess.run(
-        args, cwd=cwd, env=env, check=True, stdout=subprocess.PIPE if output else None
-    ).stdout
-
-
-def digest(path):
-    with Path(path).open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
-
-
-def capture_evidence(work, rev, target, env, spec):
-    repo = os.environ.get("BUNDLE_REPO", "")
-    run_id = os.environ.get("BUNDLE_RUN_ID", "")
-    artifact = os.environ.get("BUNDLE_ARTIFACT", "")
+def capture_evidence(work, rev, target, env, spec, selection=None):
+    selection = os.environ if selection is None else selection
+    repo = selection.get("BUNDLE_REPO", "")
+    run_id = selection.get("BUNDLE_RUN_ID", "")
+    artifact = selection.get("BUNDLE_ARTIFACT", "")
     require(
         re.fullmatch("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo), "BUNDLE_REPO required"
     )
@@ -454,7 +576,7 @@ def capture_evidence(work, rev, target, env, spec):
         and evidence["event"] == "push"
         and evidence["status"] == "completed"
         and evidence["conclusion"] == "success"
-        and evidence["repository"]["full_name"] == repo,
+        and evidence["repository"]["full_name"].lower() == repo.lower(),
         "specified run is not a successful main release of this revision/repository",
     )
     comparison = json.loads(
@@ -500,6 +622,162 @@ def capture_evidence(work, rev, target, env, spec):
     }
 
 
+def package(mode):
+    env = environment()
+    root = Path.cwd()
+    explicit_output = os.environ.get("BUNDLE")
+    output = Path(explicit_output or DEFAULT_BUNDLE).resolve()
+    require(
+        not explicit_output or not output.exists(),
+        "refusing to replace existing bundle",
+    )
+    if not explicit_output:
+        # A failed refresh must not leave the previous release selected for bare install.
+        Path(str(output) + ".sha256").unlink(missing_ok=True)
+    rev = os.environ.get("RELEASE_REVISION")
+    if mode == "hotfix":
+        require(
+            not run("git", "status", "--porcelain", cwd=root, output=True),
+            "commit all hotfix changes first",
+        )
+        head = run("git", "rev-parse", "HEAD", cwd=root, output=True).decode().strip()
+        rev = revision(rev or head)
+        require(head == rev, "hotfix revision must equal committed HEAD")
+    target = (
+        platform(os.environ["RELEASE_PLATFORM"])
+        if os.environ.get("RELEASE_PLATFORM")
+        else current_platform(env)
+    )
+    if mode == "hotfix":
+        print(
+            f"Selected hotfix revision {rev}, platform {target}; local build and checks"
+        )
+    selection = capture_selection(root, target, env) if mode == "capture" else None
+    if selection:
+        rev = selection["RELEASE_REVISION"]
+        try:
+            run("git", "cat-file", "-e", rev + "^{commit}", cwd=root, output=True)
+        except subprocess.CalledProcessError:
+            # Capture is online preparation; installation never fetches.
+            run(
+                "git",
+                "fetch",
+                "--no-tags",
+                "origin",
+                rev,
+                cwd=root,
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            )
+    selected = os.environ.get("SCAFFOLD_PROFILE", "")
+    settings = inputs(os.environ.get("BUNDLE_INPUTS"))
+    with tempfile.TemporaryDirectory(prefix="release-bundle-") as temporary:
+        work = Path(temporary)
+        source = preserve_source(root, rev, work, checkout=mode != "hotfix")
+        spec = adapter(source, selected)
+        data = {
+            "schema": 1,
+            "mode": mode,
+            "revision": rev,
+            "platform": target,
+            "profile": selected,
+        }
+        release = work / "release.env"
+        values = options(data, settings, release)
+        env["DOCKER_DEFAULT_PLATFORM"] = target
+        if mode == "capture":
+            captured, evidence = capture_evidence(
+                work, rev, target, env, spec, selection
+            )
+            release.write_bytes(captured.read_bytes())
+            recorded = manifest_values(release)
+            require(
+                recorded.get("RELEASE_REVISION") == rev,
+                "release artifact revision mismatch",
+            )
+            require(
+                recorded.get("SCAFFOLD_PROFILE", "react-vite") == selected,
+                "release profile mismatch",
+            )
+            require(
+                recorded.get("RELEASE_IMAGE_PREFIX")
+                == "ghcr.io/" + evidence["repository"].lower(),
+                "release repository mismatch",
+            )
+            for name in set(spec["images"].values()):
+                require(
+                    re.fullmatch(
+                        r"ghcr\.io/"
+                        + re.escape(evidence["repository"].lower())
+                        + r"-[a-z-]+@sha256:[0-9a-f]{64}",
+                        recorded.get(name, ""),
+                    ),
+                    "release application reference must pin this repository by digest",
+                )
+        else:
+            hotfix_manifest, values, roles, evidence = build_hotfix(
+                root, source, rev, target, selected, values, env, spec
+            )
+            require(
+                hotfix_manifest == release,
+                "hotfix manifest must use the selected release path",
+            )
+        config = compose(source, values, env)
+        for definition in config["services"].values():
+            reference = definition.get("image")
+            require(reference, "runtime service has no image")
+            if mode == "capture":
+                run("docker", "pull", "--platform", target, reference, env=env)
+        data["images"] = inspect_roles(config, spec, rev, target, env, mode == "hotfix")
+        # Local content IDs survive docker save/load without any repository tag lookup.
+        if mode == "hotfix":
+            recorded = manifest_values(release)
+            for service, name in spec["images"].items():
+                recorded[name] = data["images"][service]["id"]
+            release.write_text(
+                "".join(f"{key}={value}\n" for key, value in recorded.items())
+            )
+        run(
+            "docker",
+            "image",
+            "save",
+            "--output",
+            str(work / "images.tar"),
+            *sorted({item["id"] for item in data["images"].values()}),
+            env=env,
+        )
+        validate_images(work / "images.tar", data["images"], target)
+        write_json(work / "evidence.json", evidence)
+        names = [
+            "source.tar",
+            "history.bundle",
+            "release.env",
+            "images.tar",
+            "evidence.json",
+        ]
+        if mode == "capture":
+            names.append("artifacts.tar")
+        data["files"] = {name: digest(work / name) for name in names}
+        write_json(work / "bundle.json", data)
+        output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # Refresh the conventional transfer path only after the complete build/checks pass.
+        with tempfile.TemporaryDirectory(
+            dir=output.parent, prefix=".bundle-"
+        ) as staging_path:
+            staged = Path(staging_path) / "bundle.tar"
+            with tarfile.open(staged, "x") as archive:
+                for name in ["bundle.json", *names]:
+                    archive.add(work / name, arcname=name)
+            checksum = digest(staged)
+            checksum_path = Path(str(output) + ".sha256")
+            staged_checksum = Path(staging_path) / "bundle.tar.sha256"
+            staged_checksum.write_text(checksum + "\n")
+            os.replace(staged, output)
+            os.replace(staged_checksum, checksum_path)
+        print(
+            f"PASS: {mode} bundle {output}\nBUNDLE_SHA256={checksum}\nChecksum file: {checksum_path}"
+        )
+
+
 def verify_source(work, rev):
     """Match the deployment archive to its exact preserved commit, entirely offline."""
     revision(rev)
@@ -519,9 +797,17 @@ def verify_source(work, rev):
     )
 
 
-def preserve_source(root, rev, work):
+def preserve_source(root, rev, work, checkout=True):
     """Package one committed source tree and its local Git history without changing refs."""
     revision(rev)
+    if not checkout:
+        run("git", "bundle", "create", str(work / "history.bundle"), "HEAD", cwd=root)
+        (work / "source.tar").write_bytes(
+            run("git", "archive", "--format=tar", rev, cwd=root, output=True)
+        )
+        with tarfile.open(work / "source.tar") as archive:
+            members(archive)
+        return root
     bare = work / "history.git"
     run("git", "clone", "--bare", "--no-hardlinks", str(root), str(bare), output=True)
     run("git", "update-ref", "refs/heads/emergency-release", rev, cwd=bare)
@@ -541,10 +827,6 @@ def preserve_source(root, rev, work):
     run("git", "clone", str(work / "history.bundle"), str(source), output=True)
     run("git", "checkout", "--detach", rev, cwd=source, output=True)
     return source
-
-
-def write_json(path, value):
-    Path(path).write_text(json.dumps(value, sort_keys=True, indent=2) + "\n")
 
 
 def unpack(bundle, expected, work):
@@ -639,37 +921,255 @@ def unpack(bundle, expected, work):
     return data, spec, source
 
 
-def inspect(reference, env):
-    return json.loads(
-        run("docker", "image", "inspect", reference, env=env, output=True)
-    )[0]
-
-
-def inspect_roles(config, spec, rev, target, env, require_labels):
+def frozen_config(config, data, spec, destination, source):
     require(
-        set(spec["images"]) <= set(config["services"]), "adapter image service missing"
+        set(config["services"]) == set(data["images"]),
+        "runtime service set differs from bundle",
     )
-    images = {}
     for service, definition in config["services"].items():
-        reference = definition.get("image")
-        require(reference, "every runtime service must declare an image")
-        info = inspect(reference, env)
-        require(
-            info["Os"] + "/" + info["Architecture"] == target,
-            "runtime image architecture mismatch",
+        item = data["images"][service]
+        require(item["platform"] == data["platform"], "service platform mismatch")
+        expected = (
+            item["id"]
+            if data["mode"] == "hotfix" and service in spec["images"]
+            else item["reference"]
         )
-        if service in spec["images"] and require_labels:
+        require(
+            definition.get("image") == expected,
+            "runtime image reference differs from bundle",
+        )
+        definition["image"] = image_id(item["id"])
+        definition["platform"] = data["platform"]
+        definition["pull_policy"] = "never"
+        definition.pop("build", None)
+        for volume in definition.get("volumes", []):
+            if volume["type"] == "bind":
+                path = Path(volume["source"])
+                if path.is_relative_to(source):
+                    if not path.exists():
+                        path = destination / path.relative_to(source)
+                require(path.exists(), "required bind input missing: " + str(path))
+                volume["source"] = str(path)
+                volume.setdefault("bind", {})["create_host_path"] = False
+    # configs/secrets file paths are also host-owned inputs, never bundle material.
+    for group in ("configs", "secrets"):
+        for value in config.get(group, {}).values():
+            if "file" in value:
+                path = Path(value["file"])
+                if path.is_relative_to(source):
+                    if not path.exists():
+                        path = destination / path.relative_to(source)
+                require(path.is_file(), "required config/secret missing")
+                value["file"] = str(path)
+    return config
+
+
+@contextlib.contextmanager
+def staging(state):
+    work = Path(tempfile.mkdtemp(prefix="release-", dir=state)).resolve()
+    try:
+        yield work
+    finally:
+        # Running containers may bind committed deployment files from this source.
+        if not (work / ".retain").exists():
+            shutil.rmtree(work)
+
+
+def destination(operation):
+    require(
+        operation != "install" or os.environ.get("EMERGENCY") == "1",
+        "installation requires EMERGENCY=1 on each invocation",
+    )
+    env = environment()
+    settings = inputs(os.environ.get("BUNDLE_INPUTS"))
+    bundle = Path(os.environ.get("BUNDLE") or DEFAULT_BUNDLE).resolve()
+    expected = (
+        os.environ.get("BUNDLE_SHA256")
+        or Path(str(bundle) + ".sha256").read_text().strip()
+    )
+    root = Path.cwd()
+    state = root / ".local/emergency-release"
+    state.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with (state / "lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with staging(state) as work:
+            data, spec, source = unpack(bundle, expected, work)
             require(
-                (info["Config"].get("Labels") or {}).get(
-                    "org.opencontainers.image.revision"
-                )
-                == rev,
-                "application image revision label mismatch",
+                current_platform(env) == data["platform"],
+                "bundle architecture differs from destination",
             )
-        images[service] = {
-            "id": image_id(info["Id"]),
-            "reference": reference,
-            "repository_digests": info.get("RepoDigests", []),
-            "platform": target,
-        }
-    return images
+            record = state / "deployment.json"
+            if record.exists():
+                require(
+                    read_json(record)["project"] == settings["project"],
+                    "recorded Compose project differs",
+                )
+            tenant_record = root / ".git/tenant-deployment.json"
+            if tenant_record.exists():
+                require(
+                    read_json(tenant_record)["project"] == settings["project"],
+                    "infra Compose project differs",
+                )
+            values = options(data, settings, work / "release.env")
+            config = frozen_config(
+                compose(source, values, env), data, spec, root, source
+            )
+            for group, resource in (("volumes", "volume"), ("networks", "network")):
+                for definition in config.get(group, {}).values():
+                    if definition.get("external"):
+                        run(
+                            "docker",
+                            resource,
+                            "inspect",
+                            definition["name"],
+                            env=env,
+                            output=True,
+                        )
+            for group, resource in (("secrets", "secret"), ("configs", "config")):
+                for name, definition in config.get(group, {}).items():
+                    if definition.get("external"):
+                        run(
+                            "docker",
+                            resource,
+                            "inspect",
+                            definition.get("name", name),
+                            env=env,
+                            output=True,
+                        )
+            write_json(work / "compose.json", config)
+            # Validate with the engine's Compose implementation before loading or changing services.
+            command = [
+                "docker",
+                "compose",
+                "--project-directory",
+                str(root),
+                "-p",
+                settings["project"],
+                "-f",
+                str(work / "compose.json"),
+            ]
+            if settings["variables"].get("MONITORING") == "1":
+                command += ["--profile", "monitoring"]
+            run(*command, "--profile", "*", "config", "--quiet", env=env)
+            if operation == "validate":
+                print(
+                    "PASS: bundle, destination architecture and required inputs; no deployment changes"
+                )
+                return
+            audit = {
+                "schema": 1,
+                "revision": data["revision"],
+                "project": settings["project"],
+                "images": data["images"],
+                "validation_source": read_json(work / "evidence.json")["source"],
+                "emergency_mode": data["mode"],
+                "bundle_sha256": expected,
+                "started_at": time.time(),
+                "status": "installing",
+            }
+            (work / ".retain").touch()
+            audit["deployment_directory"] = str(work)
+            write_json(record, audit)
+            try:
+                run(
+                    "docker",
+                    "image",
+                    "load",
+                    "--input",
+                    str(work / "images.tar"),
+                    env=env,
+                    output=True,
+                )
+                for item in data["images"].values():
+                    require(
+                        inspect(item["id"], env)["Id"] == item["id"],
+                        "loaded image identity mismatch",
+                    )
+                values.update(
+                    {
+                        "COMPOSE_RELEASE": shlex.join(command),
+                        "RELEASE_PULL": "true",
+                        "BUNDLE_SMOKE_URL": settings["smoke_url"],
+                    }
+                )
+                make(source, "release-bundle-deploy", values, env)
+                make(source, "release-bundle-smoke", values, env)
+                audit["status"] = "succeeded"
+            except BaseException:
+                audit["status"] = (
+                    "failed; inspect deployment and migration state before recovery"
+                )
+                raise
+            finally:
+                audit["finished_at"] = time.time()
+                write_json(work / "audit.json", audit)
+                write_json(record, audit)
+            print(
+                "PASS: emergency deployment and smoke; audit .local/emergency-release/deployment.json"
+            )
+            if data["mode"] == "hotfix":
+                print(
+                    "Hotfix history remains in the original bundle; reconcile this revision through a normal PR."
+                )
+
+
+def smoke():
+    url = os.environ["BUNDLE_SMOKE_URL"]
+    expected = os.environ["RELEASE_REVISION"]
+    headers = {
+        "Host": os.environ.get(
+            "PRODUCTION_SMOKE_HOST", os.environ.get("RELEASE_HOST", "localhost")
+        ),
+        "X-Forwarded-Proto": "https",
+    }
+    for attempt in range(60):
+        try:
+            with urllib.request.urlopen(
+                urllib.request.Request(url + "/api/healthz", headers=headers), timeout=2
+            ) as response:
+                health = json.load(response)
+            require(
+                health["revision"] == expected, "deployed revision differs from bundle"
+            )
+            for path in ("/", "/static/smoketest.txt"):
+                with urllib.request.urlopen(
+                    urllib.request.Request(url + path, headers=headers), timeout=2
+                ) as response:
+                    require(response.status == 200, "smoke request failed")
+            print(
+                "PASS: application reports exact bundled revision; root/static respond"
+            )
+            return
+        except (OSError, Rejected, KeyError):
+            if attempt == 59:
+                raise
+            time.sleep(1)
+
+
+def main():
+    os.umask(0o077)
+    operation = sys.argv[1]
+    if operation in ("capture", "hotfix"):
+        package(operation)
+    elif operation in ("validate", "install"):
+        destination(operation)
+    elif operation == "smoke":
+        smoke()
+    else:
+        raise Rejected("unknown operation")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (
+        Rejected,
+        OSError,
+        ValueError,
+        KeyError,
+        subprocess.CalledProcessError,
+        tarfile.TarError,
+    ) as error:
+        # Subprocess output may contain tool diagnostics; never echo resolved Compose/env objects.
+        print("FAIL: emergency release rejected: " + str(error), file=sys.stderr)
+        sys.exit(1)

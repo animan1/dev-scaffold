@@ -86,3 +86,28 @@ def test_preserve_source_keeps_requested_commit_without_unrelated_branch_content
     assert git("cat-file", "-e", revision, cwd=source) == b""
     assert not (source / "unrelated.txt").exists()
     assert "refs/remotes/origin/emergency-release" in git("show-ref", cwd=source).decode()
+
+
+def test_preserve_hotfix_source_without_any_clone_or_checkout_change(
+    preserved_source: tuple[Path, Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, work, revision = preserved_source
+    output = work / "packaged"
+    output.mkdir()
+    calls: list[tuple[str, ...]] = []
+    original = bundle.run
+
+    def local_run(*args: str, **kwargs: object) -> bytes | None:
+        calls.append(args)
+        result = original(*args, **kwargs)
+        assert result is None or isinstance(result, bytes)
+        return result
+
+    monkeypatch.setattr(bundle, "run", local_run)
+    source = bundle.preserve_source(repository, revision, output, checkout=False)
+
+    assert source == repository
+    assert not any("clone" in call or "checkout" in call for call in calls)
+    assert git("rev-parse", "HEAD", cwd=repository).decode().strip() == revision
+    assert git("status", "--porcelain", cwd=repository) == b""
+    bundle.verify_source(output, revision)
