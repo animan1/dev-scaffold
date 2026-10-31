@@ -6,6 +6,7 @@ content checks detect damage, not authorship. Uses only the Python standard libr
 
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
@@ -19,6 +20,72 @@ class Rejected(Exception):
 def require(condition, message):
     if not condition:
         raise Rejected(message)
+
+
+def environment():
+    """Remove inherited Make/Compose selectors before invoking tenant workflows."""
+    env = os.environ.copy()
+    for key in (
+        "MAKEFLAGS",
+        "MFLAGS",
+        "MAKEOVERRIDES",
+        "MAKEFILES",
+        "COMPOSE_FILE",
+        "COMPOSE_PROFILES",
+        "COMPOSE_PROJECT_NAME",
+        "RELEASE_BACKEND_IMAGE",
+        "RELEASE_WEB_IMAGE",
+    ):
+        env.pop(key, None)
+    env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
+def make(root, target, values, env, output=False):
+    result = subprocess.run(
+        (
+            "make",
+            "--no-print-directory",
+            "-s",
+            target,
+            *(f"{key}={value}" for key, value in values.items()),
+        ),
+        cwd=root,
+        env=env,
+        check=True,
+        stdout=subprocess.PIPE if output else None,
+    )
+    return result.stdout
+
+
+def options(data, settings, manifest):
+    require(
+        "PRODUCTION_COMPOSE_PROJECT" not in settings["variables"]
+        or settings["variables"]["PRODUCTION_COMPOSE_PROJECT"] == settings["project"],
+        "production wrapper project must equal explicit project",
+    )
+    return {
+        **settings["variables"],
+        "SCAFFOLD_PROFILE": data["profile"],
+        "RELEASE_REVISION": data["revision"],
+        "RELEASE_PLATFORM": data["platform"],
+        "RELEASE_FILE": str(manifest),
+        "PROD_ENV_FILE": settings["env_file"],
+        "RELEASE_COMPOSE_PROJECT": settings["project"],
+    }
+
+
+def compose(root, values, env):
+    # Never print resolved configuration: Compose embeds credentials here.
+    config = json.loads(make(root, "release-bundle-config", values, env, output=True))
+    require(
+        config.get("name") == values["RELEASE_COMPOSE_PROJECT"],
+        "Compose project mismatch",
+    )
+    require(config.get("services"), "empty runtime topology")
+    return config
 
 
 def members(archive):
