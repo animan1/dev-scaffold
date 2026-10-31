@@ -232,6 +232,25 @@ the trust boundary, so do not republish the origin port on a public interface.
 The smoke target supplies synthetic routing headers and does not require or
 prescribe a particular ingress product.
 
+The React/Vite profile's application Nginx renders
+`deploy/nginx/default.host-ingress.conf` at container startup. `BACKEND_HOST`
+defaults to the production Compose service name `backend`; an overlay may select
+another service name without copying the template. Substitution is deliberately
+restricted to `BACKEND_HOST`, preserving Nginx runtime variables such as `$host`
+and `$remote_addr`. API and Django admin requests go to that backend, while
+static files, built frontend assets, and client-side routes remain owned by
+Nginx. Ordinary `up-prod`, `bootstrap-prod`, and `deploy-release` operations
+recreate Nginx after replacing the backend so it cannot retain the old
+container address. Its bare `/admin` redirect remains relative so the private
+HTTP origin never downgrades the public HTTPS scheme.
+
+Existing React/Vite children adopting this behavior should copy the host-ingress
+Compose overlay and Nginx template together, plus the Nginx refresh lines and
+admin checks from the root Makefile. Keep the child's hostnames, loopback ports,
+Compose identity, release registry, CSP additions, and application-specific
+promotion or backup checks in the child. Server-rendered children already use
+their profile-owned Nginx release topology and should retain that boundary.
+
 ### Optional operational and dead-man monitoring
 
 The scaffold's Django `app.monitoring` architecture provides persisted check

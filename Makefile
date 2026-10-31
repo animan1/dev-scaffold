@@ -206,6 +206,7 @@ prepare-prod: ## Prepare private production inputs; LOCAL_TLS=1 permits localhos
 bootstrap-prod: prepare-prod ## Prepare inputs and start the production stack
 	# Bring up stack, run migrations, and smoke test
 	$(COMPOSE_PROD) up -d --build
+	$(COMPOSE_PROD) up -d --no-deps --force-recreate nginx
 	$(COMPOSE_PROD) run --rm backend bash -lc "cd /app && python -m app.manage migrate"
 	$(MAKE) smoke-prod HOST_INGRESS=$(HOST_INGRESS) \
 		HOST_INGRESS_HOST=$(HOST_INGRESS_HOST) HOST_INGRESS_PORT=$(HOST_INGRESS_PORT)
@@ -217,6 +218,7 @@ restart-prod: down-prod up-prod
 .PHONY: up-prod
 up-prod: ## Start prod stack
 	$(COMPOSE_PROD) up -d --build
+	$(COMPOSE_PROD) up -d --no-deps --force-recreate nginx
 
 .PHONY: down-prod
 down-prod: ## Stop prod stack while preserving persistent volumes
@@ -275,6 +277,22 @@ smoke-host-ingress:
 		'http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz' >/dev/null
 	curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
 		'http://127.0.0.1:$(HOST_INGRESS_PORT)/static/smoketest.txt' >/dev/null
+	@location="$$(curl -fsS -D - -o /dev/null \
+		-H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
+		'http://127.0.0.1:$(HOST_INGRESS_PORT)/admin' \
+		| awk 'tolower($$1) == "location:" {sub(/\r$$/, "", $$2); print $$2}')"; \
+	test "$$location" = '/admin/' || { \
+		echo "Django admin slash redirect was not routed (got $$location)"; \
+		exit 1; \
+	}
+	@location="$$(curl -fsS -D - -o /dev/null \
+		-H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
+		'http://127.0.0.1:$(HOST_INGRESS_PORT)/admin/' \
+		| awk 'tolower($$1) == "location:" {sub(/\r$$/, "", $$2); print $$2}')"; \
+	case "$$location" in \
+		/admin/login/*) ;; \
+		*) echo "Django admin login was not routed (got $$location)"; exit 1 ;; \
+	esac
 	curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
 		'http://127.0.0.1:$(HOST_INGRESS_PORT)/' | grep -qi 'dev-scaffold\|id="root"'
 	@code="$$(curl -sS -o /dev/null -w '%{http_code}' \
@@ -405,6 +423,7 @@ initialize-release: ## Initialize the database/static volume with the recorded b
 .PHONY: deploy-release
 deploy-release: initialize-release ## Deploy the recorded images through normal production initialization
 	$(COMPOSE_RELEASE) up -d --no-build
+	$(COMPOSE_RELEASE) up -d --no-deps --force-recreate nginx
 
 .PHONY: rollback-release
 rollback-release: ## Deploy a previously recorded RELEASE_FILE

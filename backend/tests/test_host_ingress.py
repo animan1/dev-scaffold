@@ -30,6 +30,39 @@ def test_host_ingress_origin_is_loopback_http_only() -> None:
     assert "ssl_certificate" not in nginx
 
 
+def test_host_ingress_templates_only_the_selected_backend() -> None:
+    compose = (_repo_root() / "deploy/docker-compose.host-ingress.yml").read_text()
+    nginx = (_repo_root() / "deploy/nginx/default.host-ingress.conf").read_text()
+
+    assert "${BACKEND_HOST:-backend}" in compose
+    assert 'NGINX_ENVSUBST_FILTER: "^BACKEND_HOST$"' in compose
+    assert "/etc/nginx/templates/default.conf.template:ro" in compose
+    assert nginx.count("proxy_pass http://${BACKEND_HOST}:8000;") == 2
+    assert "$host" in nginx
+    assert "$trusted_forwarded_proto" in nginx
+
+
+def test_host_ingress_routes_django_admin_without_capturing_frontend_routes() -> None:
+    nginx = (_repo_root() / "deploy/nginx/default.host-ingress.conf").read_text()
+
+    assert "location = /admin {" in nginx
+    assert "absolute_redirect off;" in nginx
+    assert "return 301 /admin/;" in nginx
+    assert "location /admin/ {" in nginx
+    assert "location /api/ {" in nginx
+    assert "location /static/ {" in nginx
+    assert "location /assets/ {" in nginx
+    assert "location / {" in nginx
+
+
+def test_production_workflows_refresh_nginx_after_backend_replacement() -> None:
+    makefile = (_repo_root() / "Makefile").read_text()
+
+    refresh = "$(COMPOSE_PROD) up -d --no-deps --force-recreate nginx"
+    assert makefile.count(refresh) == 2
+    assert "$(COMPOSE_RELEASE) up -d --no-deps --force-recreate nginx" in makefile
+
+
 def test_host_ingress_normalizes_forwarding_headers_at_the_proxy_boundary() -> None:
     nginx = (_repo_root() / "deploy/nginx/default.host-ingress.conf").read_text()
 
