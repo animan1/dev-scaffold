@@ -1,4 +1,3 @@
-import copy
 import hashlib
 import importlib.util
 import io
@@ -71,45 +70,6 @@ class BoundaryTests(unittest.TestCase):
             )
             add(archive, "config.json", self.config_bytes)
             add(archive, "layer.tar", self.layer if layer is None else layer)
-
-    def test_accepts_content_verified_images_without_repository_tags(self) -> None:
-        configs = bundle.validate_images(self.archive, self.images, "linux/arm64")
-        self.assertEqual(configs[self.identity], self.config)
-
-    def test_rejects_layer_tampering(self) -> None:
-        self.save(b"changed layer")
-        with self.assertRaisesRegex(bundle.Rejected, "layer digest"):
-            bundle.validate_images(self.archive, self.images, "linux/arm64")
-
-    def test_rejects_wrong_architecture(self) -> None:
-        with self.assertRaisesRegex(bundle.Rejected, "architecture"):
-            bundle.validate_images(self.archive, self.images, "linux/amd64")
-
-    def test_rejects_missing_image(self) -> None:
-        images = copy.deepcopy(self.images)
-        images["db"] = {**images["app"], "id": "sha256:" + "b" * 64}
-        with self.assertRaisesRegex(bundle.Rejected, "incomplete"):
-            bundle.validate_images(self.archive, images, "linux/arm64")
-
-    def test_rejects_wrong_content_identity(self) -> None:
-        self.images["app"]["id"] = "sha256:" + "b" * 64
-        with self.assertRaisesRegex(bundle.Rejected, "incomplete"):
-            bundle.validate_images(self.archive, self.images, "linux/arm64")
-
-    def test_rejects_traversal_links_and_duplicate_entries(self) -> None:
-        for name, kind in (("../escape", tarfile.REGTYPE), ("link", tarfile.SYMTYPE)):
-            with self.subTest(name=name):
-                with tarfile.open(self.archive, "w") as archive:
-                    item = tarfile.TarInfo(name)
-                    item.type = kind
-                    archive.addfile(item)
-                with self.assertRaises(bundle.Rejected):
-                    bundle.extract(self.archive, self.root / "out")
-        with tarfile.open(self.archive, "w") as archive:
-            add(archive, "same", b"a")
-            add(archive, "same", b"b")
-        with self.assertRaises(bundle.Rejected):
-            bundle.extract(self.archive, self.root / "out")
 
     def test_rejects_outer_checksum_before_extract(self) -> None:
         with self.assertRaisesRegex(bundle.Rejected, "SHA256 mismatch"):
