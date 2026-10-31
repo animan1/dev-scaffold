@@ -398,3 +398,39 @@ def unpack(bundle, expected, work):
         )
     verify_source(work, data["revision"])
     return data, spec, source
+
+
+def inspect(reference, env):
+    return json.loads(
+        run("docker", "image", "inspect", reference, env=env, output=True)
+    )[0]
+
+
+def inspect_roles(config, spec, rev, target, env, require_labels):
+    require(
+        set(spec["images"]) <= set(config["services"]), "adapter image service missing"
+    )
+    images = {}
+    for service, definition in config["services"].items():
+        reference = definition.get("image")
+        require(reference, "every runtime service must declare an image")
+        info = inspect(reference, env)
+        require(
+            info["Os"] + "/" + info["Architecture"] == target,
+            "runtime image architecture mismatch",
+        )
+        if service in spec["images"] and require_labels:
+            require(
+                (info["Config"].get("Labels") or {}).get(
+                    "org.opencontainers.image.revision"
+                )
+                == rev,
+                "application image revision label mismatch",
+            )
+        images[service] = {
+            "id": image_id(info["Id"]),
+            "reference": reference,
+            "repository_digests": info.get("RepoDigests", []),
+            "platform": target,
+        }
+    return images
