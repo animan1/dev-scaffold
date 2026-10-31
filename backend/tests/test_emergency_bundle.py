@@ -9,6 +9,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,27 +17,29 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("release_bundle", ROOT / "scripts/release_bundle.py")
+assert SPEC is not None and SPEC.loader is not None
 bundle = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bundle)
 
 
-def add(archive, name, data):
+def add(archive: tarfile.TarFile, name: str, data: bytes) -> None:
     item = tarfile.TarInfo(name)
     item.size = len(data)
     archive.addfile(item, io.BytesIO(data))
 
 
 class BoundaryTests(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.layer = b"example uncompressed layer"
+        self.labels = {"org.opencontainers.image.revision": "a" * 40}
         self.config = {
             "os": "linux",
             "architecture": "arm64",
             "rootfs": {"diff_ids": ["sha256:" + hashlib.sha256(self.layer).hexdigest()]},
-            "config": {"Labels": {"org.opencontainers.image.revision": "a" * 40}},
+            "config": {"Labels": self.labels},
         }
         self.config_bytes = json.dumps(self.config).encode()
         self.identity = "sha256:" + hashlib.sha256(self.config_bytes).hexdigest()
@@ -51,7 +54,7 @@ class BoundaryTests(unittest.TestCase):
         self.archive = self.root / "images.tar"
         self.save()
 
-    def save(self, layer=None):
+    def save(self, layer: bytes | None = None) -> None:
         with tarfile.open(self.archive, "w") as archive:
             add(
                 archive,
@@ -69,31 +72,31 @@ class BoundaryTests(unittest.TestCase):
             add(archive, "config.json", self.config_bytes)
             add(archive, "layer.tar", self.layer if layer is None else layer)
 
-    def test_accepts_content_verified_images_without_repository_tags(self):
+    def test_accepts_content_verified_images_without_repository_tags(self) -> None:
         configs = bundle.validate_images(self.archive, self.images, "linux/arm64")
         self.assertEqual(configs[self.identity], self.config)
 
-    def test_rejects_layer_tampering(self):
+    def test_rejects_layer_tampering(self) -> None:
         self.save(b"changed layer")
         with self.assertRaisesRegex(bundle.Rejected, "layer digest"):
             bundle.validate_images(self.archive, self.images, "linux/arm64")
 
-    def test_rejects_wrong_architecture(self):
+    def test_rejects_wrong_architecture(self) -> None:
         with self.assertRaisesRegex(bundle.Rejected, "architecture"):
             bundle.validate_images(self.archive, self.images, "linux/amd64")
 
-    def test_rejects_missing_image(self):
+    def test_rejects_missing_image(self) -> None:
         images = copy.deepcopy(self.images)
         images["db"] = {**images["app"], "id": "sha256:" + "b" * 64}
         with self.assertRaisesRegex(bundle.Rejected, "incomplete"):
             bundle.validate_images(self.archive, images, "linux/arm64")
 
-    def test_rejects_wrong_content_identity(self):
+    def test_rejects_wrong_content_identity(self) -> None:
         self.images["app"]["id"] = "sha256:" + "b" * 64
         with self.assertRaisesRegex(bundle.Rejected, "incomplete"):
             bundle.validate_images(self.archive, self.images, "linux/arm64")
 
-    def test_rejects_traversal_links_and_duplicate_entries(self):
+    def test_rejects_traversal_links_and_duplicate_entries(self) -> None:
         for name, kind in (("../escape", tarfile.REGTYPE), ("link", tarfile.SYMTYPE)):
             with self.subTest(name=name):
                 with tarfile.open(self.archive, "w") as archive:
@@ -108,12 +111,12 @@ class BoundaryTests(unittest.TestCase):
         with self.assertRaises(bundle.Rejected):
             bundle.extract(self.archive, self.root / "out")
 
-    def test_rejects_outer_checksum_before_extract(self):
+    def test_rejects_outer_checksum_before_extract(self) -> None:
         with self.assertRaisesRegex(bundle.Rejected, "SHA256 mismatch"):
             bundle.unpack(self.archive, "f" * 64, self.root / "unpack")
         self.assertFalse((self.root / "unpack").exists())
 
-    def test_install_requires_authorization_before_any_subprocess(self):
+    def test_install_requires_authorization_before_any_subprocess(self) -> None:
         with (
             patch.dict(os.environ, {"EMERGENCY": "0"}),
             patch.object(bundle, "run") as run,
@@ -122,7 +125,7 @@ class BoundaryTests(unittest.TestCase):
                 bundle.destination("install")
             run.assert_not_called()
 
-    def test_default_smoke_checks_revision_through_trusted_loopback_headers(self):
+    def test_default_smoke_checks_revision_through_trusted_loopback_headers(self) -> None:
         class Response(io.BytesIO):
             status = 200
 
@@ -146,7 +149,7 @@ class BoundaryTests(unittest.TestCase):
         self.assertEqual(request.get_header("X-forwarded-proto"), "https")
         self.assertEqual(request.full_url, "http://127.0.0.1:18080/api/healthz")
 
-    def test_missing_runtime_bind_rejected_before_load(self):
+    def test_missing_runtime_bind_rejected_before_load(self) -> None:
         config = {
             "services": {
                 "app": {
@@ -171,7 +174,7 @@ class BoundaryTests(unittest.TestCase):
                 self.root / "source",
             )
 
-    def test_pins_every_service_and_preserves_named_volumes_and_config(self):
+    def test_pins_every_service_and_preserves_named_volumes_and_config(self) -> None:
         source = self.root / "source"
         source.mkdir()
         (source / "committed.conf").write_text("committed configuration")
@@ -214,12 +217,13 @@ class BoundaryTests(unittest.TestCase):
         self.assertEqual(service["volumes"][2]["source"], str(self.root / "private.conf"))
         self.assertEqual(actual["volumes"]["data"]["name"], "existing-project_data")
 
-    def test_changed_service_set_or_image_reference_is_rejected(self):
+    def test_changed_service_set_or_image_reference_is_rejected(self) -> None:
         data = {"images": self.images, "mode": "hotfix", "platform": "linux/arm64"}
-        for config in (
+        configs: list[dict[str, object]] = [
             {"services": {}},
             {"services": {"app": {"image": "mutable:latest"}}},
-        ):
+        ]
+        for config in configs:
             with self.assertRaises(bundle.Rejected):
                 bundle.frozen_config(
                     config,
@@ -229,7 +233,7 @@ class BoundaryTests(unittest.TestCase):
                     self.root,
                 )
 
-    def test_json_duplicate_keys_and_manifest_expansion_are_rejected(self):
+    def test_json_duplicate_keys_and_manifest_expansion_are_rejected(self) -> None:
         path = self.root / "bad.json"
         path.write_text('{"schema":1,"schema":2}')
         with self.assertRaises(bundle.Rejected):
@@ -238,7 +242,9 @@ class BoundaryTests(unittest.TestCase):
         with self.assertRaises(bundle.Rejected):
             bundle.manifest_values(path)
 
-    def committed_bundle(self, change=None):
+    def committed_bundle(
+        self, change: Callable[[Path, dict[str, object]], None] | None = None
+    ) -> tuple[Path, str, Path]:
         source = self.root / "repository"
         source.mkdir()
         spec = {
@@ -277,7 +283,7 @@ class BoundaryTests(unittest.TestCase):
             "refs/heads/emergency-release",
             cwd=source,
         )
-        self.config["config"]["Labels"]["org.opencontainers.image.revision"] = revision
+        self.labels["org.opencontainers.image.revision"] = revision
         self.config_bytes = json.dumps(self.config).encode()
         self.identity = "sha256:" + hashlib.sha256(self.config_bytes).hexdigest()
         self.images["app"]["id"] = self.identity
@@ -297,7 +303,7 @@ class BoundaryTests(unittest.TestCase):
                 "images": {"RELEASE_BACKEND_IMAGE": self.identity},
             },
         )
-        data = {
+        data: dict[str, object] = {
             "schema": 1,
             "mode": "hotfix",
             "revision": revision,
@@ -317,20 +323,20 @@ class BoundaryTests(unittest.TestCase):
         destination.mkdir()
         return output, bundle.digest(output), destination
 
-    def test_unpacks_exact_source_and_self_contained_hotfix_history(self):
+    def test_unpacks_exact_source_and_self_contained_hotfix_history(self) -> None:
         data, _, source = bundle.unpack(*self.committed_bundle())
         self.assertEqual(data["mode"], "hotfix")
         self.assertEqual((source / "deployment.conf").read_text(), "exact committed configuration")
 
-    def test_rejects_revision_inconsistent_manifest(self):
-        def change(payload, data):
+    def test_rejects_revision_inconsistent_manifest(self) -> None:
+        def change(payload: Path, data: dict[str, object]) -> None:
             (payload / "release.env").write_text("RELEASE_REVISION=" + "b" * 40 + "\n")
 
         with self.assertRaisesRegex(bundle.Rejected, "manifest revision"):
             bundle.unpack(*self.committed_bundle(change))
 
-    def test_rejects_unvalidated_image_identity(self):
-        def change(payload, data):
+    def test_rejects_unvalidated_image_identity(self) -> None:
+        def change(payload: Path, data: dict[str, object]) -> None:
             evidence = bundle.read_json(payload / "evidence.json")
             evidence["images"]["RELEASE_BACKEND_IMAGE"] = "sha256:" + "b" * 64
             bundle.write_json(payload / "evidence.json", evidence)
@@ -338,8 +344,8 @@ class BoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(bundle.Rejected, "evidence images"):
             bundle.unpack(*self.committed_bundle(change))
 
-    def test_rejects_source_that_differs_from_preserved_commit(self):
-        def change(payload, data):
+    def test_rejects_source_that_differs_from_preserved_commit(self) -> None:
+        def change(payload: Path, data: dict[str, object]) -> None:
             with tarfile.open(payload / "source.tar", "a") as archive:
                 add(archive, "unexpected.conf", b"not in the commit")
 
@@ -355,5 +361,5 @@ if __name__ == "__main__":
     os.environ.get("RUN_EMERGENCY_INTEGRATION") != "1",
     reason="opt-in: privileged Docker engines and initial registry access required",
 )
-def test_isolated_emergency_operator_workflows():
+def test_isolated_emergency_operator_workflows() -> None:
     subprocess.run([sys.executable, str(ROOT / "tests/emergency_release/exercise.py")], check=True)
