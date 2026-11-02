@@ -19,6 +19,13 @@ The application runs from source in `<project>-dev`. Repeat `up-dev` and
 `verify-dev` after code changes when needed. `down-dev` retains development data
 for the next startup. No production-image build or registry transfer is needed.
 
+Use `make help` for command discovery. To opt into local Git hooks:
+
+```sh
+make setup
+make hooks
+```
+
 For an intentional dependency update:
 
 ```sh
