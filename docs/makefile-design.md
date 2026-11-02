@@ -66,6 +66,7 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | `migrations` | Generate migration source files for intentional model changes; no application-schema or data changes | Source editing |
 | `format` | Apply configured formatting and automatic fixes across the selected application's components; no tests or deployment | Source editing |
 | `help` | List documented commands supported by the selected profile, their selector forms, and required inputs; no setup, service changes, or secret values. Default for bare `make` | Access and inspection |
+| `profiles` | Print JSON with selected profile names at `selected.application` and `selected.backup`, and configured validation profile-name arrays at `validation.application` and `validation.backup`; no configuration edits, setup, or service changes | Access and inspection |
 | `config-<env>` | Write the resolved Compose model, including configured optional services, to owner-only `.local/config/<env>.json`; print only its path. No service changes, builds, image pulls, or registry/API calls | Access and inspection |
 | `ps-<env>[-<container>]` | Display container status for the selected service, or all environment services when omitted | Access and inspection |
 | `logs-<env>[-<container>]` | Display container logs for the selected service, or all environment services when omitted | Access and inspection |

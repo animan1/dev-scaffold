@@ -26,6 +26,12 @@ make setup
 make hooks
 ```
 
+To inspect the selected profiles and configured validation matrix:
+
+```sh
+make profiles
+```
+
 During code changes, run individual source gates as needed:
 
 ```sh
