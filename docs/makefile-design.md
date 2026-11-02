@@ -19,6 +19,7 @@ An environment-specific command must name its environment explicitly; bare
 - Artifact transfer: publish or download recorded release artifacts.
 - Lifecycle: start, update (including deployment), stop, or remove an environment.
 - Validation: test source, artifacts, or application behavior.
+- Source editing: explicitly format or fix source.
 - Access and inspection: interact with an existing environment.
 
 ## Command results
@@ -28,6 +29,8 @@ below illustrate composition and do not add requirements.
 
 | Command | Result | Type |
 | --- | --- | --- |
+| `check` | Run all configured source-quality gates across the selected application's components: formatting checks, lint, type checks, tests and coverage thresholds, migration consistency, and framework checks. The required gates are identical locally and in CI; no source fixes or deployment | Validation |
+| `format` | Apply configured formatting and automatic fixes across the selected application's components; no tests or deployment | Source editing |
 | `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded; shared across environments, with no application startup | Build |
 | `publish` | Upload the recorded build's images, committed deployment source, release manifest, and successful validation evidence; preserve their revision and immutable image identities | Artifact transfer |
 | `download` | Obtain the selected published release's recorded images, manifest, evidence, and deployment source; prepare the current deployment checkout at the recorded revision and validate completeness, integrity, and architecture, without changing running containers or application data | Artifact transfer |
@@ -85,6 +88,7 @@ sequence applies on a laptop, in CI, or on a droplet with Docker and the require
 configuration; it requires no prior CI build or validation elsewhere.
 
 ```sh
+make check
 make build
 make up-ephemeral
 make integration-test-ephemeral
