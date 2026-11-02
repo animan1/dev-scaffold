@@ -28,6 +28,7 @@ Unknown service selectors must fail before service changes.
 - Data administration: explicitly manage application data and schema.
 - Validation: test source, artifacts, or application behavior.
 - Source editing: explicitly update source or lockfiles.
+- Cleanup: remove regenerable local artifacts.
 - Access and inspection: interact with an existing environment.
 
 ## Command results
@@ -65,6 +66,7 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | `deps-lock` | Update the selected application's dependency lockfiles from declared dependency constraints; no application startup or deployment-image build | Source editing |
 | `migrations` | Generate migration source files for intentional model changes; no application-schema or data changes | Source editing |
 | `format` | Apply configured formatting and automatic fixes across the selected application's components; no tests or deployment | Source editing |
+| `clean` | Remove regenerable tool caches in the current checkout only; preserve source, installed dependencies, credentials, release artifacts, container resources, and application data | Cleanup |
 | `help` | List documented commands supported by the selected profile, their selector forms, and required inputs; no setup, service changes, or secret values. Default for bare `make` | Access and inspection |
 | `config-<env>` | Write the resolved Compose model, including configured optional services, to owner-only `.local/config/<env>.json`; print only its path. No service changes, builds, image pulls, or registry/API calls | Access and inspection |
 | `ps-<env>[-<container>]` | Display container status for the selected service, or all environment services when omitted | Access and inspection |

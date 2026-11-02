@@ -39,6 +39,8 @@ make test
 
 Use `make format` for formatting and fixes, or `make check` for the complete gate.
 
+For local cache troubleshooting, use `make clean`.
+
 For an intentional dependency update:
 
 ```sh
