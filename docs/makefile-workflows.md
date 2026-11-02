@@ -79,6 +79,7 @@ available, run in order and stop at the first failure:
 make setup
 make check
 make build
+make image-check
 make up-ephemeral
 make integration-test-ephemeral
 make verify-ephemeral
@@ -100,6 +101,7 @@ On the build host, with the intended source committed:
 make setup
 make check
 make build
+make image-check
 make up-ephemeral
 make integration-test-ephemeral
 make verify-ephemeral
