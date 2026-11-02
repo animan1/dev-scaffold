@@ -29,6 +29,19 @@ make check
 
 Commit the dependency declarations and lockfiles together before building a release.
 
+After an intentional model change:
+
+```sh
+make migrations
+make check
+make migrate-dev
+make verify-dev
+```
+
+Commit model changes and migration files together before building a release.
+For interactive administration of the running development application, use
+`make superuser-dev` to create an administrator account.
+
 ## 2. Local prod lifecycle
 
 On one host, with the intended source committed and production configuration

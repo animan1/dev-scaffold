@@ -19,6 +19,7 @@ An environment-specific command must name its environment explicitly; bare
 - Build: produce artifacts.
 - Artifact transfer: publish or download recorded release artifacts.
 - Lifecycle: start, update (including deployment), stop, or remove an environment.
+- Data administration: explicitly manage application data and schema.
 - Validation: test source, artifacts, or application behavior.
 - Source editing: explicitly update source or lockfiles.
 - Access and inspection: interact with an existing environment.
@@ -27,6 +28,7 @@ An environment-specific command must name its environment explicitly; bare
 
 This table defines command behavior in every supported environment. Examples
 in [Makefile workflows](makefile-workflows.md) illustrate composition and do not add requirements.
+Subcommands are listed as **Invokes:** at the end of the result.
 
 | Command | Result | Type |
 | --- | --- | --- |
@@ -34,17 +36,21 @@ in [Makefile workflows](makefile-workflows.md) illustrate composition and do not
 | `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded; shared across environments, with no application startup | Build |
 | `publish` | Upload the recorded build's images, committed deployment source, release manifest, and successful validation evidence; preserve their revision and immutable image identities | Artifact transfer |
 | `download` | Obtain the selected published release's recorded images, manifest, evidence, and deployment source; prepare the current deployment checkout at the recorded revision and validate completeness, integrity, and architecture, without changing running containers or application data | Artifact transfer |
-| `up-<env>` | A running application matching the checked-out revision; retain configuration and volumes, initialize dependencies, and apply required migrations, without building or testing. Migration failure stops startup; database changes are not automatically reversed | Lifecycle |
+| `up-<env>` | A running application matching the checked-out revision; retain configuration and volumes, initialize dependencies, and apply required migrations before application startup, without building or testing. Migration failure stops startup; database changes are not automatically reversed. **Invokes:** `migrate-<env>` | Lifecycle |
 | `down-<env>` | Stopped application, with configuration and data preserved | Lifecycle |
 | `rm-<env>` | Environment containers and data removed | Lifecycle |
+| `migrate-<env>` | Apply existing migration files using the environment's application runtime; no migration-file generation or application deployment | Data administration |
+| `superuser-<env>` | Create an administrative application account interactively; no implicit migration or application deployment | Data administration |
 | `check` | Run all configured source-quality gates across the selected application's components: formatting checks, lint, type checks, tests and coverage thresholds, migration consistency, and framework checks. The required gates are identical locally and in CI; no source fixes or deployment | Validation |
 | `verify-<env>` | Read-only checks of health, expected revision, and HTTP/static smoke behavior; no container lifecycle changes, schema migration, or application-data writes | Validation |
 | `integration-test-<env>` | Application integration tests, including writes to its data | Validation |
 | `deps-lock` | Update the selected application's dependency lockfiles from declared dependency constraints; no application startup or deployment-image build | Source editing |
+| `migrations` | Generate migration source files for intentional model changes; no application-schema or data changes | Source editing |
 | `format` | Apply configured formatting and automatic fixes across the selected application's components; no tests or deployment | Source editing |
 | `ps-<env>` | Display the environment's container status | Access and inspection |
 | `logs-<env>` | Display the environment's container logs | Access and inspection |
 | `shell-<env>` | Open a shell in the environment's application container | Access and inspection |
+| `console-<env>` | Open the environment's interactive application/framework console | Access and inspection |
 
 The production host needs registry access and its own existing configuration and
 credentials. Downloading does not build images or rerun the build host's tests.
