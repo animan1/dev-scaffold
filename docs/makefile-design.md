@@ -39,6 +39,7 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | Command | Result | Type |
 | --- | --- | --- |
 | `setup` | Prepare tooling and dependencies for the selected application's components from committed lockfiles; no lockfile edits, application startup, or deployment-image build | Setup |
+| `hooks` | Install the repository's configured Git hooks for the current checkout; no hook execution, lockfile edits, or service startup | Setup |
 | `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded; shared across environments, with no application startup | Build |
 | `publish` | Upload the recorded build's images, committed deployment source, release manifest, and successful validation evidence; preserve their revision and immutable image identities | Artifact transfer |
 | `download` | Obtain the selected published release's recorded images, manifest, evidence, and deployment source; prepare the current deployment checkout at the recorded revision and validate completeness, integrity, and architecture, without changing running containers or application data | Artifact transfer |
@@ -58,6 +59,7 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | `deps-lock` | Update the selected application's dependency lockfiles from declared dependency constraints; no application startup or deployment-image build | Source editing |
 | `migrations` | Generate migration source files for intentional model changes; no application-schema or data changes | Source editing |
 | `format` | Apply configured formatting and automatic fixes across the selected application's components; no tests or deployment | Source editing |
+| `help` | List documented commands supported by the selected profile, their selector forms, and required inputs; no setup, service changes, or secret values. Default for bare `make` | Access and inspection |
 | `ps-<env>[-<container>]` | Display container status for the selected service, or all environment services when omitted | Access and inspection |
 | `logs-<env>[-<container>]` | Display container logs for the selected service, or all environment services when omitted | Access and inspection |
 | `shell-<env>[-<container>]` | Open a shell in the selected service's container, defaulting to the application service when omitted | Access and inspection |
