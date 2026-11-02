@@ -47,6 +47,15 @@ out another revision alone does not change a running deployment.
 
 SSH transfer and remote coordination belong to infra.
 
+## Validation boundaries
+
+- Source-quality checks must not also deploy or verify a running application.
+- `verify-<env>` must not also run source-quality gates.
+- Source-quality checks must not start, stop, migrate, or replace persistent
+  deployments, use their application data, or build deployment images.
+- Checks must not rewrite tracked source. Formatting and automatic fixes must
+  be separate, explicitly invoked commands.
+
 ## Environments and resource names
 
 | Environment | Runtime and data | Default Compose project |
