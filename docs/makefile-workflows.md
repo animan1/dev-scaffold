@@ -26,6 +26,8 @@ make setup
 make hooks
 ```
 
+During code changes, use `make test` for a test-only pass.
+
 For an intentional dependency update:
 
 ```sh
