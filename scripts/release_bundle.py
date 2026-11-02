@@ -161,7 +161,8 @@ def inputs(path=None):
         read_json(path)
         if path
         else {
-            "project": os.environ.get("RELEASE_COMPOSE_PROJECT") or Path.cwd().name,
+            "project": os.environ.get("RELEASE_COMPOSE_PROJECT")
+            or Path.cwd().name + "-prod",
             "env_file": str(
                 Path(os.environ.get("PROD_ENV_FILE") or "deploy/.env.prod").resolve()
             ),
@@ -1171,6 +1172,45 @@ def staging(state):
             shutil.rmtree(work)
 
 
+def validation_preflight():
+    project = os.environ.get("RELEASE_CI_COMPOSE_PROJECT", "")
+    require(
+        re.fullmatch("[a-z0-9][a-z0-9_-]+", project),
+        "explicit release-CI project required",
+    )
+    marker = "io.dev-scaffold.validation=release-ci"
+    env = environment()
+    for kind, command, field in (
+        ("containers", ("docker", "ps", "-a"), "ID"),
+        ("volumes", ("docker", "volume", "ls"), "Name"),
+        ("networks", ("docker", "network", "ls"), "ID"),
+    ):
+        base = (*command, "--filter", "label=com.docker.compose.project=" + project)
+        all_resources = set(
+            run(*base, "--format", "{{." + field + "}}", env=env, output=True)
+            .decode()
+            .split()
+        )
+        owned = set(
+            run(
+                *base,
+                "--filter",
+                "label=" + marker,
+                "--format",
+                "{{." + field + "}}",
+                env=env,
+                output=True,
+            )
+            .decode()
+            .split()
+        )
+        require(
+            not all_resources - owned,
+            f"refusing validation or cleanup: {project} has non-CI {kind}; no services or volumes changed",
+        )
+    print("PASS: release-CI resources are empty or explicitly validation-owned")
+
+
 def destination(operation):
     require(
         operation != "install" or os.environ.get("EMERGENCY") == "1",
@@ -1363,6 +1403,8 @@ def main():
         destination(operation)
     elif operation == "smoke":
         smoke()
+    elif operation == "validation-preflight":
+        validation_preflight()
     else:
         raise Rejected("unknown operation")
 

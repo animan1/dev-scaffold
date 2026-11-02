@@ -63,7 +63,7 @@ def test_make_exports_normal_config_without_required_bundle_parameters(
     )
     exported = json.loads(result.stdout)
     assert exported["RELEASE_COMPOSE_PROJECT"] == (
-        "existing-project" if override_project else repository.name
+        "existing-project" if override_project else repository.name + "-prod"
     )
     assert exported["PROD_ENV_FILE"] == "/private/normal.env"
     assert exported["RELEASE_HTTP_PORT"] == "19080"

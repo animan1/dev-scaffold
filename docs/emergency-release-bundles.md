@@ -55,9 +55,15 @@ monitoring options. There is no required emergency input JSON file or second
 credentials file. A previously recorded deployment project is reused unless a
 project override is explicit; conflicting project records still reject the
 operation. Existing credentials, volumes and application data stay on the host.
-Without a record/override, the runtime project is the normal application project
-(`PROJECT_NAME`), rather than the disposable `-release` verification project.
-Local checks retain the selected profile's existing CI project defaults.
+The three default Compose identities are `$(PROJECT_NAME)-dev` for `make up-dev`
+(also `make up`), `$(PROJECT_NAME)-prod` for `make deploy-release`/`make up-prod`,
+and `$(PROJECT_NAME)-release` for testing deployable images and bundles.
+Emergency installation uses the same production identity as normal deployment.
+Changing a default does not rename existing containers or volumes. If an older
+deployment occupies `-release`, leave it running and preserve/back up its data
+before deliberately moving it to `-prod`; validation refuses those resources.
+Do not run cleanup to free that namespace or assume newly named volumes contain
+the old data.
 
 Use the same Make overrides that normal deployment needs when the destination
 deviates from the application's defaults. For example, a host with an alternate
@@ -120,8 +126,13 @@ local checks through the existing Make workflows, and verifies the checks did
 not change committed source or the application image IDs. Quality checks use
 one-off containers without starting the development app/proxy or publishing its
 ports. Exact-image checks use the existing release-CI workflow on automatically
-selected free loopback ports; cleanup stops only that CI stack. Run build-side
-validation in the development environment, not on production data.
+selected free loopback ports. Before preparation or cleanup, a read-only check
+requires every existing container, volume and network in the validation project
+to carry its CI ownership label. Unmarked resources reject before mutation,
+including after failed checks. Preparation pulls only the database service for
+the requested platform before startup, replacing a cached tag of another
+architecture. Run build-side validation in the development environment, not on
+production data.
 
 Keep the original feature branch and bundle. After recovery, push the preserved
 commit and reconcile it with current main through the normal PR/CI workflow.
