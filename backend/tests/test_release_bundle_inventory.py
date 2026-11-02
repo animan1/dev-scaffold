@@ -74,6 +74,37 @@ def test_cross_platform_capture_inspects_the_pulled_variant() -> None:
     ]
 
 
+def test_inventory_uses_resolved_digest_without_changing_compose_reference() -> None:
+    pinned = "sha256:" + "d" * 64
+    with patch.object(bundle, "run", return_value=image_info(Id=pinned)) as run:
+        images = bundle.inspect_roles(
+            {"services": {"db": {"image": "postgres:16"}}},
+            {"images": {}},
+            REVISION,
+            "linux/arm64",
+            {},
+            False,
+            {"db": pinned},
+        )
+    assert run.call_args.args == ("docker", "image", "inspect", pinned)
+    assert images["db"]["reference"] == "postgres:16"
+    assert images["db"]["id"] == pinned
+
+
+def test_inventory_rejects_a_different_config_than_the_selected_manifest() -> None:
+    with patch.object(bundle, "run", return_value=image_info()):
+        with pytest.raises(bundle.Rejected, match="config identity mismatch"):
+            bundle.inspect_roles(
+                {"services": {"db": {"image": "postgres:16"}}},
+                {"images": {}},
+                REVISION,
+                "linux/arm64",
+                {},
+                False,
+                {"db": "sha256:" + "d" * 64},
+            )
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [

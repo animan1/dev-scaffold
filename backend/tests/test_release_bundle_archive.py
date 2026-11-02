@@ -1,4 +1,5 @@
 import copy
+import gzip
 import hashlib
 import importlib.util
 import io
@@ -73,6 +74,51 @@ class BoundaryTests(unittest.TestCase):
     def test_rejects_layer_tampering(self) -> None:
         self.save(b"changed layer")
         with self.assertRaisesRegex(bundle.Rejected, "layer digest"):
+            bundle.validate_images(self.archive, self.images, "linux/arm64")
+
+    def test_accepts_gzip_layers_after_verifying_uncompressed_identity(self) -> None:
+        self.save(gzip.compress(self.layer))
+        self.assertEqual(
+            bundle.validate_images(self.archive, self.images, "linux/arm64")[self.identity],
+            self.config,
+        )
+
+    def test_accepts_verified_manifest_and_index_image_identities(self) -> None:
+        manifest = json.dumps(
+            {
+                "schemaVersion": 2,
+                "config": {"digest": self.identity},
+                "layers": [{"digest": "sha256:" + hashlib.sha256(self.layer).hexdigest()}],
+            }
+        ).encode()
+        manifest_id = "sha256:" + hashlib.sha256(manifest).hexdigest()
+        index = json.dumps(
+            {
+                "schemaVersion": 2,
+                "manifests": [
+                    {"digest": manifest_id, "platform": {"os": "linux", "architecture": "arm64"}}
+                ],
+            }
+        ).encode()
+        index_id = "sha256:" + hashlib.sha256(index).hexdigest()
+        with tarfile.open(self.archive, "a") as archive:
+            add(archive, "blobs/sha256/" + manifest_id[7:], manifest)
+            add(archive, "blobs/sha256/" + index_id[7:], index)
+        for identity in (manifest_id, index_id):
+            with self.subTest(identity=identity):
+                self.images["app"]["id"] = identity
+                aliases: dict[str, str] = {}
+                configs = bundle.validate_images(self.archive, self.images, "linux/arm64", aliases)
+                self.assertEqual(configs[identity], self.config)
+                self.assertEqual(aliases[identity], self.identity)
+
+    def test_rejects_tampered_manifest_alias(self) -> None:
+        manifest = json.dumps({"config": {"digest": self.identity}}).encode()
+        identity = "sha256:" + hashlib.sha256(manifest).hexdigest()
+        with tarfile.open(self.archive, "a") as archive:
+            add(archive, "blobs/sha256/" + identity[7:], manifest + b" ")
+        self.images["app"]["id"] = identity
+        with self.assertRaisesRegex(bundle.Rejected, "manifest digest"):
             bundle.validate_images(self.archive, self.images, "linux/arm64")
 
     def test_rejects_wrong_architecture(self) -> None:
