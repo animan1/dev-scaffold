@@ -26,7 +26,18 @@ make setup
 make hooks
 ```
 
-During code changes, use `make test` for a test-only pass.
+During code changes, run individual source gates as needed:
+
+```sh
+make format-check
+make lint
+make typecheck
+make migrations-check
+make framework-check
+make test
+```
+
+Use `make format` for formatting and fixes, or `make check` for the complete gate.
 
 For an intentional dependency update:
 
