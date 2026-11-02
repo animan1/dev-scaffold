@@ -1,23 +1,9 @@
 # Makefile workflows
 
 Proposed workflows for the Makefile redesign, using the command convention in
-[#58](https://github.com/animan1/dev-scaffold/pull/58). These are design examples,
+[the command contract](makefile-design.md). These are design examples,
 not instructions for the current implementation. Existing command definitions
 remain authoritative; the examples add no implicit build, test, or deploy steps.
-
-## Artifact transfer commands
-
-These environment-neutral commands extend the command contract for two hosts.
-
-| Command | Result | Type |
-| --- | --- | --- |
-| `publish` | Upload the recorded build's images, committed deployment source, release manifest, and successful validation evidence; preserve their revision and immutable image identities | Artifact transfer |
-| `download` | Obtain the selected published release's recorded images, manifest, evidence, and deployment source; prepare the current deployment checkout at the recorded revision and validate completeness, integrity, and architecture, without changing running containers or application data | Artifact transfer |
-
-The production host needs registry access and its own existing configuration and
-credentials. Downloading does not build images or rerun the build host's tests.
-Subsequent commands run from that same checkout. Selecting or checking
-out another revision alone does not change a running deployment.
 
 ## 1. Local dev lifecycle
 
@@ -26,8 +12,6 @@ On the development host, with source and development configuration available:
 ```sh
 make up-dev
 make verify-dev
-make logs-dev
-make shell-dev
 make down-dev
 ```
 
