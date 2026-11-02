@@ -61,6 +61,50 @@ def test_inventories_application_database_and_optional_monitor() -> None:
     ]
 
 
+def test_cross_platform_capture_inspects_the_pulled_variant() -> None:
+    env = {"DOCKER_DEFAULT_PLATFORM": "linux/amd64"}
+    with patch.object(
+        bundle, "run", side_effect=[image_info(), image_info(Architecture="amd64")]
+    ) as run:
+        info = bundle.inspect("postgres:16", env)
+    assert info["Architecture"] == "amd64"
+    assert [call.args for call in run.call_args_list] == [
+        ("docker", "image", "inspect", "postgres:16"),
+        ("docker", "image", "inspect", "--platform", "linux/amd64", "postgres:16"),
+    ]
+
+
+def test_inventory_uses_resolved_digest_without_changing_compose_reference() -> None:
+    pinned = "sha256:" + "d" * 64
+    with patch.object(bundle, "run", return_value=image_info(Id=pinned)) as run:
+        images = bundle.inspect_roles(
+            {"services": {"db": {"image": "postgres:16"}}},
+            {"images": {}},
+            REVISION,
+            "linux/arm64",
+            {},
+            False,
+            {"db": pinned},
+        )
+    assert run.call_args.args == ("docker", "image", "inspect", pinned)
+    assert images["db"]["reference"] == "postgres:16"
+    assert images["db"]["id"] == pinned
+
+
+def test_inventory_rejects_a_different_config_than_the_selected_manifest() -> None:
+    with patch.object(bundle, "run", return_value=image_info()):
+        with pytest.raises(bundle.Rejected, match="config identity mismatch"):
+            bundle.inspect_roles(
+                {"services": {"db": {"image": "postgres:16"}}},
+                {"images": {}},
+                REVISION,
+                "linux/arm64",
+                {},
+                False,
+                {"db": "sha256:" + "d" * 64},
+            )
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [

@@ -22,7 +22,8 @@ SHELL := /bin/bash
 COMPOSE_DEV := docker compose -f deploy/docker-compose.dev.yml
 FRONTEND_DIR := frontend
 PROJECT_NAME ?= $(notdir $(CURDIR))
-COMPOSE_PROJECT_NAME ?= $(PROJECT_NAME)
+DEV_COMPOSE_PROJECT ?= $(PROJECT_NAME)-dev
+COMPOSE_PROJECT_NAME ?= $(DEV_COMPOSE_PROJECT)
 export COMPOSE_PROJECT_NAME
 HOST_INGRESS ?= 0
 MONITORING ?= 0
@@ -41,11 +42,12 @@ PROD_COMPOSE_FILES += -f deploy/docker-compose.external-monitoring.yml
 RELEASE_COMPOSE_FILES += -f deploy/docker-compose.external-monitoring.yml
 PROD_COMPOSE_PROFILES += --profile monitoring
 endif
-COMPOSE_PROD = docker compose $(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file deploy/.env.prod
-COMPOSE_MONITOR = docker compose -f deploy/docker-compose.prod.yml \
+COMPOSE_PROD = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) docker compose $(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file deploy/.env.prod
+COMPOSE_MONITOR = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) docker compose -f deploy/docker-compose.prod.yml \
 	-f deploy/docker-compose.external-monitoring.yml --profile monitoring \
 	--env-file deploy/.env.prod
-RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
+RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-prod
+RELEASE_CI_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
 RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)
 RELEASE_REVISION ?= $(shell git rev-parse HEAD)
 RELEASE_BACKEND_TAG = $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
@@ -60,13 +62,14 @@ COMPOSE_RELEASE = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) COMPOSE_PROJECT_NAME
 	$(RELEASE_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) \
 	--env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
 RUN_RELEASE = $(COMPOSE_RELEASE) run --rm --no-deps backend
-COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
+COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_CI_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
 	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
 	-f deploy/docker-compose.release-ci.yml
-COMPOSE_RELEASE_INGRESS_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
+COMPOSE_RELEASE_INGRESS_CI = COMPOSE_PROJECT_NAME=$(RELEASE_CI_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
 	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
+	-f deploy/docker-compose.release-ci.yml \
 	-f deploy/docker-compose.host-ingress.yml
 
 # ---- Paths ----
@@ -104,7 +107,8 @@ help-verbose: ## Show full help (featured + everything else)
 	echo "$$ALL" | grep -v -E "^($$REGEX):" | sort -t: -k1,1 | \
 	  awk 'BEGIN {FS=":.*?## "} {printf "    \033[36m%-24s\033[0m %s\n", $$1, $$2}'
 
-.PHONY: up
+.PHONY: up up-dev
+up-dev: up ## Start the development stack
 up: ## (Docker) Start dev stack (backend + nginx + frontend proxy)
 	$(COMPOSE_DEV) up --build -d
 
@@ -152,11 +156,11 @@ be.wait: ## Wait for backend health (dev)
 
 .PHONY: be.ci
 be.ci: ## (Docker) Run backend verify inside dev container
-	$(COMPOSE_DEV) run --rm backend bash -lc 'REPO_DIR=/workspace make -f /workspace/Makefile PY_DIR=/app be.verify'
+	$(COMPOSE_DEV) run --build --rm --no-deps backend bash -lc 'REPO_DIR=/workspace make -f /workspace/Makefile PY_DIR=/app be.verify'
 
 .PHONY: fe.ci
 fe.ci: ## (Docker) Run frontend verify inside dev container
-	$(COMPOSE_DEV) run --rm frontend sh -lc 'apk add --no-cache make >/dev/null 2>&1 || true; corepack enable; make -f /workspace/Makefile FRONTEND_DIR=/app fe.setup fe.verify'
+	$(COMPOSE_DEV) run --rm --no-deps frontend sh -lc 'apk add --no-cache make >/dev/null 2>&1 || true; corepack enable; make -f /workspace/Makefile FRONTEND_DIR=/app fe.setup fe.verify'
 
 .PHONY: smoke
 smoke: ## Dev smoketest (API + static + FE root)
@@ -317,6 +321,7 @@ build-release-images: ## Build SHA-tagged production images once
 
 .PHONY: prepare-release-ci
 prepare-release-ci: ## Prepare isolated, non-secret release smoke-test configuration
+	@python3 scripts/release_bundle.py validation-preflight
 	@mkdir -p .tmp deploy/nginx/certs
 	@printf '%s\n' \
 		'DJANGO_SECRET_KEY=release-ci-only' \
@@ -334,6 +339,8 @@ prepare-release-ci: ## Prepare isolated, non-secret release smoke-test configura
 			-days 1 -subj '/CN=localhost' \
 			-addext 'subjectAltName=DNS:localhost'; \
 	fi
+	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+		$(COMPOSE_RELEASE_CI) pull db
 
 .PHONY: verify-release-images
 verify-release-images: prepare-release-ci ## Verify and smoke-test the exact SHA-tagged images
@@ -386,6 +393,7 @@ verify-monitoring-config: prepare-release-ci ## Validate the optional monitoring
 
 .PHONY: down-release-ci
 down-release-ci: ## Stop the isolated immutable-release test stack
+	@python3 scripts/release_bundle.py validation-preflight
 	@if [ -f .tmp/release-ci.env ]; then \
 		RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
 		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
@@ -412,6 +420,7 @@ push-release-images: ## Push verified images and record their immutable digests
 
 .PHONY: initialize-release
 initialize-release: ## Initialize the database/static volume with the recorded backend image
+	@test '$(RELEASE_COMPOSE_PROJECT)' != '$(RELEASE_CI_COMPOSE_PROJECT)' || { echo 'Deployment project is reserved for release validation'; exit 1; }
 	@test -f $(RELEASE_FILE) || { echo 'Set RELEASE_FILE to a recorded release manifest'; exit 1; }
 	$(COMPOSE_RELEASE) config --quiet
 	$(RELEASE_PULL)
@@ -509,7 +518,7 @@ test: ## Pytest (backend)
 
 .PHONY: coverage
 coverage: ## Pytest coverage gate (backend)
-	cd $(PY_DIR) && uv run pytest --cov=src --cov-report=term-missing
+	cd $(PY_DIR) && uv run pytest --cov=src --cov-config=$(abspath $(PY_DIR)/pyproject.toml) --cov-report=term-missing
 
 # ---- Pre-commit runner ----
 .PHONY: precommit
@@ -585,3 +594,4 @@ SELECTED_OPTIONAL_PROFILE_MAKEFILES := $(SELECTED_OPTIONAL_PROFILE_MAKEFILES) $(
 endif
 
 include $(SCAFFOLD_ROOT)profiles/release-transport.mk
+include $(SCAFFOLD_ROOT)profiles/emergency-release/profile.mk

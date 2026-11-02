@@ -67,12 +67,14 @@ def test_rejects_invalid_destination_inputs(
     assert not (tmp_path / "marker").exists()
 
 
-def test_rejects_missing_or_public_environment_file(tmp_path: Path) -> None:
+def test_preserves_normal_environment_permissions_and_rejects_missing_file(tmp_path: Path) -> None:
     path = document(tmp_path)
     private = tmp_path / "production.env"
     private.chmod(0o644)
-    with pytest.raises(bundle.Rejected, match="private"):
-        bundle.inputs(path)
+    before = private.read_bytes()
+    assert bundle.inputs(path)["env_file"] == str(private)
+    assert private.stat().st_mode & 0o777 == 0o644
+    assert private.read_bytes() == before
     private.unlink()
     with pytest.raises(bundle.Rejected, match="absolute existing"):
         bundle.inputs(path)

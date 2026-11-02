@@ -1,0 +1,18 @@
+services:
+  app:
+    image: "${RELEASE_BACKEND_IMAGE:?}"
+    env_file: ["${PROD_ENV_FILE:?}"]
+    environment:
+      RELEASE_REVISION: "${RELEASE_REVISION:?}"
+    volumes:
+      - data:/data
+      - ./private.conf:/config/private.conf:ro
+  web:
+    image: "${RELEASE_WEB_IMAGE:?}"
+    environment:
+      RELEASE_REVISION: "${RELEASE_REVISION:?}"
+  sidecar:
+    image: ghcr.io/exercise/runtime:cached
+    command: ["python", "-c", "import time; time.sleep(3600)"]
+volumes:
+  data:

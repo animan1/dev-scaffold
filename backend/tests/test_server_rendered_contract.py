@@ -104,11 +104,12 @@ def test_server_rendered_up_prod_uses_isolated_production_simulation() -> None:
     assert "profiles/server-rendered-django/release-nginx.Dockerfile" in output
     assert "profiles/server-rendered-django/prod-sim-ingress.Dockerfile" in output
     assert "profiles/server-rendered-django/prod-sim.compose.yml" in output
-    assert f"COMPOSE_PROJECT_NAME={project_name}-prod-sim" in output
+    assert f"COMPOSE_PROJECT_NAME={project_name}-prod" in output
     assert "server-rendered-prod-sim.env" in output
     assert "DJANGO_SECURE_SSL_REDIRECT" not in output
     assert "pull app web" not in output
-    assert "Set RELEASE_FILE" not in output
+    assert "initialize-release-ci" not in output
+    assert "RELEASE_PULL=true" in output
     database_start = output.index("up -d --no-build db")
     production_check = output.index("python -m app.manage check --deploy")
     migration = output.index("python -m app.manage migrate")
@@ -117,7 +118,7 @@ def test_server_rendered_up_prod_uses_isolated_production_simulation() -> None:
     assert database_start < production_check < migration < static_collection < application_start
 
     down = _make("--dry-run", "down-prod").stdout
-    assert f"COMPOSE_PROJECT_NAME={project_name}-prod-sim" in down
+    assert f"COMPOSE_PROJECT_NAME={project_name}-prod" in down
     assert "down --remove-orphans" in down
     assert "down -v" not in down
 
@@ -175,7 +176,7 @@ def test_server_rendered_prod_sim_wrapper_selects_the_profile() -> None:
     ).stdout
 
     assert "profiles/server-rendered-django/backend.Dockerfile" in output
-    assert f"COMPOSE_PROJECT_NAME={project_name}-prod-sim" in output
+    assert f"COMPOSE_PROJECT_NAME={project_name}-prod" in output
     assert "deploy/docker-compose.prod.yml" not in output
 
     smoke = subprocess.run(
