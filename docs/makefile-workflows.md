@@ -144,3 +144,12 @@ make up-prod-backup
 
 The backup service uses the same selectors as the other services. All examples
 operate within `<project>-prod`.
+
+## Operational monitoring
+
+With monitoring configuration and notification destinations configured, explicitly
+run a single monitoring pass:
+
+```sh
+make monitor-check-prod
+```

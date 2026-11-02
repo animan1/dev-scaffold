@@ -53,6 +53,7 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | `superuser-<env>` | Create an administrative application account interactively; no implicit migration or application deployment | Data administration |
 | `check` | Run all configured source-quality gates across the selected application's components: formatting checks, lint, type checks, tests and coverage thresholds, migration consistency, and framework checks. The required gates are identical locally and in CI; no source fixes or deployment | Validation |
 | `verify-<env>` | Read-only checks of health, expected revision, and HTTP/static smoke behavior; no container lifecycle changes, schema migration, or application-data writes | Validation |
+| `monitor-check-<env>` | Run one pass of configured operational checks, report results, update monitoring state, and emit configured transition notifications or heartbeats; no service restart, migration, image build, backup, or restore | Validation |
 | `integration-test-<env>` | Application integration tests, including writes to its data | Validation |
 | `deps-lock` | Update the selected application's dependency lockfiles from declared dependency constraints; no application startup or deployment-image build | Source editing |
 | `migrations` | Generate migration source files for intentional model changes; no application-schema or data changes | Source editing |
