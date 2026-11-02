@@ -24,8 +24,9 @@ REVISION = "a" * 40
 
 @pytest.mark.parametrize("operation", ["capture", "hotfix", "validate", "install"])
 def test_make_exports_normal_config_without_required_bundle_parameters(
-    tmp_path: Path, operation: str
+    tmp_path: Path, operation: str, preserved_source: tuple[Path, Path, str]
 ) -> None:
+    repository, _, revision = preserved_source
     python = tmp_path / "python3"
     python.write_text(f"#!{sys.executable}\nimport json, os\nprint(json.dumps(dict(os.environ)))\n")
     python.chmod(0o755)
@@ -40,6 +41,8 @@ def test_make_exports_normal_config_without_required_bundle_parameters(
         [
             "make",
             "--no-print-directory",
+            "-f",
+            str(ROOT / "Makefile"),
             "-s",
             f"release-bundle-{operation}",
             "RELEASE_COMPOSE_PROJECT=existing-project",
@@ -47,7 +50,7 @@ def test_make_exports_normal_config_without_required_bundle_parameters(
             "RELEASE_HTTP_PORT=19080",
             "MONITORING=1",
         ],
-        cwd=ROOT,
+        cwd=repository,
         env=env,
         check=True,
         capture_output=True,
@@ -63,7 +66,7 @@ def test_make_exports_normal_config_without_required_bundle_parameters(
     if operation == "capture":
         assert not exported["RELEASE_REVISION"]  # Make's HEAD default must not select capture.
     else:
-        assert exported["RELEASE_REVISION"] == git("rev-parse", "HEAD", cwd=ROOT).decode().strip()
+        assert exported["RELEASE_REVISION"] == revision
 
 
 def test_inputs_reuse_normal_configuration_and_recorded_project(
@@ -94,9 +97,19 @@ def test_inputs_reuse_normal_configuration_and_recorded_project(
 @pytest.mark.parametrize(
     "remote", ["git@github.com:owner/app.git", "https://github.com/owner/app.git"]
 )
+@pytest.mark.parametrize(
+    "requested, suffix, expected_platform",
+    [("linux/arm64", "-arm64", "linux/arm64"), (None, "", "linux/amd64")],
+)
 def test_capture_detects_latest_successful_run_revision_repo_and_artifact(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, remote: str
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    remote: str,
+    requested: str | None,
+    suffix: str,
+    expected_platform: str,
 ) -> None:
+    artifact = f"release-{REVISION}{suffix}"
     for key in (
         "BUNDLE_REPO",
         "BUNDLE_RUN_ID",
@@ -132,7 +145,7 @@ def test_capture_detects_latest_successful_run_revision_repo_and_artifact(
             {
                 "artifacts": [
                     {
-                        "name": f"release-{REVISION}-arm64",
+                        "name": artifact,
                         "expired": False,
                     }
                 ]
@@ -140,19 +153,21 @@ def test_capture_detects_latest_successful_run_revision_repo_and_artifact(
         ).encode()
 
     monkeypatch.setattr(bundle, "run", run)
-    selected = bundle.capture_selection(tmp_path, "linux/arm64", {})
+    selected = bundle.capture_selection(tmp_path, requested, {})
     assert selected == {
         "RELEASE_REVISION": REVISION,
         "BUNDLE_REPO": "owner/app",
         "BUNDLE_RUN_ID": "42",
-        "BUNDLE_ARTIFACT": f"release-{REVISION}-arm64",
+        "BUNDLE_ARTIFACT": artifact,
+        "RELEASE_PLATFORM": expected_platform,
     }
     assert "branch=main&event=push&status=success&per_page=1" in calls[1][2]
     assert len(calls) == 3
 
 
+@pytest.mark.parametrize("available", [[], [f"release-{REVISION}"]])
 def test_capture_does_not_fall_back_to_an_older_run_when_artifact_is_missing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, available: list[str]
 ) -> None:
     monkeypatch.setenv("BUNDLE_REPO", "owner/app")
     monkeypatch.setenv("BUNDLE_RUN_ID", "42")
@@ -163,7 +178,9 @@ def test_capture_does_not_fall_back_to_an_older_run_when_artifact_is_missing(
     def run(*args: str, **kwargs: object) -> bytes:
         calls.append(args)
         if "/artifacts?" in args[2]:
-            return b'{"artifacts":[]}'
+            return json.dumps(
+                {"artifacts": [{"name": name, "expired": False} for name in available]}
+            ).encode()
         return json.dumps(
             {
                 "head_sha": REVISION,
@@ -238,6 +255,36 @@ def test_dirty_hotfix_rejects_before_docker_or_source_packaging(
     with pytest.raises(bundle.Rejected, match="commit all hotfix changes first"):
         bundle.package("hotfix")
     assert calls == [("git", "status", "--porcelain")]
+
+
+@pytest.mark.parametrize("cached", ["native", "missing", "wrong-architecture"])
+def test_hotfix_resolves_runtime_dependencies_without_prior_capture(
+    monkeypatch: pytest.MonkeyPatch, cached: str
+) -> None:
+    inspected: list[str] = []
+    pulled: list[tuple[str, ...]] = []
+
+    def inspect(reference: str, env: dict[str, str]) -> dict[str, str]:
+        inspected.append(reference)
+        if cached == "missing":
+            raise subprocess.CalledProcessError(1, ["docker", "image", "inspect", reference])
+        return {"Os": "linux", "Architecture": "arm64" if cached == "native" else "amd64"}
+
+    monkeypatch.setattr(bundle, "inspect", inspect)
+    monkeypatch.setattr(bundle, "run", lambda *args, **kwargs: pulled.append(args))
+    bundle.resolve_runtime_images(
+        {"services": {"app": {"image": "local/app:commit"}, "db": {"image": "postgres:16"}}},
+        {"images": {"app": "RELEASE_BACKEND_IMAGE"}},
+        "linux/arm64",
+        {},
+        "hotfix",
+    )
+    assert inspected == ["postgres:16"]
+    assert pulled == (
+        []
+        if cached == "native"
+        else [("docker", "pull", "--platform", "linux/arm64", "postgres:16")]
+    )
 
 
 def test_bare_hotfix_packages_local_head_and_installs_using_normal_settings(

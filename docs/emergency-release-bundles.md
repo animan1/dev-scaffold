@@ -14,9 +14,6 @@ From a child application's checkout, with its normal deployment configuration
 already prepared:
 
 ```bash
-# Before an outage: save the latest successful main release.
-make release-bundle-capture
-
 # During a CI outage: commit the hotfix on a feature branch, then build it locally.
 make release-bundle-hotfix
 
@@ -24,6 +21,20 @@ make release-bundle-hotfix
 make release-bundle-validate
 make release-bundle-install EMERGENCY=1
 ```
+
+Hotfix creation needs no previous capture, emergency setup or cache-warming
+command. It uses the existing project configuration and resolves build/runtime
+dependencies as part of the operation, just like a normal local build.
+
+Separately, to keep a saved main release available for recovery without building:
+
+```bash
+make release-bundle-capture
+```
+
+Capturing an existing release requires access to that release while GitHub and
+its registry are reachable. This saved-release option is independent of creating
+a hotfix when CI is unavailable.
 
 Capture and hotfix both print `PASS`, the selected full revision, bundle path and
 checksum. Hotfix builds run in the current clean checkout; no clone or checkout
@@ -50,12 +61,12 @@ deviates from the application's defaults. For example, a host with an alternate
 env file uses `PROD_ENV_FILE=/absolute/existing.env` for both normal and emergency
 deployment. Store recurring host settings in the application's existing Make
 configuration or deployment wrapper rather than retyping them for emergencies.
-The private env file must already exist and have mode 600.
+The normal env file must already exist; its contents and permissions are preserved.
 
 | Input | Default | Override purpose |
 | --- | --- | --- |
 | `RELEASE_REVISION` | Capture: latest successful main run's SHA. Hotfix: current committed HEAD. | Select a particular captured revision; a hotfix override must still equal HEAD. |
-| `RELEASE_PLATFORM` | Current Docker daemon's OS/architecture. | Build or capture for a different destination, e.g. `linux/amd64`. |
+| `RELEASE_PLATFORM` | Capture: published artifact architecture, preferring the local platform when both are published. Hotfix: current Docker daemon architecture. | Build or capture for a specific destination, e.g. `linux/amd64`. |
 | `BUNDLE_REPO` | GitHub repository from Git's `origin` URL. | Capture from another repository. |
 | `BUNDLE_WORKFLOW` | `ci.yml`, the scaffold release workflow. | Child application's differently named release workflow file. |
 | `BUNDLE_RUN_ID` | Latest successful main push run of that workflow. | Select a particular successful run. |
@@ -69,9 +80,10 @@ Capture prints the selected run, revision, platform and artifact before packagin
 It checks that the run succeeded on main and the revision remains on main. If
 necessary it fetches that exact commit during this online preparation step,
 without switching the working checkout. It never falls back to an older release
-if the selected artifact/images are unavailable. A laptop's current architecture
-may differ from its CI image architecture: override `RELEASE_PLATFORM` explicitly
-in that case; there is no automatic architecture substitution.
+if the selected artifact/images are unavailable. A single-platform release is
+captured for its published platform even when the laptop differs. An explicit
+`RELEASE_PLATFORM` must match an artifact of that selected run; it is never
+substituted. Installation always checks the actual destination architecture.
 
 The conventional bundle path is refreshed only after packaging and checks pass.
 Starting a refresh invalidates the previous default checksum selection, so a
@@ -86,11 +98,16 @@ and `pull_policy: never` support. Prepare enough storage for the source/history
 and all saved runtime images. Supported destinations are `linux/amd64` and
 `linux/arm64`; destination emulation does not satisfy the architecture check.
 
-Capture requires GitHub/artifact and registry access **before** an outage.
-Hotfixes require cached or reachable build dependencies and all non-application
-runtime images already in the build daemon's cache for the selected architecture.
-The hotfix command does not pull those runtime images or publish application
-images. Prewarm base images/dependency caches for a completely offline build.
+Hotfix packaging builds the application images locally and reuses other runtime
+images already present for the selected architecture. It fetches missing runtime
+images on demand and lets the normal Docker build resolve build dependencies.
+It does not query GitHub or pull/publish application release images. There is no
+requirement to have captured or prepared a release earlier.
+
+If a registry is also unavailable and a necessary dependency is absent locally,
+the operation reports that missing dependency and produces no selected bundle.
+An unavailable CI service or exhausted Actions quota alone does not prevent a
+local hotfix build. Installation remains completely offline in either path.
 
 For a hotfix, first commit the intended changes on a feature branch. Packaging
 rejects tracked or untracked uncommitted changes and any revision other than
@@ -212,7 +229,7 @@ It does not record credentials. A failure after deployment starts can leave
 migrations applied; inspect service/schema state before attempting recovery.
 
 An optional existing `BUNDLE_INPUTS` JSON file has fields `project`, `env_file`,
-`variables` and `smoke_url`. `env_file` is an absolute private existing file;
+`variables` and `smoke_url`. `env_file` is the absolute existing normal env file;
 `variables` contains only supported non-secret Make overrides. This compatibility
 override is useful for a coordinator already managing host input records; it is
 not needed for ordinary operators and does not duplicate credentials.
