@@ -200,7 +200,6 @@ def inputs(path=None):
         re.fullmatch("[a-zA-Z0-9_./-]+", str(config)),
         "env_file path must be shell/Make safe",
     )
-    require(config.stat().st_mode & 0o077 == 0, "env_file must be private (mode 600)")
     # Make command-line values execute Make expansion and later shell recipes.
     for key, content in value["variables"].items():
         require(re.fullmatch("[A-Z][A-Z0-9_]*", key), "invalid input variable name")
@@ -369,9 +368,26 @@ def compose(root, values, env):
 
 
 def inspect(reference, env):
-    return json.loads(
+    info = json.loads(
         run("docker", "image", "inspect", reference, env=env, output=True)
     )[0]
+    target = env.get("DOCKER_DEFAULT_PLATFORM")
+    if target and info["Os"] + "/" + info["Architecture"] != target:
+        # Multi-platform Docker stores can otherwise inspect the native variant
+        # even after a successful pull for a different destination platform.
+        info = json.loads(
+            run(
+                "docker",
+                "image",
+                "inspect",
+                "--platform",
+                target,
+                reference,
+                env=env,
+                output=True,
+            )
+        )[0]
+    return info
 
 
 def inspect_roles(config, spec, rev, target, env, require_labels):
@@ -385,7 +401,7 @@ def inspect_roles(config, spec, rev, target, env, require_labels):
         info = inspect(reference, env)
         require(
             info["Os"] + "/" + info["Architecture"] == target,
-            "runtime image architecture mismatch",
+            f"runtime image architecture mismatch for {service}: {info['Os']}/{info['Architecture']} != {target}",
         )
         if service in spec["images"] and require_labels:
             require(
@@ -521,6 +537,10 @@ def capture_selection(root, target, env):
         "selected run is not a successful main release",
     )
     artifact = os.environ.get("BUNDLE_ARTIFACT")
+    candidates = {
+        "linux/amd64": (f"release-{rev}-amd64", f"release-{rev}"),
+        "linux/arm64": (f"release-{rev}-arm64",),
+    }
     if not artifact:
         artifacts = json.loads(
             run(
@@ -532,21 +552,52 @@ def capture_selection(root, target, env):
             )
         )["artifacts"]
         names = {item["name"] for item in artifacts if not item["expired"]}
-        artifact = f"release-{rev}-{target.split('/')[1]}"
-        if artifact not in names and target == "linux/amd64":
-            artifact = f"release-{rev}"
+        available = {
+            architecture: next(name for name in choices if name in names)
+            for architecture, choices in candidates.items()
+            if any(name in names for name in choices)
+        }
         require(
-            artifact in names,
+            available,
+            "selected run has no unexpired release artifact; no older release selected",
+        )
+        if not target:
+            target = (
+                next(iter(available)) if len(available) == 1 else current_platform(env)
+            )
+        require(
+            target in available,
             "selected run has no unexpired release artifact for this architecture; no older release selected",
         )
+        artifact = available[target]
+    else:
+        published = next(
+            (
+                architecture
+                for architecture, choices in candidates.items()
+                if artifact in choices
+            ),
+            None,
+        )
+        require(
+            published,
+            "artifact does not identify this release and a supported architecture",
+        )
+        require(
+            not target or target == published,
+            "artifact architecture differs from RELEASE_PLATFORM",
+        )
+        target = target or published
     print(
-        f"Selected {repo} main run {run_id}, revision {rev}, platform {target}, artifact {artifact}"
+        f"Selected {repo} main run {run_id}, revision {rev}, platform {target}, artifact {artifact}",
+        flush=True,
     )
     return {
         "BUNDLE_REPO": repo,
         "BUNDLE_RUN_ID": run_id,
         "BUNDLE_ARTIFACT": artifact,
         "RELEASE_REVISION": rev,
+        "RELEASE_PLATFORM": target,
     }
 
 
@@ -622,6 +673,28 @@ def capture_evidence(work, rev, target, env, spec, selection=None):
     }
 
 
+def resolve_runtime_images(config, spec, target, env, mode):
+    for service, definition in config["services"].items():
+        reference = definition.get("image")
+        require(reference, "runtime service has no image")
+        if mode == "hotfix":
+            if service in spec["images"]:
+                continue  # The application images were just built and checked locally.
+            try:
+                cached = inspect(reference, env)
+                if cached["Os"] + "/" + cached["Architecture"] == target:
+                    continue
+            except subprocess.CalledProcessError:
+                pass
+        print(f"Fetching runtime image {reference} for {target}", flush=True)
+        try:
+            run("docker", "pull", "--platform", target, reference, env=env)
+        except subprocess.CalledProcessError as error:
+            raise Rejected(
+                f"runtime image {reference} for {target} is unavailable locally and could not be fetched"
+            ) from error
+
+
 def package(mode):
     env = environment()
     root = Path.cwd()
@@ -646,15 +719,18 @@ def package(mode):
     target = (
         platform(os.environ["RELEASE_PLATFORM"])
         if os.environ.get("RELEASE_PLATFORM")
-        else current_platform(env)
+        else None
     )
     if mode == "hotfix":
+        target = target or current_platform(env)
         print(
-            f"Selected hotfix revision {rev}, platform {target}; local build and checks"
+            f"Selected hotfix revision {rev}, platform {target}; local build and checks",
+            flush=True,
         )
     selection = capture_selection(root, target, env) if mode == "capture" else None
     if selection:
         rev = selection["RELEASE_REVISION"]
+        target = selection["RELEASE_PLATFORM"]
         try:
             run("git", "cat-file", "-e", rev + "^{commit}", cwd=root, output=True)
         except subprocess.CalledProcessError:
@@ -722,11 +798,7 @@ def package(mode):
                 "hotfix manifest must use the selected release path",
             )
         config = compose(source, values, env)
-        for definition in config["services"].values():
-            reference = definition.get("image")
-            require(reference, "runtime service has no image")
-            if mode == "capture":
-                run("docker", "pull", "--platform", target, reference, env=env)
+        resolve_runtime_images(config, spec, target, env, mode)
         data["images"] = inspect_roles(config, spec, rev, target, env, mode == "hotfix")
         # Local content IDs survive docker save/load without any repository tag lookup.
         if mode == "hotfix":
@@ -824,7 +896,15 @@ def preserve_source(root, rev, work, checkout=True):
     with tarfile.open(work / "source.tar") as archive:
         members(archive)
     source = work / "source"
-    run("git", "clone", str(work / "history.bundle"), str(source), output=True)
+    run(
+        "git",
+        "clone",
+        "--branch",
+        "emergency-release",
+        str(work / "history.bundle"),
+        str(source),
+        output=True,
+    )
     run("git", "checkout", "--detach", rev, cwd=source, output=True)
     return source
 

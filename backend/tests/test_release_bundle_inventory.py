@@ -61,6 +61,19 @@ def test_inventories_application_database_and_optional_monitor() -> None:
     ]
 
 
+def test_cross_platform_capture_inspects_the_pulled_variant() -> None:
+    env = {"DOCKER_DEFAULT_PLATFORM": "linux/amd64"}
+    with patch.object(
+        bundle, "run", side_effect=[image_info(), image_info(Architecture="amd64")]
+    ) as run:
+        info = bundle.inspect("postgres:16", env)
+    assert info["Architecture"] == "amd64"
+    assert [call.args for call in run.call_args_list] == [
+        ("docker", "image", "inspect", "postgres:16"),
+        ("docker", "image", "inspect", "--platform", "linux/amd64", "postgres:16"),
+    ]
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
