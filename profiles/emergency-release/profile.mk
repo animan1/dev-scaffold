@@ -1,6 +1,8 @@
 # Shared hooks; tenants may override these recipes in their own included adapter.
 .PHONY: release-bundle-check release-bundle-deploy release-bundle-smoke
+prepare-release-ci down-release-ci: export RELEASE_CI_COMPOSE_PROJECT := $(RELEASE_CI_COMPOSE_PROJECT)
 release-bundle-check: ## Run selected-profile local quality and exact-image release gates
+	@$(MAKE) prepare-release-ci
 ifeq ($(SCAFFOLD_PROFILE),server-rendered-django)
 	@set -e; trap '$(MAKE) down-release-ci' EXIT; \
 		$(MAKE) build check; \

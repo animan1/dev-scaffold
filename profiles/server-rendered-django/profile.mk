@@ -2,6 +2,7 @@ SHELL := /bin/bash
 SERVER_PROFILE_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
 PROJECT_NAME ?= $(notdir $(CURDIR))
+DEV_COMPOSE_PROJECT ?= $(PROJECT_NAME)-dev
 APP_PORT ?= 18000
 APP_HOST ?= localhost
 DIFF_BASE ?= origin/main
@@ -9,14 +10,15 @@ PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
 GIT_COMMON_DIR ?= $(shell git rev-parse --path-format=absolute --git-common-dir)
 HOST_UID ?= $(shell id -u)
 HOST_GID ?= $(shell id -g)
-COMPOSE := COMPOSE_PROJECT_NAME=$(PROJECT_NAME) APP_HOST=$(APP_HOST) APP_PORT=$(APP_PORT) \
+COMPOSE := COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) APP_HOST=$(APP_HOST) APP_PORT=$(APP_PORT) \
 	GIT_COMMON_DIR=$(GIT_COMMON_DIR) HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
 	docker compose --project-directory . -f profiles/server-rendered-django/compose.yml
 RUN := $(COMPOSE) run --rm app
 UV_RUN := uv run --project /workspace/profiles/server-rendered-django
 DJANGO_DEV_MANAGE := $(RUN) $(UV_RUN) python -m app.manage
 PROFILE_PROJECT := /workspace/profiles/server-rendered-django/pyproject.toml
-RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
+RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-prod
+RELEASE_CI_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
 RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)
 RELEASE_REVISION ?= $(shell git rev-parse HEAD)
 RELEASE_BACKEND_TAG ?= $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
@@ -27,7 +29,7 @@ RELEASE_PULL ?= $(COMPOSE_RELEASE) pull app web
 RELEASE_HTTP_PORT ?= 18080
 PROD_ENV_FILE ?= deploy/.env.prod
 RELEASE_CI_ENV_FILE ?= .tmp/server-rendered-release-ci.env
-PROD_SIM_COMPOSE_PROJECT ?= $(PROJECT_NAME)-prod-sim
+PROD_SIM_COMPOSE_PROJECT ?= $(RELEASE_COMPOSE_PROJECT)
 PROD_SIM_ENV_FILE ?= .tmp/server-rendered-prod-sim.env
 PROD_SIM_HTTP_PORT ?= 18081
 PROD_SIM_HTTPS_PORT ?= 18444
@@ -38,9 +40,10 @@ RELEASE_COMPOSE_FILES := -f $(RELEASE_COMPOSE_FILE)
 COMPOSE_RELEASE = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(PROD_ENV_FILE) docker compose --project-directory . \
 	$(RELEASE_COMPOSE_FILES) --env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
-COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
+COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_CI_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(RELEASE_CI_ENV_FILE) docker compose --project-directory . \
-	-f $(RELEASE_COMPOSE_FILE) --env-file $(RELEASE_CI_ENV_FILE)
+	-f $(RELEASE_COMPOSE_FILE) -f profiles/server-rendered-django/release-ci.compose.yml \
+	--env-file $(RELEASE_CI_ENV_FILE)
 COMPOSE_PROD_SIM = COMPOSE_PROJECT_NAME=$(PROD_SIM_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(PROD_SIM_ENV_FILE) PROD_SIM_HTTP_PORT=$(PROD_SIM_HTTP_PORT) \
 	PROD_SIM_HTTPS_PORT=$(PROD_SIM_HTTPS_PORT) \
@@ -72,7 +75,8 @@ help: ## Show available commands
 build: ## Build the deterministic development application image
 	$(COMPOSE) build app
 
-.PHONY: up
+.PHONY: up up-dev
+up-dev: up ## Start the development stack
 up: ## Start Django and PostgreSQL in full-Docker development
 	$(COMPOSE) up -d --build db app
 
@@ -193,8 +197,7 @@ build-release-images: ## Build commit-addressed Django and application Nginx ima
 		--backend $(RELEASE_BACKEND_TAG) --web $(RELEASE_WEB_TAG) \
 		$(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) --output $(RELEASE_FILE)
 
-.PHONY: prepare-release-ci
-prepare-release-ci: ## Prepare isolated, non-secret server-rendered release configuration
+define PREPARE_SERVER_LOCAL_ENV
 	@mkdir -p $(dir $(RELEASE_CI_ENV_FILE))
 	@printf '%s\n' \
 		'DJANGO_SECRET_KEY=release-ci-only-abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ' \
@@ -205,6 +208,13 @@ prepare-release-ci: ## Prepare isolated, non-secret server-rendered release conf
 		'POSTGRES_DB=app' \
 		'DATABASE_URL=postgresql://app:release-ci-only@db:5432/app' \
 		> $(RELEASE_CI_ENV_FILE)
+endef
+
+.PHONY: prepare-release-ci
+prepare-release-ci: ## Prepare isolated, non-secret server-rendered release configuration
+	@python3 scripts/release_bundle.py validation-preflight
+	$(PREPARE_SERVER_LOCAL_ENV)
+	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) pull db
 
 .PHONY: initialize-release-ci
 initialize-release-ci: prepare-release-ci ## Initialize a fresh release test database and static volume
@@ -255,6 +265,7 @@ verify-monitoring-config: prepare-release-ci ## Validate the optional release mo
 
 .PHONY: down-release-ci
 down-release-ci: ## Remove the isolated immutable-release verification stack
+	@python3 scripts/release_bundle.py validation-preflight
 	@if [[ -f $(RELEASE_CI_ENV_FILE) ]]; then \
 		$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) down -v --remove-orphans; \
 	fi
@@ -278,6 +289,7 @@ push-release-images: ## Publish verified images and record immutable digests
 
 .PHONY: initialize-release
 initialize-release: ## Initialize the database and static volume with recorded images
+	@test '$(RELEASE_COMPOSE_PROJECT)' != '$(RELEASE_CI_COMPOSE_PROJECT)' || { echo 'Deployment project is reserved for release validation'; exit 1; }
 	@test -f $(RELEASE_FILE) || { echo 'Set RELEASE_FILE to a recorded release manifest'; exit 1; }
 	$(COMPOSE_RELEASE) config --quiet
 	$(RELEASE_PULL)
@@ -291,10 +303,12 @@ deploy-release: initialize-release ## Deploy the digest-pinned server-rendered i
 	$(COMPOSE_RELEASE) up -d --no-build app web
 
 .PHONY: up-prod
+up-prod: RELEASE_CI_ENV_FILE = $(PROD_SIM_ENV_FILE)
 up-prod: build-release-images build-prod-sim-ingress ## Build and start an isolated production-shaped local stack
-	$(MAKE) initialize-release-ci \
+	$(PREPARE_SERVER_LOCAL_ENV)
+	$(MAKE) initialize-release \
 		RELEASE_COMPOSE_PROJECT=$(PROD_SIM_COMPOSE_PROJECT) \
-		RELEASE_CI_ENV_FILE=$(PROD_SIM_ENV_FILE)
+		PROD_ENV_FILE=$(PROD_SIM_ENV_FILE) RELEASE_PULL=true
 	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_PROD_SIM) up -d --no-build \
 		app web prod-sim-ingress
 

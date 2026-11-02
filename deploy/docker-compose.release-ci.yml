@@ -1,5 +1,33 @@
+x-validation: &validation
+  platform: "${RELEASE_PLATFORM:-}"
+  labels:
+    io.dev-scaffold.validation: release-ci
+
 services:
+  db:
+    <<: *validation
+  backend:
+    <<: *validation
+  monitor:
+    <<: *validation
   nginx:
+    <<: *validation
     ports: !override
       - "127.0.0.1:${RELEASE_HTTP_PORT:-18080}:80"
       - "127.0.0.1:${RELEASE_HTTPS_PORT:-18443}:443"
+
+volumes:
+  pgdata:
+    labels:
+      io.dev-scaffold.validation: release-ci
+  staticfiles:
+    labels:
+      io.dev-scaffold.validation: release-ci
+  backup_status:
+    labels:
+      io.dev-scaffold.validation: release-ci
+
+networks:
+  default:
+    labels:
+      io.dev-scaffold.validation: release-ci
