@@ -1,14 +1,18 @@
+import hashlib
 import importlib.util
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tarfile
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 import test_release_bundle_preflight as preflight
 import test_release_bundle_source as history
+from test_release_bundle_archive import add
 from test_release_bundle_source import git
 
 preserved_source = history.preserved_source
@@ -23,8 +27,9 @@ REVISION = "a" * 40
 
 
 @pytest.mark.parametrize("operation", ["capture", "hotfix", "validate", "install"])
+@pytest.mark.parametrize("override_project", [False, True])
 def test_make_exports_normal_config_without_required_bundle_parameters(
-    tmp_path: Path, operation: str, preserved_source: tuple[Path, Path, str]
+    tmp_path: Path, operation: str, preserved_source: tuple[Path, Path, str], override_project: bool
 ) -> None:
     repository, _, revision = preserved_source
     python = tmp_path / "python3"
@@ -45,7 +50,7 @@ def test_make_exports_normal_config_without_required_bundle_parameters(
             str(ROOT / "Makefile"),
             "-s",
             f"release-bundle-{operation}",
-            "RELEASE_COMPOSE_PROJECT=existing-project",
+            *(["RELEASE_COMPOSE_PROJECT=existing-project"] if override_project else []),
             "PROD_ENV_FILE=/private/normal.env",
             "RELEASE_HTTP_PORT=19080",
             "MONITORING=1",
@@ -57,7 +62,9 @@ def test_make_exports_normal_config_without_required_bundle_parameters(
         text=True,
     )
     exported = json.loads(result.stdout)
-    assert exported["RELEASE_COMPOSE_PROJECT"] == "existing-project"
+    assert exported["RELEASE_COMPOSE_PROJECT"] == (
+        "existing-project" if override_project else repository.name
+    )
     assert exported["PROD_ENV_FILE"] == "/private/normal.env"
     assert exported["RELEASE_HTTP_PORT"] == "19080"
     assert exported["MONITORING"] == "1"
@@ -258,39 +265,90 @@ def test_dirty_hotfix_rejects_before_docker_or_source_packaging(
 
 
 @pytest.mark.parametrize("cached", ["native", "missing", "wrong-architecture"])
+@pytest.mark.parametrize("store", ["config", "manifest"])
 def test_hotfix_resolves_runtime_dependencies_without_prior_capture(
-    monkeypatch: pytest.MonkeyPatch, cached: str
+    monkeypatch: pytest.MonkeyPatch, cached: str, store: str
 ) -> None:
     inspected: list[str] = []
     pulled: list[tuple[str, ...]] = []
+    local_id = "sha256:" + ("c" if store == "manifest" else "e") * 64
 
     def inspect(reference: str, env: dict[str, str]) -> dict[str, str]:
         inspected.append(reference)
-        if cached == "missing":
+        if cached == "missing" and not pulled:
             raise subprocess.CalledProcessError(1, ["docker", "image", "inspect", reference])
-        return {"Os": "linux", "Architecture": "arm64" if cached == "native" else "amd64"}
+        return {
+            "Id": local_id,
+            "Os": "linux",
+            "Architecture": "arm64" if cached == "native" or pulled else "amd64",
+        }
 
     monkeypatch.setattr(bundle, "inspect", inspect)
-    monkeypatch.setattr(bundle, "run", lambda *args, **kwargs: pulled.append(args))
-    bundle.resolve_runtime_images(
+
+    def run(*args: str, **kwargs: object) -> bytes | None:
+        pulled.append(args)
+        return None
+
+    monkeypatch.setattr(bundle, "run", run)
+    resolved = bundle.resolve_runtime_images(
         {"services": {"app": {"image": "local/app:commit"}, "db": {"image": "postgres:16"}}},
         {"images": {"app": "RELEASE_BACKEND_IMAGE"}},
         "linux/arm64",
         {},
         "hotfix",
     )
-    assert inspected == ["postgres:16"]
+    assert inspected == ["postgres:16"] * (1 if cached == "native" else 2)
     assert pulled == (
         []
         if cached == "native"
         else [("docker", "pull", "--platform", "linux/arm64", "postgres:16")]
     )
+    assert resolved["db"] == ("postgres:16" if cached == "native" else local_id)
 
 
+def _runtime_commands(
+    work: Path, calls: list[tuple[str, ...]], state: dict[str, bool]
+) -> Callable[..., bytes | None]:
+    original_run = bundle.run
+
+    def run(*args: str, **kwargs: object) -> bytes | None:
+        calls.append(args)
+        if args[0] == "git":
+            result = original_run(*args, **kwargs)
+            assert result is None or isinstance(result, bytes)
+            return result
+        if args[:2] == ("docker", "info"):
+            return b"linux/amd64\n" if state["wrong_architecture"] else b"linux/aarch64\n"
+        if args[:3] == ("docker", "image", "save"):
+            shutil.copyfile(work / "images.tar", args[args.index("--output") + 1])
+            return None
+        if args[:3] == ("docker", "image", "load"):
+            state["installed"] = True
+            return b""
+        if args[:2] == ("docker", "compose"):
+            return b""
+        raise AssertionError(f"unexpected network/build command: {args}")
+
+    return run
+
+
+@pytest.mark.parametrize("source_store", ["config", "manifest"])
 def test_bare_hotfix_packages_local_head_and_installs_using_normal_settings(
-    monkeypatch: pytest.MonkeyPatch, payload: tuple[Path, str, str]
+    monkeypatch: pytest.MonkeyPatch, payload: tuple[Path, str, str], source_store: str
 ) -> None:
     work, revision, identity = payload
+    source_id = identity
+    if source_store == "manifest":
+        manifest = json.dumps(
+            {
+                "schemaVersion": 2,
+                "config": {"digest": identity},
+                "layers": [{"digest": "sha256:" + hashlib.sha256(b"runtime layer").hexdigest()}],
+            }
+        ).encode()
+        source_id = "sha256:" + hashlib.sha256(manifest).hexdigest()
+        with tarfile.open(work / "images.tar", "a") as archive:
+            add(archive, "blobs/sha256/" + source_id[7:], manifest)
     repository = work.parent / "repository"
     (repository / ".git/info/exclude").write_text(".local/\n")
     monkeypatch.chdir(repository)
@@ -304,23 +362,7 @@ def test_bare_hotfix_packages_local_head_and_installs_using_normal_settings(
     monkeypatch.setenv("SCAFFOLD_PROFILE", "example")
     monkeypatch.setenv("EMERGENCY", "1")
     calls: list[tuple[str, ...]] = []
-    original_run = bundle.run
-    wrong_architecture = False
-
-    def run(*args: str, **kwargs: object) -> bytes | None:
-        calls.append(args)
-        if args[0] == "git":
-            result = original_run(*args, **kwargs)
-            assert result is None or isinstance(result, bytes)
-            return result
-        if args[:2] == ("docker", "info"):
-            return b"linux/amd64\n" if wrong_architecture else b"linux/aarch64\n"
-        if args[:3] == ("docker", "image", "save"):
-            shutil.copyfile(work / "images.tar", args[args.index("--output") + 1])
-            return None
-        if args[:3] == ("docker", "image", "load") or args[:2] == ("docker", "compose"):
-            return b""
-        raise AssertionError(f"unexpected network/build command: {args}")
+    state = {"wrong_architecture": False, "installed": False}
 
     targets: list[tuple[Path, str]] = []
     fail_checks = False
@@ -329,7 +371,10 @@ def test_bare_hotfix_packages_local_head_and_installs_using_normal_settings(
         root: Path, target: str, values: dict[str, str], env: dict[str, str], output: bool = False
     ) -> bytes | None:
         targets.append((root, target))
-        assert values["RELEASE_COMPOSE_PROJECT"] == "existing-project"
+        if target == "checks":
+            assert "RELEASE_COMPOSE_PROJECT" not in values
+        else:
+            assert values["RELEASE_COMPOSE_PROJECT"] == "existing-project"
         assert values["PROD_ENV_FILE"] == str(env_file)
         if target == "checks" and fail_checks:
             raise subprocess.CalledProcessError(1, ["make", "checks"])
@@ -343,19 +388,21 @@ def test_bare_hotfix_packages_local_head_and_installs_using_normal_settings(
             ).encode()
         return None
 
-    monkeypatch.setattr(bundle, "run", run)
+    monkeypatch.setattr(bundle, "run", _runtime_commands(work, calls, state))
     monkeypatch.setattr(bundle, "make", make)
-    monkeypatch.setattr(
-        bundle,
-        "inspect",
-        lambda *args: {
-            "Id": identity,
+
+    def inspect(reference: str, env: dict[str, str]) -> dict[str, object]:
+        if state["installed"] and source_id != identity and reference == source_id:
+            raise subprocess.CalledProcessError(1, ["docker", "image", "inspect", reference])
+        return {
+            "Id": identity if reference == identity else source_id,
             "Os": "linux",
             "Architecture": "arm64",
             "RepoDigests": [],
             "Config": {"Labels": {"org.opencontainers.image.revision": revision}},
-        },
-    )
+        }
+
+    monkeypatch.setattr(bundle, "inspect", inspect)
     bundle.package("hotfix")
     assert all(root == repository for root, _ in targets)
     assert not any("clone" in call or "fetch" in call for call in calls)
@@ -371,17 +418,22 @@ def test_bare_hotfix_packages_local_head_and_installs_using_normal_settings(
         bundle.destination("install")
     assert not calls
     checksum_file.write_text(checksum)
-    wrong_architecture = True
+    state["wrong_architecture"] = True
     with pytest.raises(bundle.Rejected, match="architecture differs from destination"):
         bundle.destination("install")
     assert not any(call[:3] == ("docker", "image", "load") for call in calls)
     assert not any(target == "release-bundle-deploy" for _, target in targets)
-    wrong_architecture = False
+    state["wrong_architecture"] = False
     bundle.destination("install")
     audit = bundle.read_json(repository / ".local/emergency-release/deployment.json")
     assert audit["revision"] == revision
     assert audit["status"] == "succeeded"
     assert audit["project"] == "existing-project"
+    assert audit["images"]["app"]["id"] == source_id
+    assert audit["images"]["app"]["deployed_id"] == identity
+    assert audit["images"]["app"]["config_digest"] == identity
+    deployed_config = bundle.read_json(Path(audit["deployment_directory"]) / "compose.json")
+    assert deployed_config["services"]["app"]["image"] == identity
     assert [target for _, target in targets][-2:] == [
         "release-bundle-deploy",
         "release-bundle-smoke",

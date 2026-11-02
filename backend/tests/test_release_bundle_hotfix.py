@@ -87,7 +87,7 @@ def test_hotfix_builds_target_platform_and_checks_same_image_ids(
     assert all(call[3]["DOCKER_DEFAULT_PLATFORM"] == "linux/arm64" for call in make_calls)
     check_values = make_calls[1][2]
     assert "PROJECT_NAME" not in check_values
-    assert check_values["RELEASE_COMPOSE_PROJECT"] == "existing-project"
+    assert "RELEASE_COMPOSE_PROJECT" not in check_values
     assert evidence["source"] == "local-checks"
     assert evidence["revision"] == REVISION
     assert evidence["platform"] == "linux/arm64"

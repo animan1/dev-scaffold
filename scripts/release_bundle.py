@@ -6,6 +6,7 @@ SHA256 is the trust boundary; internal checksums detect damage, not authorship.
 
 import contextlib
 import fcntl
+import gzip
 import hashlib
 import json
 import os
@@ -159,8 +160,7 @@ def inputs(path=None):
         read_json(path)
         if path
         else {
-            "project": os.environ.get("RELEASE_COMPOSE_PROJECT")
-            or Path.cwd().name + "-release",
+            "project": os.environ.get("RELEASE_COMPOSE_PROJECT") or Path.cwd().name,
             "env_file": str(
                 Path(os.environ.get("PROD_ENV_FILE") or "deploy/.env.prod").resolve()
             ),
@@ -315,8 +315,15 @@ def build_hotfix(root, source, rev, target, selected, values, env, spec):
     )
     before = {name: image_id(inspect(tag, env)["Id"]) for name, tag in roles.items()}
     started = time.time()
+    # Normal release checks own their existing disposable CI project. Do not
+    # redirect those checks onto the destination's persistent production project.
+    project_keys = {"RELEASE_COMPOSE_PROJECT", "PRODUCTION_COMPOSE_PROJECT"}
+    check_values = {
+        key: value for key, value in build_values.items() if key not in project_keys
+    }
+    check_env = {key: value for key, value in env.items() if key not in project_keys}
     for check in spec["check_targets"]:
-        make(source, check, build_values, env)
+        make(source, check, check_values, check_env)
     require(
         not run("git", "diff", "--exit-code", rev, cwd=source, output=True),
         "checks changed committed source",
@@ -372,7 +379,8 @@ def inspect(reference, env):
         run("docker", "image", "inspect", reference, env=env, output=True)
     )[0]
     target = env.get("DOCKER_DEFAULT_PLATFORM")
-    if target and info["Os"] + "/" + info["Architecture"] != target:
+    actual = info["Os"] + "/" + info["Architecture"]
+    if target and actual not in (target, "/"):
         # Multi-platform Docker stores can otherwise inspect the native variant
         # even after a successful pull for a different destination platform.
         info = json.loads(
@@ -390,7 +398,7 @@ def inspect(reference, env):
     return info
 
 
-def inspect_roles(config, spec, rev, target, env, require_labels):
+def inspect_roles(config, spec, rev, target, env, require_labels, resolved=None):
     require(
         set(spec["images"]) <= set(config["services"]), "adapter image service missing"
     )
@@ -398,14 +406,20 @@ def inspect_roles(config, spec, rev, target, env, require_labels):
     for service, definition in config["services"].items():
         reference = definition.get("image")
         require(reference, "every runtime service must declare an image")
-        info = inspect(reference, env)
+        lookup = (resolved or {}).get(service, reference)
+        info = inspect(lookup, env)
         require(
-            info["Os"] + "/" + info["Architecture"] == target,
+            not lookup.startswith("sha256:") or info["Id"] == lookup,
+            "resolved image config identity mismatch",
+        )
+        actual = info["Os"] + "/" + info["Architecture"]
+        require(
+            actual in (target, "/"),
             f"runtime image architecture mismatch for {service}: {info['Os']}/{info['Architecture']} != {target}",
         )
-        if service in spec["images"] and require_labels:
+        if service in spec["images"] and require_labels and actual != "/":
             require(
-                (info["Config"].get("Labels") or {}).get(
+                ((info.get("Config") or {}).get("Labels") or {}).get(
                     "org.opencontainers.image.revision"
                 )
                 == rev,
@@ -420,7 +434,7 @@ def inspect_roles(config, spec, rev, target, env, require_labels):
     return images
 
 
-def validate_images(path, images, target):
+def validate_images(path, images, target, identities=None):
     """Verify config identities, platform and uncompressed layer digests before load."""
     with tarfile.open(path) as archive:
         files = {item.name: item for item in members(archive) if item.isfile()}
@@ -429,6 +443,7 @@ def validate_images(path, images, target):
         configs = {}
         checked_layers = {}
         for item in saved:
+            require(item["Config"] in files, "image config missing from archive")
             config_bytes = archive.extractfile(files[item["Config"]]).read()
             identity = "sha256:" + hashlib.sha256(config_bytes).hexdigest()
             config = json.loads(config_bytes)
@@ -439,21 +454,69 @@ def validate_images(path, images, target):
             diffs = config["rootfs"]["diff_ids"]
             require(len(diffs) == len(item["Layers"]), "image layer count mismatch")
             for layer, expected in zip(item["Layers"], diffs):
+                require(layer in files, "image layer missing from archive")
                 if layer not in checked_layers:
                     with archive.extractfile(files[layer]) as stream:
+                        compressed = stream.read(2) == b"\x1f\x8b"
+                        stream.seek(0)
+                        decoded = (
+                            gzip.GzipFile(fileobj=stream) if compressed else stream
+                        )
                         checked_layers[layer] = (
                             "sha256:"
-                            + hashlib.file_digest(stream, "sha256").hexdigest()
+                            + hashlib.file_digest(decoded, "sha256").hexdigest()
                         )
                 require(
                     checked_layers[layer] == expected, "image layer digest mismatch"
                 )
             configs[identity] = config
+
+        # Classic Docker names images by config digest; containerd-backed Docker
+        # names them by manifest/index digest. Both must be bound to these configs.
+        def config_for(identity, seen):
+            if identity in configs:
+                return identity
+            require(identity not in seen, "cyclic image index")
+            seen = seen | {identity}
+            image_id(identity)
+            name = "blobs/sha256/" + identity.removeprefix("sha256:")
+            require(name in files, "incomplete/extra image archive")
+            raw = archive.extractfile(files[name]).read()
+            require(
+                "sha256:" + hashlib.sha256(raw).hexdigest() == identity,
+                "image manifest digest mismatch",
+            )
+            manifest = json.loads(raw)
+            if "config" in manifest:
+                config_id = manifest["config"]["digest"]
+                require(config_id in configs, "image manifest config missing")
+                require(
+                    len(manifest.get("layers", []))
+                    == len(configs[config_id]["rootfs"]["diff_ids"]),
+                    "image manifest layer count mismatch",
+                )
+                return config_id
+            os_name, architecture = target.split("/")
+            variants = [
+                item
+                for item in manifest.get("manifests", [])
+                if item.get("platform", {}).get("os") == os_name
+                and item.get("platform", {}).get("architecture") == architecture
+            ]
+            require(len(variants) == 1, "image index platform mismatch")
+            return config_for(variants[0]["digest"], seen)
+
+        selected = {
+            item["id"]: config_for(item["id"], set()) for item in images.values()
+        }
         require(
-            set(configs) == {item["id"] for item in images.values()},
-            "incomplete/extra image archive",
+            set(selected.values()) == set(configs), "incomplete/extra image archive"
         )
-        return configs
+        if identities is not None:
+            identities.update(selected)
+        return {
+            identity: configs[config_id] for identity, config_id in selected.items()
+        }
 
 
 def manifest_values(path):
@@ -673,26 +736,41 @@ def capture_evidence(work, rev, target, env, spec, selection=None):
     }
 
 
+def pull_runtime_image(reference, target, env):
+    run("docker", "pull", "--platform", target, reference, env=env)
+    return image_id(inspect(reference, env)["Id"])
+
+
 def resolve_runtime_images(config, spec, target, env, mode):
+    resolved = {}
+    references = {}
     for service, definition in config["services"].items():
         reference = definition.get("image")
         require(reference, "runtime service has no image")
+        if reference in references:
+            resolved[service] = references[reference]
+            continue
+        resolved[service] = reference
         if mode == "hotfix":
             if service in spec["images"]:
+                references[reference] = reference
                 continue  # The application images were just built and checked locally.
             try:
                 cached = inspect(reference, env)
                 if cached["Os"] + "/" + cached["Architecture"] == target:
+                    references[reference] = reference
                     continue
             except subprocess.CalledProcessError:
                 pass
         print(f"Fetching runtime image {reference} for {target}", flush=True)
         try:
-            run("docker", "pull", "--platform", target, reference, env=env)
+            resolved[service] = pull_runtime_image(reference, target, env)
+            references[reference] = resolved[service]
         except subprocess.CalledProcessError as error:
             raise Rejected(
                 f"runtime image {reference} for {target} is unavailable locally and could not be fetched"
             ) from error
+    return resolved
 
 
 def package(mode):
@@ -798,8 +876,10 @@ def package(mode):
                 "hotfix manifest must use the selected release path",
             )
         config = compose(source, values, env)
-        resolve_runtime_images(config, spec, target, env, mode)
-        data["images"] = inspect_roles(config, spec, rev, target, env, mode == "hotfix")
+        resolved = resolve_runtime_images(config, spec, target, env, mode)
+        data["images"] = inspect_roles(
+            config, spec, rev, target, env, mode == "hotfix", resolved
+        )
         # Local content IDs survive docker save/load without any repository tag lookup.
         if mode == "hotfix":
             recorded = manifest_values(release)
@@ -812,12 +892,27 @@ def package(mode):
             "docker",
             "image",
             "save",
+            "--platform",
+            target,
             "--output",
             str(work / "images.tar"),
             *sorted({item["id"] for item in data["images"].values()}),
             env=env,
         )
-        validate_images(work / "images.tar", data["images"], target)
+        saved_configs = validate_images(work / "images.tar", data["images"], target)
+        if mode == "hotfix":
+            for service in spec["images"]:
+                require(
+                    (
+                        (
+                            saved_configs[data["images"][service]["id"]].get("config")
+                            or {}
+                        ).get("Labels")
+                        or {}
+                    ).get("org.opencontainers.image.revision")
+                    == rev,
+                    "saved application image revision mismatch",
+                )
         write_json(work / "evidence.json", evidence)
         names = [
             "source.tar",
@@ -950,7 +1045,10 @@ def unpack(bundle, expected, work):
     source.mkdir()
     extract(work / "source.tar", source)
     spec = adapter(source, data["profile"])
-    saved = validate_images(work / "images.tar", data["images"], data["platform"])
+    config_ids = {}
+    saved = validate_images(
+        work / "images.tar", data["images"], data["platform"], config_ids
+    )
     evidence = read_json(work / "evidence.json")
     manifest = manifest_values(work / "release.env")
     require(
@@ -966,7 +1064,7 @@ def unpack(bundle, expected, work):
         if data["mode"] == "hotfix":
             require(manifest[name] == item["id"], "hotfix manifest image mismatch")
             require(
-                (saved[item["id"]].get("config", {}).get("Labels") or {}).get(
+                ((saved[item["id"]].get("config") or {}).get("Labels") or {}).get(
                     "org.opencontainers.image.revision"
                 )
                 == data["revision"],
@@ -998,6 +1096,7 @@ def unpack(bundle, expected, work):
             "missing successful main evidence",
         )
     verify_source(work, data["revision"])
+    data["_config_ids"] = config_ids
     return data, spec, source
 
 
@@ -1078,6 +1177,7 @@ def destination(operation):
                 current_platform(env) == data["platform"],
                 "bundle architecture differs from destination",
             )
+            env["DOCKER_DEFAULT_PLATFORM"] = data["platform"]
             record = state / "deployment.json"
             if record.exists():
                 require(
@@ -1160,11 +1260,22 @@ def destination(operation):
                     env=env,
                     output=True,
                 )
-                for item in data["images"].values():
-                    require(
-                        inspect(item["id"], env)["Id"] == item["id"],
-                        "loaded image identity mismatch",
-                    )
+                for service, item in data["images"].items():
+                    config_id = data["_config_ids"][item["id"]]
+                    loaded = None
+                    for candidate in dict.fromkeys((item["id"], config_id)):
+                        try:
+                            if inspect(candidate, env)["Id"] == candidate:
+                                loaded = candidate
+                                break
+                        except subprocess.CalledProcessError:
+                            continue
+                    require(loaded, "loaded image identity mismatch")
+                    config["services"][service]["image"] = loaded
+                    item["deployed_id"] = loaded
+                    item["config_digest"] = config_id
+                write_json(work / "compose.json", config)
+                run(*command, "--profile", "*", "config", "--quiet", env=env)
                 values.update(
                     {
                         "COMPOSE_RELEASE": shlex.join(command),

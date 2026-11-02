@@ -55,6 +55,9 @@ monitoring options. There is no required emergency input JSON file or second
 credentials file. A previously recorded deployment project is reused unless a
 project override is explicit; conflicting project records still reject the
 operation. Existing credentials, volumes and application data stay on the host.
+Without a record/override, the runtime project is the normal application project
+(`PROJECT_NAME`), rather than the disposable `-release` verification project.
+Local checks retain the selected profile's existing CI project defaults.
 
 Use the same Make overrides that normal deployment needs when the destination
 deviates from the application's defaults. For example, a host with an alternate
@@ -93,8 +96,9 @@ only the selected path; it does not scan for an older usable bundle.
 
 ## Build prerequisites and hotfix follow-up
 
-Use Python 3.12+, Git, Make, Docker Engine and Compose v2 with JSON configuration
-and `pull_policy: never` support. Prepare enough storage for the source/history
+Use Python 3.12+, Git, Make, Docker Engine 28+ for packaging (platform-specific
+image export), and Compose v2 with JSON configuration and `pull_policy: never`
+support. Prepare enough storage for the source/history
 and all saved runtime images. Supported destinations are `linux/amd64` and
 `linux/arm64`; destination emulation does not satisfy the architecture check.
 
@@ -227,6 +231,12 @@ The private `deployment.json` audit records status, revision, image identities,
 validation source, emergency mode, checksum, project and retained directory.
 It does not record credentials. A failure after deployment starts can leave
 migrations applied; inspect service/schema state before attempting recovery.
+
+Image verification accepts both classic Docker config IDs and containerd-backed
+manifest/index IDs, with their saved config and layer bytes verified by digest.
+Installation may select the verified config-ID equivalent on a different image
+store; the audit records the actual `deployed_id` and common `config_digest`.
+Every Compose service remains pinned to an immutable image ID.
 
 An optional existing `BUNDLE_INPUTS` JSON file has fields `project`, `env_file`,
 `variables` and `smoke_url`. `env_file` is the absolute existing normal env file;

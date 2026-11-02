@@ -76,9 +76,10 @@ For captured-release recovery and locally validated hotfixes during outages, see
 reuses the existing release migration/deployment hooks and runs without GitHub
 or registry access on the destination.
 
-The default local-production workflow remains intentionally simple and builds
-from the checkout. Projects that need a pull-only host can opt into the
-immutable-release profile.
+For a GitHub-backed baseline, use `deploy-release` with the manifest from a
+successful main run, as shown below. `up-prod` and `bootstrap-prod` currently
+build from the checkout; they do not select a GitHub release and can report a
+`local` revision. The emergency bundle commands provide the explicit hotfix path.
 
 CI reads the committed scaffold selector and waits for that profile's
 verification. A skipped inactive-profile job does not suppress the release.
