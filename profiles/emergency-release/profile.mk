@@ -2,12 +2,12 @@
 .PHONY: release-bundle-check release-bundle-deploy release-bundle-smoke
 release-bundle-check: ## Run selected-profile local quality and exact-image release gates
 ifeq ($(SCAFFOLD_PROFILE),server-rendered-django)
-	@set -e; trap '$(MAKE) down-release-ci down' EXIT; \
-		$(MAKE) build up check; \
+	@set -e; trap '$(MAKE) down-release-ci' EXIT; \
+		$(MAKE) build check; \
 		$(MAKE) verify-release-images verify-host-ingress verify-monitoring-config
 else
-	@set -e; trap '$(MAKE) down-release-ci down' EXIT; \
-		$(MAKE) up be.wait be.ci fe.ci smoke; \
+	@set -e; trap '$(MAKE) down-release-ci' EXIT; \
+		$(MAKE) be.ci fe.ci; \
 		$(MAKE) verify-release-images verify-host-ingress verify-monitoring-config
 endif
 

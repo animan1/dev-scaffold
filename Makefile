@@ -152,11 +152,11 @@ be.wait: ## Wait for backend health (dev)
 
 .PHONY: be.ci
 be.ci: ## (Docker) Run backend verify inside dev container
-	$(COMPOSE_DEV) run --rm backend bash -lc 'REPO_DIR=/workspace make -f /workspace/Makefile PY_DIR=/app be.verify'
+	$(COMPOSE_DEV) run --build --rm --no-deps backend bash -lc 'REPO_DIR=/workspace make -f /workspace/Makefile PY_DIR=/app be.verify'
 
 .PHONY: fe.ci
 fe.ci: ## (Docker) Run frontend verify inside dev container
-	$(COMPOSE_DEV) run --rm frontend sh -lc 'apk add --no-cache make >/dev/null 2>&1 || true; corepack enable; make -f /workspace/Makefile FRONTEND_DIR=/app fe.setup fe.verify'
+	$(COMPOSE_DEV) run --rm --no-deps frontend sh -lc 'apk add --no-cache make >/dev/null 2>&1 || true; corepack enable; make -f /workspace/Makefile FRONTEND_DIR=/app fe.setup fe.verify'
 
 .PHONY: smoke
 smoke: ## Dev smoketest (API + static + FE root)

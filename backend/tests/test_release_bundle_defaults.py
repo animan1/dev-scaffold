@@ -80,6 +80,8 @@ def test_inputs_reuse_normal_configuration_and_recorded_project(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PRODUCTION_HTTP_PORT", raising=False)
+    monkeypatch.delenv("BUNDLE_SMOKE_URL", raising=False)
     env_file = tmp_path / "existing.env"
     env_file.write_text("DATABASE_PASSWORD=secret\n")
     env_file.chmod(0o600)
