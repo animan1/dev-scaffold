@@ -28,6 +28,7 @@ An environment-specific command must name its environment explicitly; bare
 
 This table defines command behavior in every supported environment. Examples
 in [Makefile workflows](makefile-workflows.md) illustrate composition and do not add requirements.
+Subcommands are listed as **Invokes:** at the end of the result.
 
 | Command | Result | Type |
 | --- | --- | --- |
@@ -35,7 +36,7 @@ in [Makefile workflows](makefile-workflows.md) illustrate composition and do not
 | `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded; shared across environments, with no application startup | Build |
 | `publish` | Upload the recorded build's images, committed deployment source, release manifest, and successful validation evidence; preserve their revision and immutable image identities | Artifact transfer |
 | `download` | Obtain the selected published release's recorded images, manifest, evidence, and deployment source; prepare the current deployment checkout at the recorded revision and validate completeness, integrity, and architecture, without changing running containers or application data | Artifact transfer |
-| `up-<env>` | A running application matching the checked-out revision; retain configuration and volumes, initialize dependencies, and invoke `migrate-<env>` before application startup, without building or testing. Migration failure stops startup; database changes are not automatically reversed | Lifecycle |
+| `up-<env>` | A running application matching the checked-out revision; retain configuration and volumes, initialize dependencies, and apply required migrations before application startup, without building or testing. Migration failure stops startup; database changes are not automatically reversed. **Invokes:** `migrate-<env>` | Lifecycle |
 | `down-<env>` | Stopped application, with configuration and data preserved | Lifecycle |
 | `rm-<env>` | Environment containers and data removed | Lifecycle |
 | `migrate-<env>` | Apply existing migration files using the environment's application runtime; no migration-file generation or application deployment | Data administration |
