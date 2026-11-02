@@ -10,6 +10,7 @@ remain authoritative; the examples add no implicit build, test, or deploy steps.
 On the development host, with source and development configuration available:
 
 ```sh
+make setup
 make up-dev
 make verify-dev
 make down-dev
@@ -19,12 +20,23 @@ The application runs from source in `<project>-dev`. Repeat `up-dev` and
 `verify-dev` after code changes when needed. `down-dev` retains development data
 for the next startup. No production-image build or registry transfer is needed.
 
+For an intentional dependency update:
+
+```sh
+make deps-lock
+make setup
+make check
+```
+
+Commit the dependency declarations and lockfiles together before building a release.
+
 ## 2. Local prod lifecycle
 
 On one host, with the intended source committed and production configuration
 available, run in order and stop at the first failure:
 
 ```sh
+make setup
 make check
 make build
 make up-ephemeral
@@ -45,6 +57,7 @@ starts it again. Neither startup nor restart rebuilds or retests those images.
 On the build host, with the intended source committed:
 
 ```sh
+make setup
 make check
 make build
 make up-ephemeral
@@ -59,6 +72,7 @@ checkout for the same production startup and verification as the local workflow:
 
 ```sh
 make download
+make setup
 make up-prod
 make verify-prod
 ```
