@@ -5,13 +5,19 @@ existing targets. Implement the agreed contract in subsequent PRs.
 
 ## Command names
 
-Environment-specific targets use `<command>-<env>`. The environment comes last.
+Targets use `<command>[-<env>[-<container>]]`. The table lists supported forms.
 For example, `make up-prod` deploys production on the current host;
 `make shell-prod` opens a shell there. `make prod-shell` violates the convention.
 
 Environment-neutral commands, such as `make help` and `make build`, have no suffix.
 An environment-specific command must name its environment explicitly; bare
 `make up` is not a canonical command under this contract.
+
+Use Compose service names, such as `backend` or `backup`, for `<container>`.
+A container selector narrows the command to that service. Container-scoped
+lifecycle commands must not start, stop, or recreate other persistent services;
+required dependencies must already be available.
+Unknown service selectors must fail before service changes.
 
 ## Command types
 
@@ -36,8 +42,9 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded; shared across environments, with no application startup | Build |
 | `publish` | Upload the recorded build's images, committed deployment source, release manifest, and successful validation evidence; preserve their revision and immutable image identities | Artifact transfer |
 | `download` | Obtain the selected published release's recorded images, manifest, evidence, and deployment source; prepare the current deployment checkout at the recorded revision and validate completeness, integrity, and architecture, without changing running containers or application data | Artifact transfer |
-| `up-<env>` | A running application matching the checked-out revision; retain configuration and volumes, initialize dependencies, and apply required migrations before application startup, without building or testing. Migration failure stops startup; database changes are not automatically reversed. **Invokes:** `migrate-<env>` | Lifecycle |
-| `down-<env>` | Stopped application, with configuration and data preserved | Lifecycle |
+| `up-<env>[-<container>]` | Selected services running, matching the checked-out revision; retain configuration and volumes, and apply required migrations before application startup, without building or testing. Without a container selector, start all configured services and initialize dependencies. Migration failure stops startup; database changes are not automatically reversed. **Invokes:** `migrate-<env>` (before application startup) | Lifecycle |
+| `restart-<env>[-<container>]` | Stop and start selected services using normal startup behavior, preserving configuration and data; stop on failure. **Invokes:** `down-<env>[-<container>]`, then `up-<env>[-<container>]` with the same selectors | Lifecycle |
+| `down-<env>[-<container>]` | Selected services stopped, with configuration and data preserved. Without a container selector, stop the environment's services | Lifecycle |
 | `rm-<env>` | Environment containers and data removed | Lifecycle |
 | `backup-<env>` | Create an encrypted database snapshot, apply configured retention, and check backup integrity; no application deployment | Data administration |
 | `snapshots-<env>` | List restorable database snapshots; no repository initialization, snapshot creation, or application-data changes | Data administration |
@@ -50,9 +57,9 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | `deps-lock` | Update the selected application's dependency lockfiles from declared dependency constraints; no application startup or deployment-image build | Source editing |
 | `migrations` | Generate migration source files for intentional model changes; no application-schema or data changes | Source editing |
 | `format` | Apply configured formatting and automatic fixes across the selected application's components; no tests or deployment | Source editing |
-| `ps-<env>` | Display the environment's container status | Access and inspection |
-| `logs-<env>` | Display the environment's container logs | Access and inspection |
-| `shell-<env>` | Open a shell in the environment's application container | Access and inspection |
+| `ps-<env>[-<container>]` | Display container status for the selected service, or all environment services when omitted | Access and inspection |
+| `logs-<env>[-<container>]` | Display container logs for the selected service, or all environment services when omitted | Access and inspection |
+| `shell-<env>[-<container>]` | Open a shell in the selected service's container, defaulting to the application service when omitted | Access and inspection |
 | `console-<env>` | Open the environment's interactive application/framework console | Access and inspection |
 
 The production host needs registry access and its own existing configuration and

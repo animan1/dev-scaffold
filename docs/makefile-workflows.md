@@ -129,3 +129,18 @@ make verify-prod
 
 This is database recovery, not release recovery. Restoring a snapshot does not
 select an application image or make migrations reversible.
+
+## Service-level operations
+
+Examples using the dummy project's Compose service names, run independently:
+
+```sh
+make restart-prod-backend
+make logs-prod-backend
+make logs-prod-backup
+make down-prod-backup
+make up-prod-backup
+```
+
+The backup service uses the same selectors as the other services. All examples
+operate within `<project>-prod`.
