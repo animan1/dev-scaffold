@@ -129,3 +129,21 @@ make verify-prod
 
 This is database recovery, not release recovery. Restoring a snapshot does not
 select an application image or make migrations reversible.
+
+## Scheduled backups
+
+After production startup in either production workflow, with backup images,
+storage, credentials, and schedules configured:
+
+```sh
+make up-backup-prod
+```
+
+For worker diagnostics, use `make logs-backup-prod`. To stop the worker:
+
+```sh
+make down-backup-prod
+```
+
+The worker belongs to `<project>-prod`; it does not create another environment.
+Stopping it preserves the application's uptime and retained backups.

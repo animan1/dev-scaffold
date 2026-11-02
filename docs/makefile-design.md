@@ -37,7 +37,9 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | `publish` | Upload the recorded build's images, committed deployment source, release manifest, and successful validation evidence; preserve their revision and immutable image identities | Artifact transfer |
 | `download` | Obtain the selected published release's recorded images, manifest, evidence, and deployment source; prepare the current deployment checkout at the recorded revision and validate completeness, integrity, and architecture, without changing running containers or application data | Artifact transfer |
 | `up-<env>` | A running application matching the checked-out revision; retain configuration and volumes, initialize dependencies, and apply required migrations before application startup, without building or testing. Migration failure stops startup; database changes are not automatically reversed. **Invokes:** `migrate-<env>` | Lifecycle |
+| `up-backup-<env>` | A running worker for scheduled encrypted backups and isolated restore verification, using prepared images and existing backup configuration; no application startup or restart, schema migration, or image build | Lifecycle |
 | `down-<env>` | Stopped application, with configuration and data preserved | Lifecycle |
+| `down-backup-<env>` | Stopped backup worker, with backup storage and configuration preserved; application services remain unchanged | Lifecycle |
 | `rm-<env>` | Environment containers and data removed | Lifecycle |
 | `backup-<env>` | Create an encrypted database snapshot, apply configured retention, and check backup integrity; no application deployment | Data administration |
 | `snapshots-<env>` | List restorable database snapshots; no repository initialization, snapshot creation, or application-data changes | Data administration |
@@ -52,6 +54,7 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | `format` | Apply configured formatting and automatic fixes across the selected application's components; no tests or deployment | Source editing |
 | `ps-<env>` | Display the environment's container status | Access and inspection |
 | `logs-<env>` | Display the environment's container logs | Access and inspection |
+| `logs-backup-<env>` | Display the scheduled backup worker's logs | Access and inspection |
 | `shell-<env>` | Open a shell in the environment's application container | Access and inspection |
 | `console-<env>` | Open the environment's interactive application/framework console | Access and inspection |
 
