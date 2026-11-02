@@ -28,7 +28,7 @@ below illustrate composition and do not add requirements.
 | Command | Result | Type |
 | --- | --- | --- |
 | `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded; shared across environments, with no application startup | Build |
-| `up-<env>` | A running application matching the selected source or image revision; retain configuration and volumes, initialize dependencies, and apply required migrations, without building or testing. Migration failure stops startup; database changes are not automatically reversed | Lifecycle |
+| `up-<env>` | A running application matching the checked-out revision; retain configuration and volumes, initialize dependencies, and apply required migrations, without building or testing. Migration failure stops startup; database changes are not automatically reversed | Lifecycle |
 | `down-<env>` | Stopped application, with configuration and data preserved | Lifecycle |
 | `rm-<env>` | Environment containers and data removed | Lifecycle |
 | `verify-<env>` | Read-only checks of health, expected revision, and HTTP/static smoke behavior; no container lifecycle changes, schema migration, or application-data writes | Validation |
