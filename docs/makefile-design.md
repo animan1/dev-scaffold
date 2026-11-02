@@ -13,35 +13,42 @@ Environment-neutral commands, such as `make help` and `make build`, have no suff
 An environment-specific command must name its environment explicitly; bare
 `make up` is not a canonical command under this contract.
 
+## Command types
+
+- Build: produce artifacts.
+- Lifecycle: start, update (including deployment), stop, or remove an environment.
+- Validation: test source, artifacts, or application behavior.
+- Access and inspection: interact with an existing environment.
+
 ## Command results
+
+This table defines command behavior in every supported environment. Examples
+below illustrate composition and do not add requirements.
 
 | Command | Result | Type |
 | --- | --- | --- |
-| `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded | Build |
-| `up-<env>` | A running application matching the checked-out revision; initialize dependencies and apply required migrations | Lifecycle |
+| `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded; shared across environments, with no application startup | Build |
+| `up-<env>` | A running application matching the checked-out revision; retain configuration and volumes, initialize dependencies, and apply required migrations, without building or testing. Migration failure stops startup; database changes are not automatically reversed | Lifecycle |
 | `down-<env>` | Stopped application, with configuration and data preserved | Lifecycle |
-| `rm-<env>` | Environment containers and disposable data removed; supported only for `ephemeral` | Lifecycle |
-| `verify-<env>` | Read-only checks of health, expected revision, and HTTP/static smoke behavior | Validation |
+| `rm-<env>` | Environment containers and data removed. Supported for `ephemeral`; `dev` requires explicit confirmation naming the project and acknowledging data deletion; unsupported for `prod` | Lifecycle |
+| `verify-<env>` | Read-only checks of health, expected revision, and HTTP/static smoke behavior; no container lifecycle changes, schema migration, or application-data writes | Validation |
 | `integration-test-<env>` | Application integration tests, including writes to its data | Validation |
-| `shell-<env>`, `logs-<env>`, `ps-<env>` | Shell access, logs, or container status for that environment | Access and inspection |
+| `shell-<env>` | Open a shell in the environment's application container | Access and inspection |
+| `logs-<env>` | Display the environment's container logs | Access and inspection |
+| `ps-<env>` | Display the environment's container status | Access and inspection |
 
-Each command has the same result in every supported environment. `build` starts
-no application; its images are shared by prod and ephemeral, with no separate
-build per environment. `up` neither builds nor runs tests. `verify` never creates,
-replaces, or removes containers, migrates schemas, or writes application data.
 SSH transfer and remote coordination belong to infra.
 
 ## Environments and resource names
 
 | Environment | Runtime and data | Default Compose project |
 | --- | --- | --- |
-| `dev` | Checked-out source, development server, persistent development data | `<project>-dev` |
-| `prod` | Recorded immutable images, production server/ingress, persistent application data | `<project>-prod` |
-| `ephemeral` | Same images and server/ingress as prod, disposable configuration and data | `<project>-ephemeral` |
+| `dev` | Checked-out source, development server, persistent development data; no separate application image build required | `<project>-dev` |
+| `prod` | Recorded immutable build matching the checked-out revision (otherwise refuse startup), production server/ingress, persistent configuration and application data | `<project>-prod` |
+| `ephemeral` | Same recorded build and server/ingress as prod, with the same revision requirement; disposable configuration and data | `<project>-ephemeral` |
 
-Dev needs no separate application image build. Prod and ephemeral consume the
-same recorded build matching the checked-out revision, or refuse to start.
-A laptop production exercise still uses `prod`; CI is not another environment.
+This table defines environment differences. For example, a laptop production
+exercise uses `prod`; CI is an execution context, not another environment.
 
 These are the only three default Docker Compose namespaces. A suffixed command
 operates only on containers in its environment's project, including any helper
@@ -53,7 +60,7 @@ must never stop production or remove development/production data. Renaming a
 project does not migrate its volumes: existing installations need an explicit
 migration plan before defaults change.
 
-## Updating production on the current host
+## Example: updating production on the current host
 
 Starting with an older production version running and the new source committed,
 run these proposed commands in order, stopping at the first failure. The same
@@ -70,11 +77,6 @@ make up-prod
 make verify-prod
 ```
 
-The old prod remains running through build and ephemeral testing. After those
-steps succeed, `up-prod` starts the same tested images with existing production
-configuration and volumes. Migration failure stops the update; it does not imply
-database changes can be reversed. If a test fails, `rm-ephemeral` remains an
-explicit cleanup step, affecting only ephemeral resources.
-
-The public deployment command is `up-prod`. Migration and startup are its
-substeps; this sequence needs no separate public `deploy-release` command.
+In this example, prod remains running during build and ephemeral testing; only
+`up-prod` updates it. On a test failure, stop the update and use `rm-ephemeral`
+for cleanup. No separate public `deploy-release` command is needed.
