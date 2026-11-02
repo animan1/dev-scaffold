@@ -173,3 +173,14 @@ run a single monitoring pass:
 ```sh
 make monitor-check-prod
 ```
+
+## Configuration inspection
+
+To inspect the desired configuration before deployment:
+
+```sh
+make config-prod
+```
+
+Use the generated private JSON file to review service images, mounts, and project
+identity. It is inspection output, not another configuration input to maintain.
