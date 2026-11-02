@@ -1,5 +1,7 @@
 import importlib.util
 import os
+import socket
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,13 @@ SPEC.loader.exec_module(bundle)
 
 REVISION = "a" * 40
 APP_ID = "sha256:" + "1" * 64
+
+
+@pytest.fixture
+def occupied_port() -> Iterator[str]:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        yield str(listener.getsockname()[1])
 
 
 def _install_git_fixture(
@@ -51,10 +60,11 @@ def _arguments(tmp_path: Path) -> tuple[Path, dict[str, str], dict[str, object]]
 
 
 def test_hotfix_builds_target_platform_and_checks_same_image_ids(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, occupied_port: str
 ) -> None:
     source, values, spec = _arguments(tmp_path)
     root = tmp_path / "checkout"
+    values.update({"RELEASE_HTTP_PORT": occupied_port, "RELEASE_HTTPS_PORT": occupied_port})
     monkeypatch.setenv("RELEASE_IMAGE_PREFIX", "local/existing-app")
     env = {"PATH": "/bin"}
     git_calls = _install_git_fixture(monkeypatch)
@@ -88,6 +98,11 @@ def test_hotfix_builds_target_platform_and_checks_same_image_ids(
     check_values = make_calls[1][2]
     assert "PROJECT_NAME" not in check_values
     assert "RELEASE_COMPOSE_PROJECT" not in check_values
+    assert check_values["RELEASE_HTTP_PORT"] != occupied_port
+    assert check_values["RELEASE_HTTPS_PORT"] != occupied_port
+    assert check_values["RELEASE_HTTP_PORT"] != check_values["RELEASE_HTTPS_PORT"]
+    assert check_values["HOST_INGRESS_PORT"] == check_values["RELEASE_HTTP_PORT"]
+    assert build_values["RELEASE_HTTP_PORT"] == occupied_port
     assert evidence["source"] == "local-checks"
     assert evidence["revision"] == REVISION
     assert evidence["platform"] == "linux/arm64"

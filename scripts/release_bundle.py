@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import tarfile
@@ -322,6 +323,22 @@ def build_hotfix(root, source, rev, target, selected, values, env, spec):
         key: value for key, value in build_values.items() if key not in project_keys
     }
     check_env = {key: value for key, value in env.items() if key not in project_keys}
+    with contextlib.ExitStack() as sockets:
+        listeners = [sockets.enter_context(socket.socket()) for _ in range(2)]
+        for listener in listeners:
+            listener.bind(("127.0.0.1", 0))
+        http_port, https_port = (
+            str(listener.getsockname()[1]) for listener in listeners
+        )
+    check_values.update(
+        {
+            "RELEASE_HTTP_PORT": http_port,
+            "RELEASE_HTTPS_PORT": https_port,
+            "HOST_INGRESS_PORT": http_port,
+        }
+    )
+    if "PRODUCTION_HTTP_PORT" in check_values:
+        check_values["PRODUCTION_HTTP_PORT"] = http_port
     for check in spec["check_targets"]:
         make(source, check, check_values, check_env)
     require(

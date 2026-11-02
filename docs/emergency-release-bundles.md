@@ -117,9 +117,11 @@ For a hotfix, first commit the intended changes on a feature branch. Packaging
 rejects tracked or untracked uncommitted changes and any revision other than
 HEAD before building. It builds for the selected platform, runs the adapter's
 local checks through the existing Make workflows, and verifies the checks did
-not change committed source or the application image IDs. These normal checks
-may start and stop their usual development/release verification services; run
-build-side validation in the development environment, not on production data.
+not change committed source or the application image IDs. Quality checks use
+one-off containers without starting the development app/proxy or publishing its
+ports. Exact-image checks use the existing release-CI workflow on automatically
+selected free loopback ports; cleanup stops only that CI stack. Run build-side
+validation in the development environment, not on production data.
 
 Keep the original feature branch and bundle. After recovery, push the preserved
 commit and reconcile it with current main through the normal PR/CI workflow.
@@ -181,7 +183,7 @@ Use the existing workflows rather than copying migration/deployment logic:
 | --- | --- |
 | `build-release-images` | Build locally for `RELEASE_PLATFORM`, label the revision, and respect `RELEASE_FILE`/`RELEASE_IMAGE_PREFIX`. Role suffixes correspond to the manifest variables, e.g. `RELEASE_WEB_IMAGE` uses `-web`. Do not publish. |
 | `release-bundle-config` | Print only `$(COMPOSE_RELEASE) --profile '*' config --format json`. Respect the supplied env file, release manifest, project and host/port settings; no fetch/pull/build. |
-| `release-bundle-check` | Invoke the application's normal local quality and exact-image release checks. Respect the selected build/project settings and use the normal disposable validation databases. Fail on any gate failure and do not rebuild release images. |
+| `release-bundle-check` | Invoke normal local quality and exact-image release checks. Honor the supplied `RELEASE_HTTP_PORT`, `RELEASE_HTTPS_PORT` and `HOST_INGRESS_PORT`; keep quality runners free of development proxy startup/port publication. Use normal disposable validation databases, fail on any gate failure, and do not rebuild release images. |
 | `release-bundle-deploy` | Invoke the normal production initialization/deployment target with its existing migration ordering. All Compose actions use the supplied `COMPOSE_RELEASE`; pulls go through `RELEASE_PULL`, which the installer supplies as `true`. No build/fetch/login. |
 | `release-bundle-smoke` | Invoke normal application smoke checks and verify the reported full revision, respecting `COMPOSE_RELEASE` and host/port settings. |
 
