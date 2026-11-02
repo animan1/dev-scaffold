@@ -99,3 +99,33 @@ For either production workflow, a failed ephemeral test stops promotion; use
 `make rm-ephemeral` for cleanup. A production migration failure stops startup and
 does not imply database changes can be reversed. Remote orchestration belongs
 to infra; these commands operate on their current host.
+
+## 4. Database backup and recovery
+
+On a host with backup storage and credentials configured:
+
+```sh
+make backup-prod
+make snapshots-prod
+```
+
+Replace `SNAPSHOT_ID` below with an ID from that list. Use an application checkout
+compatible with the chosen snapshot. First check recovery with disposable data:
+
+```sh
+make restore-ephemeral BACKUP_SNAPSHOT=SNAPSHOT_ID CONFIRM=restore-ephemeral
+make up-ephemeral
+make verify-ephemeral
+make rm-ephemeral
+```
+
+For an intentional replacement of the application's database:
+
+```sh
+make restore-prod BACKUP_SNAPSHOT=SNAPSHOT_ID CONFIRM=restore-prod
+make up-prod
+make verify-prod
+```
+
+This is database recovery, not release recovery. Restoring a snapshot does not
+select an application image or make migrations reversible.
