@@ -28,9 +28,9 @@ below illustrate composition and do not add requirements.
 | Command | Result | Type |
 | --- | --- | --- |
 | `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded; shared across environments, with no application startup | Build |
-| `up-<env>` | A running application matching the checked-out revision; retain configuration and volumes, initialize dependencies, and apply required migrations, without building or testing. Migration failure stops startup; database changes are not automatically reversed | Lifecycle |
+| `up-<env>` | A running application matching the selected source or image revision; retain configuration and volumes, initialize dependencies, and apply required migrations, without building or testing. Migration failure stops startup; database changes are not automatically reversed | Lifecycle |
 | `down-<env>` | Stopped application, with configuration and data preserved | Lifecycle |
-| `rm-<env>` | Environment containers and data removed. Supported for `ephemeral`; `dev` requires explicit confirmation naming the project and acknowledging data deletion; unsupported for `prod` | Lifecycle |
+| `rm-<env>` | Environment containers and data removed | Lifecycle |
 | `verify-<env>` | Read-only checks of health, expected revision, and HTTP/static smoke behavior; no container lifecycle changes, schema migration, or application-data writes | Validation |
 | `integration-test-<env>` | Application integration tests, including writes to its data | Validation |
 | `shell-<env>` | Open a shell in the environment's application container | Access and inspection |
@@ -44,8 +44,8 @@ SSH transfer and remote coordination belong to infra.
 | Environment | Runtime and data | Default Compose project |
 | --- | --- | --- |
 | `dev` | Checked-out source, development server, persistent development data; no separate application image build required | `<project>-dev` |
-| `prod` | Recorded immutable build matching the checked-out revision (otherwise refuse startup), production server/ingress, persistent configuration and application data | `<project>-prod` |
-| `ephemeral` | Same recorded build and server/ingress as prod, with the same revision requirement; disposable configuration and data | `<project>-ephemeral` |
+| `prod` | Recorded immutable build, production server/ingress, persistent configuration and application data | `<project>-prod` |
+| `ephemeral` | Same recorded build and server/ingress as prod; disposable configuration and data | `<project>-ephemeral` |
 
 This table defines environment differences. For example, a laptop production
 exercise uses `prod`; CI is an execution context, not another environment.
