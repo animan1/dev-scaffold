@@ -10,7 +10,6 @@ remain authoritative; the examples add no implicit build, test, or deploy steps.
 On the development host, with source and development configuration available:
 
 ```sh
-make setup
 make up-dev
 make verify-dev
 make down-dev
