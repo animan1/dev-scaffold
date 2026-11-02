@@ -25,23 +25,23 @@ An environment-specific command must name its environment explicitly; bare
 ## Command results
 
 This table defines command behavior in every supported environment. Examples
-below illustrate composition and do not add requirements.
+in [Makefile workflows](makefile-workflows.md) illustrate composition and do not add requirements.
 
 | Command | Result | Type |
 | --- | --- | --- |
-| `check` | Run all configured source-quality gates across the selected application's components: formatting checks, lint, type checks, tests and coverage thresholds, migration consistency, and framework checks. The required gates are identical locally and in CI; no source fixes or deployment | Validation |
-| `format` | Apply configured formatting and automatic fixes across the selected application's components; no tests or deployment | Source editing |
 | `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded; shared across environments, with no application startup | Build |
 | `publish` | Upload the recorded build's images, committed deployment source, release manifest, and successful validation evidence; preserve their revision and immutable image identities | Artifact transfer |
 | `download` | Obtain the selected published release's recorded images, manifest, evidence, and deployment source; prepare the current deployment checkout at the recorded revision and validate completeness, integrity, and architecture, without changing running containers or application data | Artifact transfer |
 | `up-<env>` | A running application matching the checked-out revision; retain configuration and volumes, initialize dependencies, and apply required migrations, without building or testing. Migration failure stops startup; database changes are not automatically reversed | Lifecycle |
 | `down-<env>` | Stopped application, with configuration and data preserved | Lifecycle |
 | `rm-<env>` | Environment containers and data removed | Lifecycle |
+| `check` | Run all configured source-quality gates across the selected application's components: formatting checks, lint, type checks, tests and coverage thresholds, migration consistency, and framework checks. The required gates are identical locally and in CI; no source fixes or deployment | Validation |
 | `verify-<env>` | Read-only checks of health, expected revision, and HTTP/static smoke behavior; no container lifecycle changes, schema migration, or application-data writes | Validation |
 | `integration-test-<env>` | Application integration tests, including writes to its data | Validation |
-| `shell-<env>` | Open a shell in the environment's application container | Access and inspection |
-| `logs-<env>` | Display the environment's container logs | Access and inspection |
+| `format` | Apply configured formatting and automatic fixes across the selected application's components; no tests or deployment | Source editing |
 | `ps-<env>` | Display the environment's container status | Access and inspection |
+| `logs-<env>` | Display the environment's container logs | Access and inspection |
+| `shell-<env>` | Open a shell in the environment's application container | Access and inspection |
 
 The production host needs registry access and its own existing configuration and
 credentials. Downloading does not build images or rerun the build host's tests.
@@ -79,25 +79,3 @@ namespaces. Ephemeral validation owns only its disposable resources; its cleanup
 must never stop production or remove development/production data. Renaming a
 project does not migrate its volumes: existing installations need an explicit
 migration plan before defaults change.
-
-## Example: updating production on the current host
-
-Starting with an older production version running and the new source committed,
-run these proposed commands in order, stopping at the first failure. The same
-sequence applies on a laptop, in CI, or on a droplet with Docker and the required
-configuration; it requires no prior CI build or validation elsewhere.
-
-```sh
-make check
-make build
-make up-ephemeral
-make integration-test-ephemeral
-make verify-ephemeral
-make rm-ephemeral
-make up-prod
-make verify-prod
-```
-
-In this example, prod remains running during build and ephemeral testing; only
-`up-prod` updates it. On a test failure, stop the update and use `rm-ephemeral`
-for cleanup. No separate public `deploy-release` command is needed.
