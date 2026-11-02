@@ -25,6 +25,7 @@ On one host, with the intended source committed and production configuration
 available, run in order and stop at the first failure:
 
 ```sh
+make check
 make build
 make up-ephemeral
 make integration-test-ephemeral
@@ -44,6 +45,7 @@ starts it again. Neither startup nor restart rebuilds or retests those images.
 On the build host, with the intended source committed:
 
 ```sh
+make check
 make build
 make up-ephemeral
 make integration-test-ephemeral
