@@ -1,0 +1,73 @@
+# Makefile workflows
+
+Proposed workflows for the Makefile redesign, using the command convention in
+[the command contract](makefile-design.md). These are design examples,
+not instructions for the current implementation. Existing command definitions
+remain authoritative; the examples add no implicit build, test, or deploy steps.
+
+## 1. Local dev lifecycle
+
+On the development host, with source and development configuration available:
+
+```sh
+make up-dev
+make verify-dev
+make down-dev
+```
+
+The application runs from source in `<project>-dev`. Repeat `up-dev` and
+`verify-dev` after code changes when needed. `down-dev` retains development data
+for the next startup. No production-image build or registry transfer is needed.
+
+## 2. Local prod lifecycle
+
+On one host, with the intended source committed and production configuration
+available, run in order and stop at the first failure:
+
+```sh
+make build
+make up-ephemeral
+make integration-test-ephemeral
+make verify-ephemeral
+make rm-ephemeral
+make up-prod
+make verify-prod
+```
+
+The existing prod stays running during build and ephemeral testing. The same
+recorded images then run in `<project>-prod`, retaining its configuration and
+volumes. Use `make down-prod` to stop it while preserving data; `make up-prod`
+starts it again. Neither startup nor restart rebuilds or retests those images.
+
+## 3. GHCR build → prod deploy
+
+On the build host, with the intended source committed:
+
+```sh
+make build
+make up-ephemeral
+make integration-test-ephemeral
+make verify-ephemeral
+make rm-ephemeral
+make publish
+```
+
+On the production host, download that published release, then use its prepared
+checkout for the same production startup and verification as the local workflow:
+
+```sh
+make download
+make up-prod
+make verify-prod
+```
+
+The host boundary adds publication and download, not a different deployment
+path. The downloaded release records the same tested image identities and
+revision. Its architecture must match the destination. The destination does not
+rebuild, substitute tags, or repeat writable tests against production data.
+Stopping and starting prod uses the same commands as workflow 2.
+
+For either production workflow, a failed ephemeral test stops promotion; use
+`make rm-ephemeral` for cleanup. A production migration failure stops startup and
+does not imply database changes can be reversed. Remote orchestration belongs
+to infra; these commands operate on their current host.

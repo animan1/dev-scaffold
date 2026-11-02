@@ -16,6 +16,7 @@ An environment-specific command must name its environment explicitly; bare
 ## Command types
 
 - Build: produce artifacts.
+- Artifact transfer: publish or download recorded release artifacts.
 - Lifecycle: start, update (including deployment), stop, or remove an environment.
 - Validation: test source, artifacts, or application behavior.
 - Access and inspection: interact with an existing environment.
@@ -28,6 +29,8 @@ below illustrate composition and do not add requirements.
 | Command | Result | Type |
 | --- | --- | --- |
 | `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded; shared across environments, with no application startup | Build |
+| `publish` | Upload the recorded build's images, committed deployment source, release manifest, and successful validation evidence; preserve their revision and immutable image identities | Artifact transfer |
+| `download` | Obtain the selected published release's recorded images, manifest, evidence, and deployment source; prepare the current deployment checkout at the recorded revision and validate completeness, integrity, and architecture, without changing running containers or application data | Artifact transfer |
 | `up-<env>` | A running application matching the checked-out revision; retain configuration and volumes, initialize dependencies, and apply required migrations, without building or testing. Migration failure stops startup; database changes are not automatically reversed | Lifecycle |
 | `down-<env>` | Stopped application, with configuration and data preserved | Lifecycle |
 | `rm-<env>` | Environment containers and data removed | Lifecycle |
@@ -36,6 +39,11 @@ below illustrate composition and do not add requirements.
 | `shell-<env>` | Open a shell in the environment's application container | Access and inspection |
 | `logs-<env>` | Display the environment's container logs | Access and inspection |
 | `ps-<env>` | Display the environment's container status | Access and inspection |
+
+The production host needs registry access and its own existing configuration and
+credentials. Downloading does not build images or rerun the build host's tests.
+Subsequent commands run from that same checkout. Selecting or checking
+out another revision alone does not change a running deployment.
 
 SSH transfer and remote coordination belong to infra.
 
