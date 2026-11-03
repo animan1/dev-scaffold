@@ -98,6 +98,10 @@ SSH transfer and remote coordination belong to infra.
 
 ## Environments and resource names
 
+Build and deployment hosts, including CI, require Docker's containerd image
+store. The classic store is unsupported. Infra owns daemon configuration;
+scaffold commands must not change it.
+
 | Environment | Runtime and data | Default Compose project |
 | --- | --- | --- |
 | `dev` | Docker containers running checked-out source and development servers, with persistent development data; no host-native application runtime or separate application image build required | `<project>-dev` |

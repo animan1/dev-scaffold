@@ -7,7 +7,7 @@ remain authoritative; the examples add no implicit build, test, or deploy steps.
 ## 0. First-time installation
 
 Infra prepares the host with Git, Make, Python 3.12+ (standard-library
-orchestration only), and Docker with Compose, then obtains
+orchestration only), and Docker with Compose and the containerd image store, then obtains
 the tenant's deployment checkout. From that
 checkout, inspect the selected profiles and prepare their tooling/dependencies:
 
@@ -246,7 +246,7 @@ then `make download`, `make setup`, `make image-check`, `make up-prod`, and
 
 ## 6. Disaster recovery on a new host
 
-Infra prepares the replacement host with Docker, Make, a deployment checkout,
+Infra prepares the replacement host with Docker's containerd image store, Make, a deployment checkout,
 the original logical deployment identity, configuration and credentials, backup
 repository access and decryption keys, and registry access. The matching release
 artifacts must be retained off-host, including locally built releases. Restore

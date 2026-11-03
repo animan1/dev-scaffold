@@ -39,7 +39,8 @@ application work. Once a project contains real code, use the separate
 ### Docker Dev
 
 The host needs Git, Make, Python 3.12+ (standard-library orchestration only), and
-Docker with Compose. Application tools run in containers.
+Docker with Compose and the containerd image store. Infra owns engine
+configuration; scaffold commands reject the classic store. Application tools run in containers.
 
 ```bash
 make setup

@@ -86,6 +86,7 @@ class Operator:
             "invalid release image prefix",
         )
         self._platform = None
+        self._store_checked = False
 
     def git(self, *arguments):
         return run("git", *arguments, cwd=self.root, capture=True)
@@ -101,6 +102,7 @@ class Operator:
         return self.head()
 
     def architecture(self):
+        self.require_image_store()
         if self._platform:
             return self._platform
         value = os.environ.get("RELEASE_PLATFORM")
@@ -115,6 +117,20 @@ class Operator:
 
     def native_architecture(self):
         return run("docker", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}", capture=True)
+
+    def require_image_store(self):
+        if not self._store_checked:
+            status = (
+                json.loads(
+                    run("docker", "info", "--format", "{{json .DriverStatus}}", capture=True)
+                )
+                or []
+            )
+            require(
+                ["driver-type", "io.containerd.snapshotter.v1"] in status,
+                "Docker's containerd image store is required; infra must configure the engine before building or deploying",
+            )
+            self._store_checked = True
 
     def release_dir(self, rev=None):
         return (
@@ -245,7 +261,7 @@ class Operator:
                 self.pyproject,
                 str(Path(self.pyproject).with_name("uv.lock")),
             ]
-        digest = hashlib.sha256()
+        digest = hashlib.sha256(b"containerd-single-platform-v1")
         for name in files:
             digest.update(name.encode() + b"\0" + (self.root / name).read_bytes())
         return digest.hexdigest()
@@ -258,7 +274,7 @@ class Operator:
         return (info["Config"].get("Labels") or {}).get("io.scaffold.tooling-inputs") == expected
 
     def backup_inputs(self):
-        digest = hashlib.sha256()
+        digest = hashlib.sha256(b"containerd-single-platform-v1")
         for name in (
             "profiles/immutable-backup/Dockerfile",
             "profiles/immutable-backup/backup.sh",
@@ -267,9 +283,17 @@ class Operator:
             digest.update((self.root / name).read_bytes())
         return digest.hexdigest()
 
-    def setup(self):
+    def captured_release(self):
         cached = self.release_dir() / "manifest.json"
-        release = self.release() if cached.exists() else None
+        release = (
+            self.release() if cached.exists() and not self.git("status", "--porcelain") else None
+        )
+        if release:
+            verify_seal(self.release_dir())
+        return release
+
+    def setup(self):
+        release = self.captured_release()
         if release and "tooling" in release["images"]:
             run(
                 "docker",
@@ -281,6 +305,7 @@ class Operator:
             run(
                 "docker",
                 "build",
+                "--provenance=false",
                 "--platform",
                 self.architecture(),
                 *self.build_inputs(),
@@ -307,6 +332,7 @@ class Operator:
                 run(
                     "docker",
                     "build",
+                    "--provenance=false",
                     "--platform",
                     self.architecture(),
                     *self.build_inputs(),
@@ -365,6 +391,7 @@ class Operator:
                 "--platform",
                 self.architecture(),
                 *options,
+                "--provenance=false",
                 "--label",
                 "io.scaffold.tooling-inputs=" + self.backup_inputs(),
                 "--file",
@@ -1009,6 +1036,15 @@ class Operator:
     def build(self):
         rev = self.clean_source()
         platform = self.architecture()
+        require(
+            self.prepared_tool(self.tool_image, self.tooling_inputs()),
+            "run make setup for the current source inputs",
+        )
+        if self.profile == "react-vite":
+            require(
+                self.prepared_tool(self.node_image, self.tooling_inputs(True)),
+                "run make setup for the current frontend inputs",
+            )
         directory = self.release_dir(rev)
         if (directory / "manifest.json").exists() and (directory / "integrity.json").exists():
             self.release(rev)
@@ -1037,6 +1073,7 @@ class Operator:
 
     def build_images(self, rev, platform, directory, source_root, source):
         common = [
+            "--provenance=false",
             "--platform",
             platform,
             "--label",
@@ -1107,6 +1144,7 @@ class Operator:
         runtime = read_json(self.root / "deploy/dependencies.json").get(
             "runtime", {"db": "postgres"}
         )
+        registry_images = {}
         for service, dependency in runtime.items():
             require(
                 re.fullmatch("[a-z][a-z0-9_-]*", service),
@@ -1114,14 +1152,13 @@ class Operator:
             )
             if dependency in images:
                 images[service] = images[dependency]
+                if dependency in registry_images:
+                    registry_images[service] = registry_images[dependency]
             else:
                 reference = immutable(pins[dependency]["pin"])
-                try:
-                    info = self.inspect_image(reference, platform)
-                except Rejected:
-                    run("docker", "pull", "--platform", platform, reference)
-                    info = self.inspect_image(reference, platform)
+                info = self.pinned_image(reference, platform)
                 images[service] = info["Id"]
+                registry_images[service] = reference
         manifest = {
             "schema": 1,
             "revision": rev,
@@ -1129,7 +1166,8 @@ class Operator:
             "backup_profile": self.backup_profile,
             "platform": platform,
             "prefix": self.prefix,
-            "images": images,
+            "images": {**images, **registry_images},
+            "image_ids": images,
         }
         validate_release(manifest)
         (directory / "source.tar").write_bytes(source)
@@ -1146,6 +1184,15 @@ class Operator:
         save_images(directory / "images.tar.gz", images.values())
         seal_release(directory)
         print(f"Recorded immutable release {rev} for {platform}")
+
+    def pinned_image(self, reference, platform):
+        for candidate in (reference, reference.rsplit("@", 1)[-1]):
+            try:
+                return self.inspect_image(candidate, platform)
+            except Rejected:
+                pass
+        run("docker", "pull", "--platform", platform, reference)
+        return self.inspect_image(reference, platform)
 
     def image_check(self):
         release = self.release()
@@ -1912,6 +1959,8 @@ class Operator:
         self.bundle_metadata()
         ids = dict(release.get("image_ids", release["images"]))
         for role, identity in ids.items():
+            if "@sha256:" in release["images"][role]:
+                continue
             name = self.prefix + "-" + role
             tag = name + ":" + self.head() + "-" + release["platform"].split("/")[1]
             run("docker", "tag", identity, tag)

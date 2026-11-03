@@ -6,7 +6,7 @@ Transfer the whole directory; an image tag or manifest alone is insufficient.
 
 | File | Contract |
 | --- | --- |
-| `manifest.json` | Schema `1`; full `revision`, selected `profile`, `backup_profile`, Linux `platform`, image `prefix`, and role-to-immutable-reference `images` map. Publication additionally records role-to-content-ID `image_ids` and the originating main workflow run. Required runtime roles are `backend`, `web`, `db`, `backup`; captured tooling and tenant runtime roles are included too. |
+| `manifest.json` | Schema `1`; full `revision`, selected `profile`, `backup_profile`, Linux `platform`, image `prefix`, role-to-immutable-reference `images` map, and role-to-containerd-ID `image_ids`. Publication additionally records the originating main workflow run. Required runtime roles are `backend`, `web`, `db`, `backup`; captured tooling and tenant runtime roles are included too. |
 | `source.tar` | Exact `git archive` of the committed revision, including deployment configuration and commands; excludes private host inputs. |
 | `source.bundle` | That revision's reachable Git history, preserving local hotfix commits and allowing an offline checkout. |
 | `images.tar.gz` | Docker image archive containing the complete recorded image set for the destination architecture. |
@@ -27,6 +27,12 @@ operate on the current host. Before an outage, retain tested release directories
 off-host; a locally built hotfix can be captured during an outage using the same
 local build workflow. Build for the destination with
 `RELEASE_PLATFORM=linux/arm64` or `linux/amd64` on the build host.
+
+Build and destination engines must use the containerd image store. Infra enables
+it before these commands; see [Docker's configuration guidance](https://docs.docker.com/engine/storage/containerd/).
+CI defaults to `linux/amd64`; ARM tenants select a matching native runner and
+`RELEASE_PLATFORM` in `.github/workflows/ci.yml`. An unavailable architecture is
+rejected rather than substituted.
 
 For a replacement checkout without network access:
 

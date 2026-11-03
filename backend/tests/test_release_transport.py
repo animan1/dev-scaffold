@@ -44,6 +44,8 @@ def test_release_build_targets_platform_and_labels_exact_revision(
     monkeypatch.setattr(op, "clean_source", lambda: revision)
     monkeypatch.setattr(op, "architecture", lambda: "linux/arm64")
     monkeypatch.setattr(op, "build_inputs", lambda: [])
+    monkeypatch.setattr(op, "prepared_tool", lambda *a: True)
+    monkeypatch.setattr(op, "tooling_inputs", lambda *a: "prepared-inputs")
     monkeypatch.setattr(op, "inspect_image", lambda *a: {"Id": "sha256:" + "b" * 64})
 
     def execute(*args: object, **kwargs: object) -> None:
@@ -76,12 +78,71 @@ def test_release_build_targets_platform_and_labels_exact_revision(
     builds = [command for command in commands if command[:2] == ("docker", "build")]
     assert len(builds) == 3
     for command in builds:
+        assert "--provenance=false" in command
         assert command[command.index("--platform") + 1] == "linux/arm64"
         assert (
             command[command.index("--label") + 1] == "org.opencontainers.image.revision=" + revision
         )
     manifest = operator_module.read_json(op.release_dir() / "manifest.json")
     assert {"backend", "web", "db", "backup", "tooling"} <= manifest["images"].keys()
+    assert manifest["images"]["db"] == "example/postgres@sha256:" + "c" * 64
+    assert manifest["image_ids"]["db"] == "sha256:" + "b" * 64
+
+
+@pytest.mark.parametrize("containerd", [False, True])
+def test_image_store_requirement_precedes_architecture_selection(
+    operator_module: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    containerd: bool,
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    monkeypatch.setenv("RELEASE_PLATFORM", "linux/arm64")
+    calls = []
+
+    def execute(*args: object, **kwargs: object) -> str:
+        calls.append(args)
+        assert args == ("docker", "info", "--format", "{{json .DriverStatus}}")
+        return json.dumps(
+            [["driver-type", "io.containerd.snapshotter.v1"]]
+            if containerd
+            else [["Backing Filesystem", "extfs"]]
+        )
+
+    monkeypatch.setattr(operator_module, "run", execute)
+    if containerd:
+        assert op.architecture() == "linux/arm64"
+        assert op.architecture() == "linux/arm64"
+        assert len(calls) == 1
+    else:
+        with pytest.raises(operator_module.Rejected, match="containerd image store is required"):
+            op.architecture()
+        assert not op.local.exists()
+
+
+def test_pinned_dependency_can_use_captured_digest_without_registry_access(
+    operator_module: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    identity = "sha256:" + "b" * 64
+    reference = "example/db@" + identity
+    candidates = []
+
+    def inspect(candidate: str, platform: str) -> dict[str, str]:
+        candidates.append(candidate)
+        assert platform == "linux/arm64"
+        if candidate == reference:
+            raise operator_module.Rejected("registry alias absent after archive load")
+        return {"Id": identity}
+
+    monkeypatch.setattr(op, "inspect_image", inspect)
+    monkeypatch.setattr(
+        operator_module, "run", lambda *a, **k: pytest.fail("unexpected registry call")
+    )
+    assert op.pinned_image(reference, "linux/arm64") == {"Id": identity}
+    assert candidates == [reference, identity]
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
