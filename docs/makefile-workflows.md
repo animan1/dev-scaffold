@@ -5,6 +5,37 @@ Proposed workflows for the Makefile redesign, using the command convention in
 not instructions for the current implementation. Existing command definitions
 remain authoritative; the examples add no implicit build, test, or deploy steps.
 
+## 0. First-time installation
+
+Infra prepares the host with Git, Make, Docker with Compose, and the selected
+profile's host tooling, then obtains the tenant's deployment checkout. From that
+checkout, inspect the selected profiles and prepare their tooling/dependencies:
+
+```sh
+make help
+make profiles
+make setup
+```
+
+Tooling preparation is environment-neutral. Prepare configuration with
+`prepare-<env>` for the intended environment, for example:
+
+```sh
+make prepare-prod
+```
+
+This command uses scaffold templates and tenant extensions for private inputs:
+project identity, ports/ingress, application/database secrets, and backup
+storage/keys when enabled. Supply required external credentials and ingress
+inputs, then rerun preparation to validate them. Production also needs durable
+`DEPLOYMENT_STATE_DIR` storage. Recovery uses the original identity and secrets.
+
+Continue with workflow 1 for development, workflow 2 for a local production
+build, workflow 3 for a published release, or workflow 6 for recovery. These
+workflows own image selection, database initialization/migration, and startup;
+first-time preparation leaves the application stopped. After downloading a
+release, run its `setup` step again for that exact checkout's dependencies.
+
 ## 1. Local dev lifecycle
 
 On the development host, with source and development configuration available:

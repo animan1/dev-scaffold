@@ -40,6 +40,7 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | Command | Result | Type |
 | --- | --- | --- |
 | `setup` | Prepare tooling and dependencies for the selected application's components from committed lockfiles; no lockfile edits, application startup, or deployment-image build | Setup |
+| `prepare-<env>` | Prepare owner-only configuration files and host directories from scaffold templates and tenant extensions; generate missing local secrets and validate required external credentials and ingress inputs. Preserve existing configuration and credentials; recovery requires the original secrets. No service startup, image build/pull, migration, or application-data changes | Setup |
 | `hooks` | Install the repository's configured Git hooks for the current checkout; no hook execution, lockfile edits, or service startup | Setup |
 | `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded; shared across environments, with no application startup | Build |
 | `publish` | Upload the recorded build's images, committed deployment source, release manifest, and successful validation evidence; preserve their revision and immutable image identities | Artifact transfer |
