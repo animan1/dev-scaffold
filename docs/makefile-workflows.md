@@ -7,8 +7,8 @@ remain authoritative; the examples add no implicit build, test, or deploy steps.
 
 ## 0. First-time installation
 
-Infra prepares the host with Git, Make, Docker with Compose, and the selected
-profile's host tooling, then obtains the tenant's deployment checkout. From that
+Infra prepares the host with Git, Make, and Docker with Compose, then obtains
+the tenant's deployment checkout. From that
 checkout, inspect the selected profiles and prepare their tooling/dependencies:
 
 ```sh

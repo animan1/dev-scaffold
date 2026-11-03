@@ -39,7 +39,7 @@ Subcommands are listed as **Invokes:** at the end of the result.
 
 | Command | Result | Type |
 | --- | --- | --- |
-| `setup` | Prepare tooling and dependencies for the selected application's components from committed lockfiles; no lockfile edits, application startup, or deployment-image build | Setup |
+| `setup` | Prepare Docker-based tooling and dependencies for the selected application's components from committed lockfiles; no host-native application tooling, lockfile edits, application startup, or deployment-image build | Setup |
 | `prepare-<env>` | Prepare owner-only configuration files and host directories from scaffold templates and tenant extensions; generate missing local secrets and validate required external credentials and ingress inputs. Preserve existing configuration and credentials; recovery requires the original secrets. No service startup, image build/pull, migration, or application-data changes | Setup |
 | `hooks` | Install the repository's configured Git hooks for the current checkout, using `check` for pre-commit validation; no hook execution, lockfile edits, or service startup | Setup |
 | `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded; shared across environments, with no application startup | Build |
@@ -103,7 +103,7 @@ SSH transfer and remote coordination belong to infra.
 
 | Environment | Runtime and data | Default Compose project |
 | --- | --- | --- |
-| `dev` | Checked-out source, development server, persistent development data; no separate application image build required | `<project>-dev` |
+| `dev` | Docker containers running checked-out source and development servers, with persistent development data; no host-native application runtime or separate application image build required | `<project>-dev` |
 | `prod` | Recorded immutable build, production server/ingress, persistent configuration and application data | `<project>-prod` |
 | `ephemeral` | Same recorded build and server/ingress as prod; disposable configuration and data | `<project>-ephemeral` |
 
