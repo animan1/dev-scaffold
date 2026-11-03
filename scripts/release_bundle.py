@@ -8,11 +8,11 @@ import gzip
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import tarfile
 import time
+from pathlib import Path, PurePosixPath
 
 
 class Rejected(Exception):
@@ -477,9 +477,8 @@ def frozen_config(config, data, spec, destination, source):
         for volume in definition.get("volumes", []):
             if volume["type"] == "bind":
                 path = Path(volume["source"])
-                if path.is_relative_to(source):
-                    if not path.exists():
-                        path = destination / path.relative_to(source)
+                if path.is_relative_to(source) and not path.exists():
+                    path = destination / path.relative_to(source)
                 require(path.exists(), "required bind input missing: " + str(path))
                 volume["source"] = str(path)
                 volume.setdefault("bind", {})["create_host_path"] = False
@@ -488,9 +487,8 @@ def frozen_config(config, data, spec, destination, source):
         for value in config.get(group, {}).values():
             if "file" in value:
                 path = Path(value["file"])
-                if path.is_relative_to(source):
-                    if not path.exists():
-                        path = destination / path.relative_to(source)
+                if path.is_relative_to(source) and not path.exists():
+                    path = destination / path.relative_to(source)
                 require(path.is_file(), "required config/secret missing")
                 value["file"] = str(path)
     return config
