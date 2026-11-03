@@ -67,6 +67,7 @@ def test_wrong_image_revision_is_rejected_before_database_startup(
         lambda *a: {"Config": {"Labels": {"org.opencontainers.image.revision": "c" * 40}}},
     )
     monkeypatch.setattr(op, "clean_source", lambda: "a" * 40)
+    monkeypatch.setattr(op, "native_architecture", lambda: "linux/arm64")
     monkeypatch.setattr(op, "compose", lambda *a, **k: calls.append(a))
     with pytest.raises(operator_module.Rejected, match="revision label"):
         op.up("prod")

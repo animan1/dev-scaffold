@@ -214,6 +214,22 @@ def test_image_checks_never_prepare_or_render_an_environment(
     assert operator_module.read_json(tmp_path / "image-check.json")["revision"] == "a" * 40
 
 
+def test_production_architecture_override_cannot_mask_the_destination_host(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    monkeypatch.setenv("RELEASE_PLATFORM", "linux/arm64")
+    monkeypatch.setattr(op, "clean_source", lambda: "a" * 40)
+    monkeypatch.setattr(op, "native_architecture", lambda: "linux/amd64")
+    monkeypatch.setattr(
+        op,
+        "inspect_image",
+        lambda *a: pytest.fail("wrong-architecture release reached image startup"),
+    )
+    with pytest.raises(operator_module.Rejected, match="destination Docker host"):
+        op.preflight_release("prod", release())
+
+
 def test_newest_backup_metadata_failure_invalidates_prior_selection_without_fallback(
     operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

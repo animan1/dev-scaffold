@@ -103,19 +103,16 @@ class Operator:
             return self._platform
         value = os.environ.get("RELEASE_PLATFORM")
         if not value:
-            value = run(
-                "docker",
-                "version",
-                "--format",
-                "{{.Server.Os}}/{{.Server.Arch}}",
-                capture=True,
-            )
+            value = self.native_architecture()
         require(
             value in ("linux/amd64", "linux/arm64"),
             "unsupported destination architecture",
         )
         self._platform = value
         return value
+
+    def native_architecture(self):
+        return run("docker", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}", capture=True)
 
     def release_dir(self, rev=None):
         return (
@@ -898,6 +895,21 @@ class Operator:
                 else None
             )
             self.tool(*command, env=env)
+        # Keep the existing archive library's root Ruff style; application
+        # configuration continues to govern the selected application's checks.
+        archive = "/workspace/scripts/release_bundle.py"
+        shared = {
+            "format-check": [
+                ("ruff", "format", "--isolated", "--line-length", "88", "--check", archive)
+            ],
+            "lint": [("ruff", "check", "--isolated", archive)],
+            "format": [
+                ("ruff", "check", "--isolated", "--fix", archive),
+                ("ruff", "format", "--isolated", "--line-length", "88", archive),
+            ],
+        }
+        for command in shared.get(operation, []):
+            self.tool(*command)
         if operation == "test":
             coverage = os.environ.get("COVERAGE", "0") == "1"
             command = ["pytest", "-c", project, "."]
@@ -1451,6 +1463,11 @@ class Operator:
 
     def preflight_release(self, environment, release):
         self.clean_source()
+        if environment == "prod":
+            require(
+                release["platform"] == self.native_architecture(),
+                "release architecture differs from the destination Docker host",
+            )
         for role, reference in release.get("image_ids", release["images"]).items():
             info = self.inspect_image(reference, release["platform"])
             if role in ("backend", "web", "backup"):
@@ -1615,7 +1632,7 @@ class Operator:
             "set BACKUP_SNAPSHOT to an exact ID",
         )
         # Validate identity and backup existence before stopping any writers.
-        self.release() if environment != "dev" else None
+        self.startup_inputs(environment, "db")
         source = os.environ.get("BACKUP_SOURCE_ENV") or environment
         self.backup(environment, "snapshot-exists", snapshot, capture=True, source=source)
         _, model = self.config(environment)

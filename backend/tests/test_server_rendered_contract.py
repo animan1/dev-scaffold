@@ -31,13 +31,19 @@ def test_server_rendered_checks_use_its_committed_configuration(
     calls: list[tuple[object, ...]] = []
     monkeypatch.setattr(op, "tool", lambda *a, **k: calls.append(a))
     op.gate(gate)
-    configured = [call for call in calls if call[0] in ("ruff", "mypy", "pytest")]
+    configured = [
+        call
+        for call in calls
+        if any("profiles/server-rendered-django/pyproject.toml" in str(value) for value in call)
+    ]
     assert len(configured) == 1
     assert any(
         "profiles/server-rendered-django/pyproject.toml" in str(value) for value in configured[0]
     )
     if gate == "lint":
         assert ("python", "scripts/check_no_any.py") in calls
+    if gate in ("format-check", "lint"):
+        assert any("/workspace/scripts/release_bundle.py" in call for call in calls)
 
 
 def test_source_gate_composition_stops_at_the_first_failure(
