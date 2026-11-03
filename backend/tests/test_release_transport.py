@@ -52,6 +52,9 @@ def test_release_build_targets_platform_and_labels_exact_revision(
             Path(str(args[args.index("--output") + 1])).write_bytes(b"image archive")
 
     monkeypatch.setattr(operator_module, "run", execute)
+    monkeypatch.setattr(
+        operator_module, "save_images", lambda path, identities: path.write_bytes(b"image archive")
+    )
     source = io.BytesIO()
     with tarfile.open(fileobj=source, mode="w"):
         pass

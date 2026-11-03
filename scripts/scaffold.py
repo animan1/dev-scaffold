@@ -38,6 +38,7 @@ from scaffold_support import (
     require,
     revision,
     run,
+    save_images,
     seal_release,
     target,
     validate_release,
@@ -1060,14 +1061,7 @@ class Operator:
                 "source validation belongs to another profile",
             )
             write_json(directory / "source-check.json", source_check)
-        run(
-            "docker",
-            "image",
-            "save",
-            "--output",
-            directory / "images.tar",
-            *dict.fromkeys(images.values()),
-        )
+        save_images(directory / "images.tar.gz", images.values())
         seal_release(directory)
         print(f"Recorded immutable release {rev} for {platform}")
 
@@ -1351,7 +1345,7 @@ class Operator:
         destination = self.state_dir(environment) / "releases" / release_identity(release)
         source = self.release_dir(release["revision"])
         require(
-            (source / "images.tar").is_file() and (source / "source.tar").is_file(),
+            (source / "images.tar.gz").is_file() and (source / "source.tar").is_file(),
             "release archives required for reliable rollback",
         )
         if not destination.exists():
@@ -1929,7 +1923,7 @@ class Operator:
                 )
                 write_json(directory / (name + ".json"), checks[key])
         identities = release.get("image_ids", release["images"])
-        if not (directory / "images.tar").exists():
+        if not (directory / "images.tar.gz").exists():
             require(remote, "local release image archive is incomplete")
             for reference in release["images"].values():
                 require(
@@ -1937,25 +1931,18 @@ class Operator:
                     "missing local image archive cannot be rebuilt or recovered from a mutable tag",
                 )
                 run("docker", "pull", "--platform", release["platform"], reference)
-            run(
-                "docker",
-                "image",
-                "save",
-                "--output",
-                directory / "images.tar",
-                *dict.fromkeys(identities.values()),
-            )
+            save_images(directory / "images.tar.gz", identities.values())
         if (directory / "integrity.json").exists():
             verify_seal(directory)
         try:
             validate_images(
-                directory / "images.tar",
+                directory / "images.tar.gz",
                 {key: {"id": value} for key, value in identities.items()},
                 release["platform"],
             )
         except ArchiveRejected as error:
             raise Rejected(str(error)) from error
-        run("docker", "image", "load", "--input", directory / "images.tar")
+        run("docker", "image", "load", "--input", directory / "images.tar.gz")
         seal_release(directory)
         if directory != destination:
             retained_build = self.local / "retained-builds" / release_identity(self.release(rev))

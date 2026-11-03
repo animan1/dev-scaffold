@@ -153,10 +153,10 @@ def test_sealed_bundle_corruption_is_rejected_before_docker_access(
     monkeypatch.setattr(op, "architecture", lambda: "linux/arm64")
     directory = op.release_dir()
     directory.mkdir(parents=True)
-    for name in ("manifest.json", "source.tar", "images.tar"):
+    for name in ("manifest.json", "source.tar", "images.tar.gz"):
         (directory / name).write_bytes(b"original")
     operator_module.seal_release(directory)
-    (directory / "images.tar").write_bytes(b"corrupt")
+    (directory / "images.tar.gz").write_bytes(b"corrupt")
     monkeypatch.setattr(
         operator_module, "run", lambda *a, **k: pytest.fail("unexpected Docker access")
     )
@@ -172,3 +172,18 @@ def test_resolved_credentials_escape_only_compose_interpolation(
     encoded = operator_module.compose_literals(model)
     assert model["environment"]["PASSWORD"] == secret
     assert encoded["environment"]["PASSWORD"] == secret.replace("$", "$$")
+
+
+def test_image_capture_failure_preserves_previous_archive(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    command = tmp_path / "docker"
+    command.write_text("#!/bin/sh\nprintf partial\nexit 1\n")
+    command.chmod(0o700)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    archive = tmp_path / "images.tar.gz"
+    archive.write_bytes(b"previous")
+    with pytest.raises(operator_module.Rejected, match="capture failed"):
+        operator_module.save_images(archive, ["sha256:" + "a" * 64])
+    assert archive.read_bytes() == b"previous"
+    assert not archive.with_suffix(".gz.pending").exists()

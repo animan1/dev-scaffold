@@ -2,6 +2,7 @@
 
 import contextlib
 import fcntl
+import gzip
 import hashlib
 import json
 import os
@@ -88,6 +89,35 @@ def release_identity(release):
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 
+def save_images(path, identities):
+    """Stream image transport without needing a second uncompressed archive."""
+    path = Path(path)
+    temporary = path.with_suffix(path.suffix + ".pending")
+    try:
+        with (
+            temporary.open("wb") as output,
+            subprocess.Popen(
+                ["docker", "image", "save", *dict.fromkeys(identities)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            ) as process,
+        ):
+            try:
+                with gzip.GzipFile(
+                    fileobj=output, mode="wb", mtime=0, compresslevel=1
+                ) as compressed:
+                    while chunk := process.stdout.read(1024 * 1024):
+                        compressed.write(chunk)
+            except BaseException:
+                process.kill()
+                raise
+            require(process.wait() == 0, "Docker image capture failed")
+        temporary.chmod(0o600)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def compose_literals(value):
     """A resolved model must not interpolate credentials a second time."""
     if isinstance(value, str):
@@ -109,7 +139,7 @@ def read_json(path):
 def seal_release(directory):
     directory = Path(directory)
     hashes = {}
-    for name in ("manifest.json", "source.tar", "images.tar"):
+    for name in ("manifest.json", "source.tar", "images.tar.gz"):
         with (directory / name).open("rb") as stream:
             hashes[name] = hashlib.file_digest(stream, "sha256").hexdigest()
         (directory / name).chmod(0o600)
@@ -120,7 +150,7 @@ def verify_seal(directory):
     directory = Path(directory)
     hashes = read_json(directory / "integrity.json")
     require(
-        set(hashes) == {"manifest.json", "source.tar", "images.tar"},
+        set(hashes) == {"manifest.json", "source.tar", "images.tar.gz"},
         "incomplete release integrity record",
     )
     for name, expected in hashes.items():
