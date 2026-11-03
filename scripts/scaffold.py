@@ -737,6 +737,10 @@ class Operator:
         return self.compose_model(environment, model, *arguments, capture=capture)
 
     def compose_model(self, environment, model, *arguments, capture=False, current=False):
+        require(
+            model.get("name") == self.project + "-" + environment,
+            "Compose project namespace mismatch",
+        )
         path = self.local / "compose" / (environment + ("-current" if current else "") + ".json")
         write_json(path, compose_literals(model))
         private = [
@@ -765,6 +769,8 @@ class Operator:
             "compose",
             "--project-directory",
             self.root,
+            "--project-name",
+            self.project + "-" + environment,
             "--file",
             path,
             *arguments,
@@ -1191,10 +1197,12 @@ class Operator:
         protect=False,
         source=None,
     ):
-        release = None if environment == "dev" else self.release()
         # The backup image owns its repository and shared status volume; app data
         # and credentials are neither replaced nor exposed on the command line.
-        _, model = self.config(environment, release)
+        if source is not None or operation == "restore":
+            _, model = self.config(environment)
+        else:
+            _, model = self.current_model(environment)
         if source and source != environment:
             require(
                 source in ("dev", "prod", "ephemeral"),

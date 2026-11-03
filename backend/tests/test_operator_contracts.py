@@ -297,6 +297,39 @@ def test_failed_publication_download_never_becomes_a_selected_cache(
     assert all("--clobber" in command for command in downloads)
 
 
+def test_compose_identity_overrides_inherited_project_selectors(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "another-project-prod")
+    monkeypatch.setattr(op, "settings", lambda *a: {})
+    commands = []
+    monkeypatch.setattr(operator_module, "run", lambda *a, **k: commands.append(a))
+    op.compose_model("prod", {"name": op.project + "-prod", "services": {}}, "up", "--no-build")
+    assert commands[0][commands[0].index("--project-name") + 1] == op.project + "-prod"
+
+
+def test_backup_uses_the_running_release_after_checkout_changes(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    monkeypatch.setattr(
+        op, "release", lambda *a: pytest.fail("backup selected the checkout release")
+    )
+    monkeypatch.setattr(op, "config", lambda *a: pytest.fail("backup rendered the new checkout"))
+    model = {"services": {"backup": {"image": "sha256:" + "a" * 64}}}
+    monkeypatch.setattr(op, "current_model", lambda *a: (None, model))
+    calls = []
+
+    def execute(env: str, selected: object, *args: object, **kwargs: object) -> str:
+        calls.append(selected)
+        return "SNAPSHOT_ID=" + "a" * 64
+
+    monkeypatch.setattr(op, "compose_model", execute)
+    assert op.backup("prod", capture=True) == "SNAPSHOT_ID=" + "a" * 64
+    assert all(selected is model for selected in calls)
+
+
 def test_prepared_setup_never_rebuilds_valid_tools(
     operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
