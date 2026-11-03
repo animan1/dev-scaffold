@@ -228,8 +228,10 @@ make verify-prod
 Snapshot discovery requires neither the lost host nor its deployment history.
 Missing release metadata or unavailable matching artifacts stop recovery rather
 than selecting an older backup, rebuilding, or guessing a compatible revision.
-Restore initializes database dependencies without starting application writers;
-normal startup follows only after successful restore. Infra directs traffic to
+Restore invokes the normal service-scoped lifecycle commands to stop writers and
+start the database (`down-prod-<writer>` and `up-prod-db` for the dummy project).
+Database-only startup does not migrate or start the application; `up-prod`
+follows only after successful restore. Infra directs traffic to
 the replacement after verification. Database writes after the selected snapshot
 are not recovered by this workflow.
 
