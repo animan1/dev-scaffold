@@ -930,7 +930,7 @@ class Operator:
         rev = self.clean_source()
         platform = self.architecture()
         directory = self.release_dir(rev)
-        if directory.exists() and (directory / "manifest.json").exists():
+        if (directory / "manifest.json").exists() and (directory / "integrity.json").exists():
             self.release(rev)
             verify_seal(directory)
             evidence = self.local / "checks" / (rev + ".json")
