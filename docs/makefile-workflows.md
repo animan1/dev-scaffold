@@ -176,36 +176,31 @@ select an application image or make migrations reversible.
 
 ## 5. Rollback after an update
 
-On the deployment host, discover the previous revision and the snapshot taken
-before the update's migrations:
+On the deployment host, inspect the recorded update, then restore its previous
+release and pre-migration snapshot without copying revision or snapshot IDs:
 
 ```sh
 make history-prod
-make snapshots-prod
+make rollback-prod CONFIRM=rollback-prod
 ```
 
-From the update's history record, use the full previous revision as `REVISION`
-and its pre-migration snapshot ID as `SNAPSHOT_ID`. Do not infer either from
-"latest": scheduled backups and later deployment attempts can change it.
-Stop at the first failure:
+Rollback uses automatically retained local release artifacts and the recorded
+snapshot pair, not the latest published release or scheduled backup. For a
+different recovery point, inspect `history-prod` and `snapshots-prod`, then supply
+both the full revision and compatible snapshot explicitly:
 
 ```sh
-make download RELEASE_REVISION=REVISION
-make setup
-make image-check
-make restore-prod BACKUP_SNAPSHOT=SNAPSHOT_ID CONFIRM=restore-prod
-make up-prod
-make verify-prod
+make rollback-prod CONFIRM=rollback-prod RELEASE_REVISION=REVISION BACKUP_SNAPSHOT=SNAPSHOT_ID
 ```
 
-The selected release supplies matching deployment source and recorded images;
-it must still exist locally or in publication. Restore stops application writers
+The selected release supplies matching deployment source and recorded images.
+Restore stops application writers
 and replaces the database with the selected snapshot, discarding subsequent
 database writes. Startup uses the normal migration workflow for that revision.
 Configuration and volumes retain their identity. This is an explicit database
 recovery, not a reversal of migrations. If the current schema and data are known
-to be compatible with the previous release, omit `restore-prod` for an
-application-only rollback.
+to be compatible with the previous release, use `download RELEASE_REVISION=REVISION`,
+`setup`, `image-check`, `up-prod`, and `verify-prod` for an application-only rollback.
 
 ## Service-level operations
 
