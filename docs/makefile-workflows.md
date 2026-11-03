@@ -75,6 +75,8 @@ make test
 ```
 
 Use `make format` for formatting and fixes, or `make check` for the complete gate.
+Use `make check` to reproduce the installed pre-commit validation, or
+`make ci-ephemeral` for the complete source and ephemeral release acceptance sequence.
 
 For local cache troubleshooting, use `make clean`.
 
@@ -144,7 +146,7 @@ On the production host, download that published release, then use its prepared
 checkout for the same production startup and verification as the local workflow:
 
 ```sh
-make download
+make download-latest
 make setup
 make up-prod
 make verify-prod
@@ -230,8 +232,9 @@ and replaces the database with the selected snapshot, discarding subsequent
 database writes. Startup uses the normal migration workflow for that revision.
 Configuration and volumes retain their identity. This is an explicit database
 recovery, not a reversal of migrations. If the current schema and data are known
-to be compatible with the previous release, use `download RELEASE_REVISION=REVISION`,
-`setup`, `image-check`, `up-prod`, and `verify-prod` for an application-only rollback.
+to be compatible with the previous release, first run `git switch --detach REVISION`,
+then `make download`, `make setup`, `make image-check`, `make up-prod`, and
+`make verify-prod` for an application-only rollback.
 
 ## 6. Disaster recovery on a new host
 
@@ -248,6 +251,7 @@ published release. Run in order, stopping at the first failure:
 ```sh
 make snapshots-prod SELECT=newest ENV_FILE=.local/recovery.env
 . .local/recovery.env
+git switch --detach "$RELEASE_REVISION"
 make download RELEASE_REVISION="$RELEASE_REVISION"
 make setup
 make image-check
