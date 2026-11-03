@@ -43,8 +43,8 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | `hooks` | Install the repository's configured Git hooks for the current checkout; no hook execution, lockfile edits, or service startup | Setup |
 | `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded; shared across environments, with no application startup | Build |
 | `publish` | Upload the recorded build's images, committed deployment source, release manifest, and successful validation evidence; preserve their revision and immutable image identities | Artifact transfer |
-| `download` | Obtain the selected release's recorded images, manifest, evidence, and deployment source from retained local artifacts or publication; prepare the current deployment checkout at the recorded revision and validate completeness, integrity, and architecture, without changing running containers or application data. With `RELEASE_REVISION`, require that exact committed revision; fail if unavailable, without rebuilding or substituting another release | Artifact transfer |
-| `up-<env>[-<container>]` | Selected services running, matching the checked-out revision; retain configuration and volumes, and apply required migrations before application startup, without building or testing. Without a container selector, start all configured services and initialize dependencies. Migration failure stops startup; database changes are not automatically reversed. **Invokes:** `migrate-<env>` (only when starting application services) | Lifecycle |
+| `download` | Obtain the selected release's recorded images, manifest, evidence, and deployment source from retained local artifacts or publication; set the deployment checkout's Git HEAD to that release's commit, select its recorded image manifest, and validate completeness, integrity, and architecture, without changing running containers or application data. With `RELEASE_REVISION`, require that exact committed revision; fail if unavailable, without rebuilding or substituting another release | Artifact transfer |
+| `up-<env>[-<container>]` | Selected services running, matching the checked-out revision; reject a mismatch between the selected image manifest and checked-out revision before service changes. Retain configuration and volumes, and apply required migrations before application startup, without building or testing. Without a container selector, start all configured services and initialize dependencies. Migration failure stops startup; database changes are not automatically reversed. **Invokes:** `migrate-<env>` (only when starting application services) | Lifecycle |
 | `restart-<env>[-<container>]` | Stop and start selected services using normal startup behavior, preserving configuration and data; stop on failure. **Invokes:** `down-<env>[-<container>]`, then `up-<env>[-<container>]` with the same selectors | Lifecycle |
 | `rollback-<env>` | Restore the previous release and pre-migration snapshot from the most recent release-changing deployment attempt, requiring per-invocation `CONFIRM=rollback-<env>` to authorize database replacement. Resolve the pair once; reject missing records, artifacts or snapshots before changing services or application data, and stop on failure. Optional `RELEASE_REVISION` and `BACKUP_SNAPSHOT` must be supplied together to override the pair. **Invokes:** `download`, `setup`, `image-check`, `restore-<env>`, `up-<env>`, then `verify-<env>` using that pair | Lifecycle |
 | `down-<env>[-<container>]` | Selected services stopped, with configuration and data preserved. Without a container selector, stop the environment's services | Lifecycle |
@@ -84,11 +84,6 @@ its own existing configuration and credentials. Downloading does not build image
 or rerun the build host's tests.
 Subsequent commands run from that same checkout. Selecting or checking
 out another revision alone does not change a running deployment.
-
-`download` sets the deployment checkout's Git HEAD to the selected release's
-commit and selects its recorded image manifest. Before service changes,
-`up-<env>` rejects a mismatch between that manifest and the checked-out revision.
-This applies to normal deployment, rollback, and new-host recovery alike.
 
 SSH transfer and remote coordination belong to infra.
 
