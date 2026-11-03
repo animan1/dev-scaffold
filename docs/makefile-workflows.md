@@ -17,10 +17,17 @@ make profiles
 make setup
 ```
 
-This preparation is environment-neutral. Use the scaffold's configuration
-templates and private environment files, extended with tenant-specific settings,
-to supply the intended environment's project identity, ports/ingress, application/database
-secrets, and backup storage/keys when enabled. Production also needs durable
+Tooling preparation is environment-neutral. Prepare configuration with
+`prepare-<env>` for the intended environment, for example:
+
+```sh
+make prepare-prod
+```
+
+This command uses scaffold templates and tenant extensions for private inputs:
+project identity, ports/ingress, application/database secrets, and backup
+storage/keys when enabled. Supply required external credentials and ingress
+inputs, then rerun preparation to validate them. Production also needs durable
 `DEPLOYMENT_STATE_DIR` storage. Recovery uses the original identity and secrets.
 
 Continue with workflow 1 for development, workflow 2 for a local production
