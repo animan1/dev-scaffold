@@ -1,5 +1,13 @@
 services:
   nginx:
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--header", "X-Forwarded-Proto: https", "http://127.0.0.1/api/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
     environment:
       BACKEND_HOST: "${BACKEND_HOST:-backend}"
       NGINX_ENVSUBST_FILTER: "^BACKEND_HOST$"

@@ -1,6 +1,12 @@
 services:
   backend:
     image: "${RELEASE_BACKEND_IMAGE:?Set RELEASE_BACKEND_IMAGE in the release manifest}"
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request; request = urllib.request.Request('http://127.0.0.1:8000/api/healthz', headers={'Host': 'localhost', 'X-Forwarded-Proto': 'https'}); urllib.request.urlopen(request, timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
 
   monitor:
     image: "${RELEASE_BACKEND_IMAGE:?Set RELEASE_BACKEND_IMAGE in the release manifest}"
