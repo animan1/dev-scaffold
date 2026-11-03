@@ -262,6 +262,41 @@ def test_newest_backup_metadata_failure_invalidates_prior_selection_without_fall
     assert not output.exists()
 
 
+def test_failed_publication_download_never_becomes_a_selected_cache(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+    import tarfile
+
+    op = operator_module.Operator(tmp_path)
+    monkeypatch.setattr(op, "head", lambda: "a" * 40)
+    monkeypatch.setattr(op, "architecture", lambda: "linux/arm64")
+    monkeypatch.setattr(op, "repository", lambda: "example/application")
+    downloads = []
+
+    def execute(*args: object, **kwargs: object) -> str:
+        if args[:3] == ("git", "cat-file", "-e"):
+            return ""
+        assert args[:3] == ("gh", "release", "download")
+        downloads.append(args)
+        destination = Path(str(args[args.index("--dir") + 1])) / str(
+            args[args.index("--pattern") + 1]
+        )
+        with tarfile.open(destination, "w") as archive:
+            item = tarfile.TarInfo("manifest.json")
+            item.size = 2
+            archive.addfile(item, io.BytesIO(b"{}"))
+        return ""
+
+    monkeypatch.setattr(operator_module, "run", execute)
+    for _ in range(2):
+        with pytest.raises(operator_module.Rejected, match="bundle contents"):
+            op.download()
+        assert not op.release_dir().exists()
+    assert len(downloads) == 2
+    assert all("--clobber" in command for command in downloads)
+
+
 def test_prepared_setup_never_rebuilds_valid_tools(
     operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

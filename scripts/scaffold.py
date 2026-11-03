@@ -1969,24 +1969,32 @@ class Operator:
         rev = revision(rev or os.environ.get("RELEASE_REVISION") or self.head())
         directory = self.release_dir(rev)
         destination = directory
+        publication_required = False
         if expected_run and directory.exists():
             cached = self.release(rev)
-            if cached.get("publication", {}).get("run_id") != str(expected_run):
-                (self.local / "downloads").mkdir(parents=True, exist_ok=True)
-                directory = (
-                    Path(tempfile.mkdtemp(prefix="published-", dir=self.local / "downloads"))
-                    / "release"
-                )
+            publication_required = cached.get("publication", {}).get("run_id") != str(expected_run)
         if retained:
             require(Path(retained).is_dir(), "exact retained rollback artifact is missing")
             verify_seal(retained)
             if directory.exists():
                 shutil.rmtree(directory)
             shutil.copytree(retained, directory)
-        remote = not directory.exists()
-        if not remote:
+        remote = publication_required or not directory.exists()
+        if remote:
+            directory = (
+                self.local
+                / "downloads"
+                / rev
+                / self.profile
+                / self.architecture().split("/")[1]
+                / "prepared"
+            )
+            if directory.exists():
+                shutil.rmtree(directory)
+        else:
             verify_seal(directory)
         if not (directory / "manifest.json").is_file():
+            run("git", "cat-file", "-e", rev + "^{commit}", cwd=self.root, capture=True)
             name = "release-" + self.profile + "-" + self.architecture().replace("/", "-") + ".tar"
             temporary = self.local / "downloads" / rev
             temporary.mkdir(parents=True, exist_ok=True)
@@ -2001,6 +2009,7 @@ class Operator:
                 name,
                 "--dir",
                 temporary,
+                "--clobber",
             )
             directory.mkdir(parents=True, exist_ok=True)
             with tarfile.open(temporary / name) as archive:
@@ -2099,13 +2108,20 @@ class Operator:
         run("docker", "image", "load", "--input", directory / "images.tar.gz")
         seal_release(directory)
         if directory != destination:
-            retained_build = self.local / "retained-builds" / release_identity(self.release(rev))
-            retained_build.parent.mkdir(parents=True, exist_ok=True)
-            require(
-                not retained_build.exists(),
-                "a different cached build is already retained; inspect it before replacement",
-            )
-            destination.rename(retained_build)
+            if destination.exists():
+                identity = release_identity(self.release(rev))
+                retained_build = self.local / "retained-builds" / identity
+                retained_build.parent.mkdir(parents=True, exist_ok=True)
+                if retained_build.exists():
+                    verify_seal(retained_build)
+                    require(
+                        release_identity(read_json(retained_build / "manifest.json")) == identity,
+                        "retained build identity mismatch",
+                    )
+                    shutil.rmtree(destination)
+                else:
+                    destination.rename(retained_build)
+            destination.parent.mkdir(parents=True, exist_ok=True)
             directory.rename(destination)
         print(f"Prepared release {rev} without changing the checkout or deployment")
 
