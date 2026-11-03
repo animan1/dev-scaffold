@@ -127,11 +127,18 @@ class Operator:
         )
 
     def release(self, rev=None):
-        return validate_release(
+        data = validate_release(
             read_json(self.release_dir(rev) / "manifest.json"),
             self.profile,
             self.architecture(),
         )
+        require(data["revision"] == (rev or self.head()), "release directory revision mismatch")
+        if os.environ.get("RELEASE_IDENTITY"):
+            require(
+                release_identity(data) == os.environ["RELEASE_IDENTITY"],
+                "release image set differs from the selected backup",
+            )
+        return data
 
     def inputs(self, environment):
         if environment == "prod" and os.environ.get("PROD_ENV_FILE"):
@@ -150,6 +157,7 @@ class Operator:
                     "POSTGRES_USER",
                     "POSTGRES_PASSWORD",
                     "POSTGRES_DB",
+                    "BACKUP_PASSWORD",
                 )
             ),
             "incomplete private environment inputs",
@@ -729,13 +737,29 @@ class Operator:
         _, model = self.config(environment, release)
         return self.compose_model(environment, model, *arguments, capture=capture)
 
-    def compose_model(self, environment, model, *arguments, capture=False):
-        path = self.local / "compose" / (environment + ".json")
+    def compose_model(self, environment, model, *arguments, capture=False, current=False):
+        path = self.local / "compose" / (environment + ("-current" if current else "") + ".json")
         write_json(path, compose_literals(model))
         private = [
             value
             for key, value in self.settings(environment).items()
             if any(word in key for word in ("PASSWORD", "SECRET", "TOKEN", "DATABASE_URL"))
+        ]
+        private += [
+            value
+            for service in model["services"].values()
+            for key, value in service.get("environment", {}).items()
+            if any(
+                word in key
+                for word in (
+                    "PASSWORD",
+                    "SECRET",
+                    "TOKEN",
+                    "CREDENTIAL",
+                    "DATABASE_URL",
+                    "REPOSITORY",
+                )
+            )
         ]
         return run(
             "docker",
@@ -762,18 +786,7 @@ class Operator:
 
     def current_compose(self, environment, *arguments, capture=False):
         _, model = self.current_model(environment)
-        path = self.local / "compose" / (environment + "-current.json")
-        write_json(path, compose_literals(model))
-        return run(
-            "docker",
-            "compose",
-            "--project-directory",
-            self.root,
-            "--file",
-            path,
-            *arguments,
-            capture=capture,
-        )
+        return self.compose_model(environment, model, *arguments, capture=capture, current=True)
 
     def require_dependencies(self, environment, service, model):
         for dependency in model["services"][service].get("depends_on", {}):
@@ -911,6 +924,12 @@ class Operator:
             if operation == "test" and os.environ.get("COVERAGE") == "1":
                 command += [
                     "--coverage",
+                    "--coverage.all=true",
+                    "--coverage.include=src/**/*.{ts,tsx}",
+                    "--coverage.exclude=src/**/__tests__/**",
+                    "--coverage.exclude=src/**/*.{test,spec}.{ts,tsx}",
+                    "--coverage.exclude=src/setupTests.ts",
+                    "--coverage.exclude=src/**/*.d.ts",
                     "--coverage.reporter=lcov",
                     "--coverage.reporter=json-summary",
                 ]
@@ -1111,9 +1130,6 @@ class Operator:
     def image_check(self):
         release = self.release()
         verify_seal(self.release_dir())
-        if not self.inputs("ephemeral").exists():
-            self.prepare("ephemeral")
-        self.config("ephemeral", release)
         for role, reference in release.get("image_ids", release["images"]).items():
             info = self.inspect_image(reference, release["platform"])
             if role in ("backend", "web", "backup"):
@@ -1240,7 +1256,6 @@ class Operator:
 
     def snapshots(self, environment):
         # Discovery must work on a replacement host before any release is loaded.
-        settings = self.settings(environment)
         output = os.environ.get("ENV_FILE")
         if output:
             path = self.root / output
@@ -1249,6 +1264,7 @@ class Operator:
                 "generated recovery inputs must remain under .local",
             )
             path.unlink(missing_ok=True)
+        settings = self.settings(environment)
         tool = os.environ.get("BACKUP_DISCOVERY_IMAGE", f"local/{self.project}-backup:discovery")
         # Explicit preparation owns building discovery tooling; discovery itself
         # never initializes or writes the backup repository.
@@ -1257,10 +1273,34 @@ class Operator:
         local_path = Path(
             settings.get("BACKUP_LOCAL_PATH", str(self.state_dir(environment) / "backups"))
         )
-        require(
-            local_path.exists(),
-            "configure existing backup repository access before discovery",
-        )
+        mounts = []
+        if environment == "ephemeral":
+            _, model = self.current_model(environment)
+            backup = model["services"]["backup"]
+            mount = next(item for item in backup["volumes"] if item["target"] == "/backups")
+            volume = model["volumes"][mount["source"]]["name"]
+            run("docker", "volume", "inspect", volume, capture=True)
+            mounts += ["--volume", f"{volume}:/backups:ro"]
+            repository = backup["environment"]["RESTIC_REPOSITORY"]
+            password = backup["environment"]["RESTIC_PASSWORD"]
+        else:
+            require(
+                local_path.exists(), "configure existing backup repository access before discovery"
+            )
+            mounts += ["--volume", f"{local_path}:/backups:ro"]
+        rclone_config = settings.get("BACKUP_RCLONE_CONFIG", "/config/rclone/rclone.conf")
+        if repository.startswith("rclone:"):
+            config_dir = Path(
+                settings.get(
+                    "BACKUP_RCLONE_CONFIG_DIR", str(self.state_dir(environment) / "rclone")
+                )
+            )
+            relative = Path(rclone_config).relative_to("/config/rclone")
+            require(
+                (config_dir / relative).is_file(),
+                "configure the existing rclone credentials before discovery",
+            )
+            mounts += ["--volume", f"{config_dir}:/config/rclone:ro"]
         command = [
             "docker",
             "run",
@@ -1270,8 +1310,9 @@ class Operator:
             "RESTIC_PASSWORD",
             "--env",
             "RESTIC_REPOSITORY",
-            "--volume",
-            f"{local_path}:/backups:ro",
+            "--env",
+            "RCLONE_CONFIG",
+            *mounts,
             "--entrypoint",
             "restic",
             tool,
@@ -1281,7 +1322,7 @@ class Operator:
             "--host",
             settings.get("BACKUP_HOST", self.project + "-" + environment),
             "--tag",
-            "postgres",
+            settings.get("BACKUP_TAG", "postgres"),
         ]
         raw = run(
             *command,
@@ -1289,6 +1330,7 @@ class Operator:
                 **os.environ,
                 "RESTIC_PASSWORD": password,
                 "RESTIC_REPOSITORY": repository,
+                "RCLONE_CONFIG": rclone_config,
             },
             capture=True,
         )
@@ -1306,16 +1348,23 @@ class Operator:
         revisions = [
             value.split(":", 1)[1] for value in tags if value.startswith("release-revision:")
         ]
+        identities = [
+            value.split(":", 1)[1] for value in tags if value.startswith("release-identity:")
+        ]
         require(
             len(revisions) == 1,
             "newest snapshot has missing or inconsistent release metadata",
         )
         rev = revision(revisions[0])
+        require(
+            len(identities) == 1 and re.fullmatch("[0-9a-f]{64}", identities[0]),
+            "newest snapshot has missing or inconsistent image identity",
+        )
         identifier = selected["id"]
         require(re.fullmatch("[0-9a-f]{64}", identifier), "invalid snapshot identity")
         atomic(
             path,
-            f"export BACKUP_SNAPSHOT={shlex.quote(identifier)}\nexport RELEASE_REVISION={shlex.quote(rev)}\n",
+            f"export BACKUP_SNAPSHOT={shlex.quote(identifier)}\nexport RELEASE_REVISION={shlex.quote(rev)}\nexport RELEASE_IDENTITY={shlex.quote(identities[0])}\n",
         )
         print(f"Selected snapshot {identifier} at release {rev}; inputs: {path}")
 
@@ -1432,7 +1481,7 @@ class Operator:
                     "validation evidence image set mismatch",
                 )
 
-    def up(self, environment, service=None):
+    def startup_inputs(self, environment, service=None):
         release = None if environment == "dev" else self.release()
         _, model = self.config(environment, release)
         require(not service or service in model["services"], "unknown service selector")
@@ -1442,17 +1491,44 @@ class Operator:
         if release:
             self.preflight_release(environment, release)
             self.retain(environment, release)
+        return release, model
+
+    def up(self, environment, service=None):
+        release, model = self.startup_inputs(environment, service)
         if service and service not in (self.app,):
-            self.compose(
-                environment,
-                "up",
-                "--detach",
-                "--no-build",
-                "--no-deps",
-                "--wait",
-                service,
-                release=release,
-            )
+            identifier = secrets.token_hex(16)
+            attempt = {
+                "id": identifier,
+                "revision": self.head(),
+                "service": service,
+                "images": {service: model["services"][service]["image"]},
+                "outcome": "started",
+            }
+            record = self.state_dir(environment) / "attempts" / (identifier + ".json")
+            write_json(record, attempt)
+            try:
+                self.compose(
+                    environment,
+                    "up",
+                    "--detach",
+                    "--no-build",
+                    "--pull",
+                    "never",
+                    "--no-deps",
+                    "--wait",
+                    service,
+                    release=release,
+                )
+                _, current = self.current_model(environment)
+                current["services"][service] = model["services"][service]
+                current.setdefault("volumes", {}).update(model.get("volumes", {}))
+                write_json(self.state_dir(environment) / "runtime.json", current)
+                attempt["outcome"] = "succeeded"
+            except (Rejected, OSError):
+                attempt["outcome"] = "failed"
+                raise
+            finally:
+                write_json(record, attempt)
             return
         attempt = {
             "id": datetime.datetime.now(datetime.UTC).strftime("%Y%m%dT%H%M%S")
@@ -1606,6 +1682,9 @@ class Operator:
                     "images": release["images"],
                     "platform": release["platform"],
                     "source": "local-runtime-checks",
+                    "profile": self.profile,
+                    "backup_profile": self.backup_profile,
+                    "monitoring": os.environ.get("MONITORING", "0") == "1",
                     "passed_at": time.time(),
                 },
             )
@@ -1928,6 +2007,11 @@ class Operator:
             read_json(directory / "manifest.json"), self.profile, self.architecture()
         )
         require(release["revision"] == rev, "downloaded release revision mismatch")
+        if os.environ.get("RELEASE_IDENTITY"):
+            require(
+                release_identity(release) == os.environ["RELEASE_IDENTITY"],
+                "release image set differs from the selected backup",
+            )
         run("git", "bundle", "verify", directory / "source.bundle", cwd=self.root, capture=True)
         heads = run(
             "git", "bundle", "list-heads", directory / "source.bundle", cwd=self.root, capture=True
@@ -2102,7 +2186,8 @@ class Operator:
         elif operation == "ci":
             self.ci()
         elif operation == "snapshots":
-            self.snapshots(environment)
+            with locked(self.state_dir(environment)):
+                self.snapshots(environment)
         elif operation in ("ps", "logs", "shell"):
             _, model = self.current_model(environment)
             require(not service or service in model["services"], "unknown service selector")
@@ -2116,18 +2201,13 @@ class Operator:
                     *([service] if service else []),
                 )
         else:
-            if (
-                environment == "ephemeral"
-                and operation == "up"
-                and not self.inputs(environment).exists()
-            ):
-                self.prepare(environment)
             with locked(self.state_dir(environment)):
                 if operation == "up":
                     self.up(environment, service)
                 elif operation == "down":
                     self.down(environment, service)
                 elif operation == "restart":
+                    self.startup_inputs(environment, service)
                     self.down(environment, service)
                     self.up(environment, service)
                 elif operation == "rm":

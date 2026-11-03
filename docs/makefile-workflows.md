@@ -1,8 +1,7 @@
 # Makefile workflows
 
-Proposed workflows for the Makefile redesign, using the command convention in
-[the command contract](makefile-design.md). These are design examples,
-not instructions for the current implementation. Existing command definitions
+Workflows using the command convention in
+[the command contract](makefile-design.md). Existing command definitions
 remain authoritative; the examples add no implicit build, test, or deploy steps.
 
 ## 0. First-time installation
@@ -120,6 +119,7 @@ make setup
 make check
 make build
 make image-check
+make prepare-ephemeral
 make up-ephemeral
 make integration-test-ephemeral
 make verify-ephemeral
@@ -142,6 +142,7 @@ make setup
 make check
 make build
 make image-check
+make prepare-ephemeral
 make up-ephemeral
 make integration-test-ephemeral
 make verify-ephemeral
@@ -256,6 +257,7 @@ Select the newest backup once and use its recorded revision, not the latest
 published release. Run in order, stopping at the first failure:
 
 ```sh
+make setup
 make snapshots-prod SELECT=newest ENV_FILE=.local/recovery.env
 . .local/recovery.env
 git switch --detach "$RELEASE_REVISION"
@@ -265,6 +267,7 @@ make image-check
 make restore-prod BACKUP_SNAPSHOT="$BACKUP_SNAPSHOT" CONFIRM=restore-prod
 make up-prod
 make verify-prod
+unset BACKUP_SNAPSHOT RELEASE_REVISION RELEASE_IDENTITY
 ```
 
 Snapshot discovery requires neither the lost host nor its deployment history.

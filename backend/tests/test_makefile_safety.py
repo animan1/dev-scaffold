@@ -56,10 +56,23 @@ def test_database_only_start_does_not_migrate_or_touch_other_services(
 ) -> None:
     op = operator_module.Operator(tmp_path)
     calls = []
-    monkeypatch.setattr(op, "config", lambda *a: (None, {"services": {"db": {}, "backend": {}}}))
+    monkeypatch.setattr(
+        op,
+        "config",
+        lambda *a: (
+            None,
+            {"services": {"db": {"image": "postgres@sha256:" + "a" * 64}, "backend": {}}},
+        ),
+    )
+    monkeypatch.setattr(op, "head", lambda: "a" * 40)
+    monkeypatch.setattr(op, "state_dir", lambda *a: tmp_path / "state")
     monkeypatch.setattr(op, "compose", lambda *a, **k: calls.append(a))
     op.up("dev", "db")
-    assert calls == [("dev", "up", "--detach", "--no-build", "--no-deps", "--wait", "db")]
+    assert calls == [
+        ("dev", "up", "--detach", "--no-build", "--pull", "never", "--no-deps", "--wait", "db")
+    ]
+    records = list((tmp_path / "state/attempts").glob("*.json"))
+    assert operator_module.read_json(records[0])["service"] == "db"
 
 
 @pytest.mark.parametrize("command", ["restore", "rollback"])
@@ -87,4 +100,21 @@ def test_failed_backup_prevents_migration(
     monkeypatch.setattr(op, "backup", failed)
     with pytest.raises(operator_module.Rejected, match="backup failed"):
         op.migrate("dev")
+    assert not calls
+
+
+def test_restart_rejects_invalid_release_before_stopping_services(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    monkeypatch.setattr(op, "state_dir", lambda *a: tmp_path / "state")
+    calls = []
+    monkeypatch.setattr(op, "down", lambda *a: calls.append(a))
+
+    def rejected(*args: object) -> None:
+        raise operator_module.Rejected("wrong release architecture")
+
+    monkeypatch.setattr(op, "startup_inputs", rejected)
+    with pytest.raises(operator_module.Rejected, match="architecture"):
+        op.dispatch("restart-prod")
     assert not calls

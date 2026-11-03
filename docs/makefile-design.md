@@ -1,8 +1,5 @@
 # Makefile command contract
 
-Proposed contract for the Makefile redesign. This document does not change
-existing targets. Implement the agreed contract in subsequent PRs.
-
 ## Command names
 
 Targets use `<command>[-<env>[-<container>]]`. The table lists supported forms.
@@ -52,7 +49,7 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | `down-<env>[-<container>]` | Selected services stopped, with configuration and data preserved. Without a container selector, stop the environment's services | Lifecycle |
 | `rm-<env>` | Environment containers and data removed | Lifecycle |
 | `backup-<env>` | Create an encrypted database snapshot with its database-compatible full release revision and immutable release identity stored in the backup repository, apply configured retention, and check backup integrity; no application deployment. Identify the logical deployment independently of the host name; reject an unknown compatible revision rather than inferring it from the checkout. Report the exact snapshot ID created | Data administration |
-| `snapshots-<env>` | List restorable database snapshots and their release revisions for the configured logical deployment; no repository initialization, snapshot creation, or application-data changes. With `SELECT=newest ENV_FILE=<path>`, select the newest snapshot once and atomically write owner-only shell-quoted exports of `BACKUP_SNAPSHOT` and `RELEASE_REVISION`; reject missing or inconsistent release metadata without falling back, and invalidate an existing output file on failure | Data administration |
+| `snapshots-<env>` | List restorable database snapshots and their release revisions for the configured logical deployment; no repository initialization, snapshot creation, or application-data changes. With `SELECT=newest ENV_FILE=<path>`, select the newest snapshot once and atomically write owner-only shell-quoted exports of `BACKUP_SNAPSHOT`, `RELEASE_REVISION`, and `RELEASE_IDENTITY`; require the recorded image set during recovery. Reject missing or inconsistent release metadata without falling back, and invalidate an existing output file on failure | Data administration |
 | `restore-<env>` | Replace the environment's database from `BACKUP_SNAPSHOT`, requiring an explicit snapshot ID and per-invocation `CONFIRM=restore-<env>`. Optional `BACKUP_SOURCE_ENV` selects another environment's repository and decryption inputs read-only; database credentials and storage remain those of the destination. Stop application writers before replacement and leave them stopped for explicit startup; use normal database startup and storage initialization. No application deployment or automatic migration reversal. **Invokes:** `down-<env>-<container>` for each configured writer, then `up-<env>-<container>` for the database service before restoring | Data administration |
 | `migrate-<env>` | Apply existing migration files using the environment's application runtime, only after a successful backup; no migration-file generation or application deployment. Backup failure prevents migration. **Invokes:** `backup-<env>` | Data administration |
 | `superuser-<env>` | Create an administrative application account interactively; no implicit migration or application deployment | Data administration |

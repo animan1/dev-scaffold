@@ -189,6 +189,63 @@ def test_image_capture_failure_preserves_previous_archive(
     assert not archive.with_suffix(".gz.pending").exists()
 
 
+def test_image_checks_never_prepare_or_render_an_environment(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    data = release()
+    monkeypatch.setattr(op, "release", lambda: data)
+    monkeypatch.setattr(op, "release_dir", lambda: tmp_path)
+    monkeypatch.setattr(operator_module, "verify_seal", lambda *a: None)
+    monkeypatch.setattr(operator_module, "seal_release", lambda *a: None)
+    monkeypatch.setattr(operator_module, "run", lambda *a, **k: None)
+    monkeypatch.setattr(
+        op,
+        "inspect_image",
+        lambda *a: {"Config": {"Labels": {"org.opencontainers.image.revision": "a" * 40}}},
+    )
+    monkeypatch.setattr(
+        op, "prepare", lambda *a: pytest.fail("image validation prepared an environment")
+    )
+    monkeypatch.setattr(
+        op, "config", lambda *a: pytest.fail("image validation rendered an environment")
+    )
+    op.image_check()
+    assert operator_module.read_json(tmp_path / "image-check.json")["revision"] == "a" * 40
+
+
+def test_newest_backup_metadata_failure_invalidates_prior_selection_without_fallback(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    op = operator_module.Operator(tmp_path)
+    repository = tmp_path / "backups"
+    repository.mkdir()
+    output = op.local / "recovery.env"
+    operator_module.atomic(output, "stale selection\n")
+    monkeypatch.setenv("SELECT", "newest")
+    monkeypatch.setenv("ENV_FILE", ".local/recovery.env")
+    monkeypatch.setattr(
+        op,
+        "settings",
+        lambda *a: {"BACKUP_PASSWORD": "test-key", "BACKUP_LOCAL_PATH": str(repository)},
+    )
+    monkeypatch.setattr(op, "state_dir", lambda *a: tmp_path / "state")
+    snapshots = [
+        {
+            "time": "2026-01-01T00:00:00Z",
+            "id": "a" * 64,
+            "tags": ["release-revision:" + "a" * 40, "release-identity:" + "b" * 64],
+        },
+        {"time": "2026-01-02T00:00:00Z", "id": "c" * 64, "tags": []},
+    ]
+    monkeypatch.setattr(operator_module, "run", lambda *a, **k: json.dumps(snapshots))
+    with pytest.raises(operator_module.Rejected, match="newest snapshot"):
+        op.snapshots("prod")
+    assert not output.exists()
+
+
 def test_prepared_setup_never_rebuilds_valid_tools(
     operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -214,7 +271,7 @@ def test_database_inputs_resolve_references_without_rewriting_credentials(
 ) -> None:
     op = operator_module.Operator(tmp_path)
     path = tmp_path / "private.env"
-    original = "DJANGO_SECRET_KEY=private\nPOSTGRES_USER=app\nPOSTGRES_PASSWORD=literal$@/secret\nPOSTGRES_DB=app\nDATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}\n"
+    original = "DJANGO_SECRET_KEY=private\nPOSTGRES_USER=app\nPOSTGRES_PASSWORD=literal$@/secret\nPOSTGRES_DB=app\nBACKUP_PASSWORD=backup-key\nDATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}\n"
     path.write_text(original.replace("@db:5432/", "@other:5432/") if mismatch else original)
     monkeypatch.setattr(op, "inputs", lambda *a: path)
     if mismatch:

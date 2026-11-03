@@ -40,6 +40,7 @@ Restore its original private configuration, credentials and durable host state;
 keep these separate from the release bundle. Then run:
 
 ```sh
+cd /deployment/dev-scaffold
 make download
 make setup
 make prepare-prod
