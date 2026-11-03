@@ -139,6 +139,20 @@ make backup-prod
 make snapshots-prod
 ```
 
+The configured backup worker periodically creates a backup and runs the same
+restore test as `backup-test-prod` after each successful backup. It records
+restore-test freshness for `monitor-check-prod`; monitoring does not perform the
+restore. To run the test on demand:
+
+```sh
+make backup-test-prod
+```
+
+This tests database restorability without stopping application writers. It uses
+resources on the existing database server and does not test application behavior
+or recovery on a replacement host. Use the ephemeral recovery sequence below
+for application-level validation.
+
 Replace `SNAPSHOT_ID` below with an ID from that list. Use an application checkout
 compatible with the chosen snapshot. First check recovery with disposable data:
 
