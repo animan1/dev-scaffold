@@ -80,7 +80,8 @@ Use `make check` to reproduce the installed pre-commit validation, or
 
 For local cache troubleshooting, use `make clean`.
 
-For an intentional dependency update:
+For an intentional dependency update, edit the declared package constraints or
+image source versions, then resolve their locks and pins:
 
 ```sh
 make deps-lock
@@ -88,7 +89,9 @@ make setup
 make check
 ```
 
-Commit the dependency declarations and lockfiles together before building a release.
+Commit dependency declarations, lockfiles, and image digest pins together before
+building a release. Use workflow 2's build and ephemeral validation for the
+updated images; `image-check` also reports their installed tool versions.
 
 After an intentional model change:
 
