@@ -26,6 +26,8 @@ import urllib.request
 from pathlib import Path
 
 from profile_metadata import metadata
+from release_bundle import Rejected as ArchiveRejected
+from release_bundle import validate_images
 from scaffold_support import (
     Rejected,
     atomic,
@@ -1964,9 +1966,6 @@ class Operator:
             )
 
     def download(self, rev=None, retained=None, expected_run=None):  # noqa: C901 -- ordered artifact preflight before image loading
-        from release_bundle import Rejected as ArchiveRejected
-        from release_bundle import validate_images
-
         rev = revision(rev or os.environ.get("RELEASE_REVISION") or self.head())
         directory = self.release_dir(rev)
         destination = directory
