@@ -75,6 +75,8 @@ make test
 ```
 
 Use `make format` for formatting and fixes, or `make check` for the complete gate.
+Use `make precommit` to reproduce the installed pre-commit validation, or
+`make ci` for the complete source and ephemeral release acceptance sequence.
 
 For local cache troubleshooting, use `make clean`.
 
@@ -144,7 +146,7 @@ On the production host, download that published release, then use its prepared
 checkout for the same production startup and verification as the local workflow:
 
 ```sh
-make download
+make download-latest
 make setup
 make up-prod
 make verify-prod
