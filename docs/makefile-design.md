@@ -43,7 +43,7 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | `hooks` | Install the repository's configured Git hooks for the current checkout; no hook execution, lockfile edits, or service startup | Setup |
 | `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded; shared across environments, with no application startup | Build |
 | `publish` | Upload the recorded build's images, committed deployment source, release manifest, and successful validation evidence; preserve their revision and immutable image identities | Artifact transfer |
-| `download` | Obtain the selected published release's recorded images, manifest, evidence, and deployment source; prepare the current deployment checkout at the recorded revision and validate completeness, integrity, and architecture, without changing running containers or application data | Artifact transfer |
+| `download` | Obtain the selected release's recorded images, manifest, evidence, and deployment source from retained local artifacts or publication; prepare the current deployment checkout at the recorded revision and validate completeness, integrity, and architecture, without changing running containers or application data. With `RELEASE_REVISION`, require that exact committed revision; fail if unavailable, without rebuilding or substituting another release | Artifact transfer |
 | `up-<env>[-<container>]` | Selected services running, matching the checked-out revision; retain configuration and volumes, and apply required migrations before application startup, without building or testing. Without a container selector, start all configured services and initialize dependencies. Migration failure stops startup; database changes are not automatically reversed. **Invokes:** `migrate-<env>` (before application startup) | Lifecycle |
 | `restart-<env>[-<container>]` | Stop and start selected services using normal startup behavior, preserving configuration and data; stop on failure. **Invokes:** `down-<env>[-<container>]`, then `up-<env>[-<container>]` with the same selectors | Lifecycle |
 | `down-<env>[-<container>]` | Selected services stopped, with configuration and data preserved. Without a container selector, stop the environment's services | Lifecycle |
@@ -72,17 +72,23 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | `help` | List documented commands supported by the selected profile, their selector forms, and required inputs; no setup, service changes, or secret values. Default for bare `make` | Access and inspection |
 | `profiles` | Print JSON with selected profile names at `selected.application` and `selected.backup`, and configured validation profile-name arrays at `validation.application` and `validation.backup`; no configuration edits, setup, or service changes | Access and inspection |
 | `config-<env>` | Write the resolved Compose model, including configured optional services, to owner-only `.local/config/<env>.json`; print only its path. No service changes, builds, image pulls, or registry/API calls | Access and inspection |
+| `history-<env>` | List recorded deployment attempts, including previous and intended revisions, immutable image identities, pre-migration snapshot IDs, and outcomes; no deployment or data changes, and no secret values | Access and inspection |
 | `ps-<env>[-<container>]` | Display container status for the selected service, or all environment services when omitted | Access and inspection |
 | `logs-<env>[-<container>]` | Display container logs for the selected service, or all environment services when omitted | Access and inspection |
 | `shell-<env>[-<container>]` | Open a shell in the selected service's container, defaulting to the application service when omitted | Access and inspection |
 | `console-<env>` | Open the environment's interactive application/framework console | Access and inspection |
 
-The production host needs registry access and its own existing configuration and
-credentials. Downloading does not build images or rerun the build host's tests.
+Downloading published artifacts needs registry access; the production host uses
+its own existing configuration and credentials. Downloading does not build images
+or rerun the build host's tests.
 Subsequent commands run from that same checkout. Selecting or checking
 out another revision alone does not change a running deployment.
 
 SSH transfer and remote coordination belong to infra.
+
+Before migrations, `up-<env>` records the previous release and the snapshot ID
+returned by its backup. Keep that record available after failed updates as well
+as successful ones. `backup-<env>` reports the exact snapshot ID it created.
 
 ## Validation boundaries
 

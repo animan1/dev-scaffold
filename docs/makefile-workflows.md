@@ -174,6 +174,39 @@ make verify-prod
 This is database recovery, not release recovery. Restoring a snapshot does not
 select an application image or make migrations reversible.
 
+## 5. Rollback after an update
+
+On the deployment host, discover the previous revision and the snapshot taken
+before the update's migrations:
+
+```sh
+make history-prod
+make snapshots-prod
+```
+
+From the update's history record, use the full previous revision as `REVISION`
+and its pre-migration snapshot ID as `SNAPSHOT_ID`. Do not infer either from
+"latest": scheduled backups and later deployment attempts can change it.
+Stop at the first failure:
+
+```sh
+make download RELEASE_REVISION=REVISION
+make setup
+make image-check
+make restore-prod BACKUP_SNAPSHOT=SNAPSHOT_ID CONFIRM=restore-prod
+make up-prod
+make verify-prod
+```
+
+The selected release supplies matching deployment source and recorded images;
+it must still exist locally or in publication. Restore stops application writers
+and replaces the database with the selected snapshot, discarding subsequent
+database writes. Startup uses the normal migration workflow for that revision.
+Configuration and volumes retain their identity. This is an explicit database
+recovery, not a reversal of migrations. If the current schema and data are known
+to be compatible with the previous release, omit `restore-prod` for an
+application-only rollback.
+
 ## Service-level operations
 
 Examples using the dummy project's Compose service names, run independently:
