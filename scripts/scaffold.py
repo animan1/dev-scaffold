@@ -154,6 +154,20 @@ class Operator:
             ),
             "incomplete private environment inputs",
         )
+        url = values.get("DATABASE_URL", "")
+        for key in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"):
+            url = url.replace("${" + key + "}", urllib.parse.quote(values[key], safe=""))
+        parsed = urllib.parse.urlsplit(url)
+        require(
+            parsed.scheme in ("postgres", "postgresql")
+            and parsed.hostname == "db"
+            and parsed.port in (None, 5432)
+            and urllib.parse.unquote(parsed.username or "") == values["POSTGRES_USER"]
+            and urllib.parse.unquote(parsed.password or "") == values["POSTGRES_PASSWORD"]
+            and urllib.parse.unquote(parsed.path.removeprefix("/")) == values["POSTGRES_DB"],
+            "DATABASE_URL must match the configured database service and credentials",
+        )
+        values["DATABASE_URL"] = url
         return values
 
     def state_dir(self, environment):
@@ -846,7 +860,10 @@ class Operator:
             "format-check": [
                 ("ruff", "format", "--config", project, "--check", ".", *SCRIPT_SOURCES)
             ],
-            "lint": [("ruff", "check", "--config", project, ".", *SCRIPT_SOURCES)],
+            "lint": [
+                ("python", "scripts/check_no_any.py"),
+                ("ruff", "check", "--config", project, ".", *SCRIPT_SOURCES),
+            ],
             "typecheck": [("mypy", "--config-file", project, ".")],
             "migrations-check": [
                 ("python", "-m", "app.manage", "makemigrations", "--check", "--dry-run")
@@ -1648,12 +1665,14 @@ class Operator:
 
     def remove(self, environment):
         # Namespace checks happen before Compose sees a destructive request.
-        path, model = self.config(environment)
+        path, model = self.current_model(environment)
         require(
             model["name"] == self.project + "-" + environment,
             "cleanup namespace mismatch",
         )
-        self.compose(environment, "down", "--volumes", "--remove-orphans")
+        self.current_compose(environment, "down", "--volumes", "--remove-orphans")
+        if environment == "ephemeral":
+            shutil.rmtree(self.state_dir(environment), ignore_errors=False)
 
     def dependencies(self):
         path = self.root / "deploy/dependencies.json"
@@ -2032,7 +2051,11 @@ class Operator:
                 "#!/bin/sh\nexec make --no-print-directory check\n",
             )
             (directory / "pre-commit").chmod(0o700)
-            self.git("config", "core.hooksPath", str(directory))
+            previous = self.git("config", "--local", "--default", "", "--get", "core.hooksPath")
+            self.git("config", "extensions.worktreeConfig", "true")
+            self.git("config", "--worktree", "core.hooksPath", str(directory))
+            if previous == str(directory):
+                self.git("config", "--local", "--unset", "core.hooksPath")
         elif operation == "check":
             self.check()
         elif operation in (

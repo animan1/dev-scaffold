@@ -208,6 +208,25 @@ def test_prepared_setup_never_rebuilds_valid_tools(
     assert not any(command[:2] == ("docker", "build") for command in commands)
 
 
+@pytest.mark.parametrize("mismatch", [False, True])
+def test_database_inputs_resolve_references_without_rewriting_credentials(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mismatch: bool
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    path = tmp_path / "private.env"
+    original = "DJANGO_SECRET_KEY=private\nPOSTGRES_USER=app\nPOSTGRES_PASSWORD=literal$@/secret\nPOSTGRES_DB=app\nDATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}\n"
+    path.write_text(original.replace("@db:5432/", "@other:5432/") if mismatch else original)
+    monkeypatch.setattr(op, "inputs", lambda *a: path)
+    if mismatch:
+        with pytest.raises(operator_module.Rejected, match="DATABASE_URL must match"):
+            op.settings("prod")
+    else:
+        values = op.settings("prod")
+        assert values["POSTGRES_PASSWORD"] == "literal$@/secret"
+        assert values["DATABASE_URL"] == "postgresql://app:literal%24%40%2Fsecret@db:5432/app"
+        assert path.read_text() == original
+
+
 def test_cross_environment_restore_keeps_source_read_only_and_target_credentials(
     operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

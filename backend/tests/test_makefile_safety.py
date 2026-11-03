@@ -44,7 +44,7 @@ def test_cleanup_rejects_another_environments_project(
 ) -> None:
     op = operator_module.Operator(tmp_path)
     calls = []
-    monkeypatch.setattr(op, "config", lambda *a: (None, {"name": "dev-scaffold-prod"}))
+    monkeypatch.setattr(op, "current_model", lambda *a: (None, {"name": "dev-scaffold-prod"}))
     monkeypatch.setattr(op, "compose", lambda *a, **k: calls.append(a))
     with pytest.raises(operator_module.Rejected, match="namespace"):
         op.remove("ephemeral")
