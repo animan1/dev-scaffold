@@ -60,6 +60,7 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | `migrations-check` | Check model changes have matching migration source files; no file generation or database migration | Validation |
 | `framework-check` | Run configured framework/configuration checks using isolated check configuration; no persistent application-data or schema changes | Validation |
 | `test` | Run source test suites for all selected application components once, using isolated test data; fail on test failure. With `COVERAGE=1`, also produce coverage reports and enforce configured thresholds in the same run; otherwise no coverage gate. No other source-quality gates or persistent deployment changes | Validation |
+| `image-check` | Validate the recorded image set's immutable identities, architecture, application revision labels, and configured runtime requirements such as non-root users and required tools; no rebuild, pull, or changes to running deployments or their data | Validation |
 | `verify-<env>` | Read-only checks of health, expected revision, and HTTP/static smoke behavior; no container lifecycle changes, schema migration, or application-data writes | Validation |
 | `monitor-check-<env>` | Run one pass of configured operational checks, report results, update monitoring state, and emit configured transition notifications or heartbeats; no service restart, migration, image build, backup, or restore | Validation |
 | `integration-test-<env>` | Application integration tests, including writes to its data | Validation |
