@@ -153,7 +153,7 @@ def test_sealed_bundle_corruption_is_rejected_before_docker_access(
     monkeypatch.setattr(op, "architecture", lambda: "linux/arm64")
     directory = op.release_dir()
     directory.mkdir(parents=True)
-    for name in ("manifest.json", "source.tar", "images.tar.gz"):
+    for name in ("manifest.json", "source.tar", "source.bundle", "images.tar.gz"):
         (directory / name).write_bytes(b"original")
     operator_module.seal_release(directory)
     (directory / "images.tar.gz").write_bytes(b"corrupt")
@@ -187,3 +187,76 @@ def test_image_capture_failure_preserves_previous_archive(
         operator_module.save_images(archive, ["sha256:" + "a" * 64])
     assert archive.read_bytes() == b"previous"
     assert not archive.with_suffix(".gz.pending").exists()
+
+
+def test_prepared_setup_never_rebuilds_valid_tools(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    monkeypatch.setattr(op, "head", lambda: "a" * 40)
+    monkeypatch.setattr(op, "architecture", lambda: "linux/arm64")
+    monkeypatch.setattr(op, "tooling_inputs", lambda *a: "inputs")
+    monkeypatch.setattr(op, "backup_inputs", lambda: "inputs")
+    monkeypatch.setattr(
+        op,
+        "inspect_image",
+        lambda *a: {"Config": {"Labels": {"io.scaffold.tooling-inputs": "inputs"}}},
+    )
+    commands = []
+    monkeypatch.setattr(operator_module, "run", lambda *a, **k: commands.append(a))
+    op.setup()
+    assert not any(command[:2] == ("docker", "build") for command in commands)
+
+
+def test_cross_environment_restore_keeps_source_read_only_and_target_credentials(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import copy
+
+    op = operator_module.Operator(tmp_path)
+    source = {
+        "services": {
+            "backup": {
+                "environment": {
+                    "POSTGRES_PASSWORD": "production-db",
+                    "RESTIC_PASSWORD": "production-key",
+                    "RESTIC_REPOSITORY": "/backups",
+                    "BACKUP_HOST": "production",
+                },
+                "volumes": [
+                    {"type": "bind", "source": "/production/backups", "target": "/backups"}
+                ],
+            }
+        },
+        "volumes": {},
+    }
+    destination = {
+        "services": {
+            "backup": {
+                "environment": {
+                    "POSTGRES_PASSWORD": "disposable-db",
+                    "RESTIC_PASSWORD": "disposable-key",
+                },
+                "volumes": [{"type": "volume", "source": "status", "target": "/backup-status"}],
+            }
+        },
+        "volumes": {"status": {}},
+    }
+    original = copy.deepcopy(source)
+    monkeypatch.setattr(op, "release", lambda: {})
+    monkeypatch.setattr(op, "config", lambda *a: (None, copy.deepcopy(destination)))
+    monkeypatch.setattr(op, "current_model", lambda *a: (None, source))
+    calls = []
+    monkeypatch.setattr(
+        op,
+        "compose_model",
+        lambda env, model, *args, **kwargs: calls.append((copy.deepcopy(model), args)),
+    )
+    op.backup("ephemeral", "restore", "a" * 64, capture=True, source="prod")
+    assert source == original
+    service = calls[-1][0]["services"]["backup"]
+    assert service["environment"]["POSTGRES_PASSWORD"] == "disposable-db"
+    assert service["environment"]["RESTIC_PASSWORD"] == "production-key"
+    assert service["environment"]["BACKUP_READ_ONLY"] == "1"
+    assert service["volumes"][-1]["read_only"] is True
+    assert calls[0][1][-1].endswith(" /backup-status")

@@ -229,6 +229,23 @@ class Operator:
             digest.update(name.encode() + b"\0" + (self.root / name).read_bytes())
         return digest.hexdigest()
 
+    def prepared_tool(self, image, expected):
+        try:
+            info = self.inspect_image(image, self.architecture())
+        except Rejected:
+            return False
+        return (info["Config"].get("Labels") or {}).get("io.scaffold.tooling-inputs") == expected
+
+    def backup_inputs(self):
+        digest = hashlib.sha256()
+        for name in (
+            "profiles/immutable-backup/Dockerfile",
+            "profiles/immutable-backup/backup.sh",
+            "deploy/dependencies.json",
+        ):
+            digest.update((self.root / name).read_bytes())
+        return digest.hexdigest()
+
     def setup(self):
         cached = self.release_dir() / "manifest.json"
         release = self.release() if cached.exists() else None
@@ -239,7 +256,7 @@ class Operator:
                 release.get("image_ids", release["images"])["tooling"],
                 self.tool_image,
             )
-        else:
+        elif not self.prepared_tool(self.tool_image, self.tooling_inputs()):
             run(
                 "docker",
                 "build",
@@ -265,7 +282,7 @@ class Operator:
                     release.get("image_ids", release["images"])["frontend-tooling"],
                     self.node_image,
                 )
-            else:
+            elif not self.prepared_tool(self.node_image, self.tooling_inputs(True)):
                 run(
                     "docker",
                     "build",
@@ -306,6 +323,13 @@ class Operator:
                 release.get("image_ids", release["images"])["backup"],
                 f"local/{self.project}-backup:discovery",
             )
+        elif self.prepared_tool(f"local/{self.project}-backup:discovery", self.backup_inputs()):
+            run(
+                "docker",
+                "tag",
+                f"local/{self.project}-backup:discovery",
+                f"local/{self.project}-backup:{self.head()}",
+            )
         else:
             pins = read_json(self.root / "deploy/dependencies.json")["images"]
             options = []
@@ -320,6 +344,8 @@ class Operator:
                 "--platform",
                 self.architecture(),
                 *options,
+                "--label",
+                "io.scaffold.tooling-inputs=" + self.backup_inputs(),
                 "--file",
                 "profiles/immutable-backup/Dockerfile",
                 "--tag",
@@ -681,9 +707,7 @@ class Operator:
             {
                 "BACKUP_RELEASE_REQUIRED": "0" if environment == "dev" else "1",
                 "BACKUP_INITIAL_REVISION": self.head(),
-                "BACKUP_INITIAL_IDENTITY": hashlib.sha256(
-                    json.dumps(release or {}, sort_keys=True).encode()
-                ).hexdigest(),
+                "BACKUP_INITIAL_IDENTITY": release_identity(release) if release else "",
             }
         )
 
@@ -941,6 +965,7 @@ class Operator:
                     "source validation belongs to another profile",
                 )
                 write_json(directory / "source-check.json", check)
+                seal_release(directory)
             print(f"Reusing immutable release {rev} for {platform}")
             return
         directory.mkdir(parents=True, exist_ok=True)
@@ -1052,6 +1077,7 @@ class Operator:
         }
         validate_release(manifest)
         (directory / "source.tar").write_bytes(source)
+        run("git", "bundle", "create", directory / "source.bundle", "HEAD", cwd=self.root)
         write_json(directory / "manifest.json", manifest)
         evidence = self.local / "checks" / (rev + ".json")
         if evidence.exists():
@@ -1107,6 +1133,7 @@ class Operator:
                 "source": "local-image-check",
             },
         )
+        seal_release(self.release_dir())
 
     def backup(  # noqa: C901 -- snapshot operations share one private helper model
         self,
@@ -1565,6 +1592,7 @@ class Operator:
                     "passed_at": time.time(),
                 },
             )
+            seal_release(self.release_dir())
 
     def rollback(self, environment):
         require(
@@ -1718,6 +1746,7 @@ class Operator:
     def bundle_metadata(self):
         release = self.release()
         directory = self.release_dir()
+        verify_seal(directory)
         evidence = {
             "source": read_json(directory / "source-check.json"),
             "images": read_json(directory / "image-check.json"),
@@ -1737,7 +1766,7 @@ class Operator:
                 "validation image set mismatch",
             )
         write_json(directory / "evidence.json", evidence)
-        names = ("manifest.json", "source.tar", "evidence.json")
+        names = ("manifest.json", "source.tar", "source.bundle", "evidence.json")
         hashes = {
             name: hashlib.sha256((directory / name).read_bytes()).hexdigest() for name in names
         }
@@ -1776,12 +1805,12 @@ class Operator:
             }
         directory = self.release_dir()
         write_json(directory / "manifest.json", release)
-        seal_release(directory)
         # Evidence records the built content IDs, even when publication adds OCI references.
         for file in ("image-check.json", "runtime-check.json"):
             check = read_json(directory / file)
             check["images"] = release["images"]
             write_json(directory / file, check)
+        seal_release(directory)
         artifact = self.bundle_metadata()
         name = "release-" + self.profile + "-" + release["platform"].replace("/", "-") + ".tar"
         publish_path = directory / name
@@ -1864,6 +1893,7 @@ class Operator:
                 expected = {
                     "manifest.json",
                     "source.tar",
+                    "source.bundle",
                     "evidence.json",
                     "checksums.json",
                 }
@@ -1879,6 +1909,11 @@ class Operator:
             read_json(directory / "manifest.json"), self.profile, self.architecture()
         )
         require(release["revision"] == rev, "downloaded release revision mismatch")
+        run("git", "bundle", "verify", directory / "source.bundle", cwd=self.root, capture=True)
+        heads = run(
+            "git", "bundle", "list-heads", directory / "source.bundle", cwd=self.root, capture=True
+        )
+        require(heads.split() == [rev, "HEAD"], "source bundle revision mismatch")
         if expected_run:
             require(
                 release.get("publication")
@@ -1898,12 +1933,12 @@ class Operator:
         if (directory / "checksums.json").exists():
             checksums = read_json(directory / "checksums.json")
             require(
-                set(checksums) == {"manifest.json", "source.tar", "evidence.json"},
+                set(checksums) == {"manifest.json", "source.tar", "source.bundle", "evidence.json"},
                 "incomplete metadata checksums",
             )
             for name, digest in checksums.items():
                 require(
-                    name in ("manifest.json", "source.tar", "evidence.json"),
+                    name in ("manifest.json", "source.tar", "source.bundle", "evidence.json"),
                     "invalid checksum path",
                 )
                 require(

@@ -187,7 +187,12 @@ backup_once() {
   after="$(database_release)"
   [[ "${before}" = "${after}" ]] || { echo 'Database release changed during backup; retry after migrations.' >&2; return 1; }
   release_revision="$(jq -r '.revision // empty' <<<"${before}")"
-  identity="$(printf '%s' "${before}" | sha256sum | cut -d ' ' -f 1)"
+  if jq -e '.release != null' <<<"${before}" >/dev/null; then
+    identity="$(jq -cS '.release | {revision,profile,platform,images:(.image_ids // .images)}' <<<"${before}")"
+    identity="$(printf '%s' "${identity}" | sha256sum | cut -d ' ' -f 1)"
+  else
+    identity="$(jq -r '.token // empty' <<<"${before}")"
+  fi
   local tags=()
   if [[ -n "${release_revision}" ]]; then
     tags+=(--tag "release-revision:${release_revision}" --tag "release-identity:${identity}")
@@ -238,6 +243,7 @@ create_verification_database() {
 }
 
 verify_restore() {
+  retention_lock
   require_repository
   local snapshot
   snapshot="$(restic snapshots --host "${BACKUP_HOST}" --tag "${BACKUP_TAG}" --latest 1 --json | jq -er '.[0].id')"
@@ -310,6 +316,8 @@ restore_database() {
   fi
 
   [[ "${BACKUP_RESTORE_SNAPSHOT:-}" =~ ^[0-9a-f]{64}$ ]] || { echo 'Exact snapshot ID required.' >&2; return 1; }
+
+  retention_lock
 
   require_repository
   cleanup_restore_file() {

@@ -86,7 +86,9 @@ def write_json(path, value):
 def release_identity(release):
     data = {key: release[key] for key in ("revision", "profile", "platform")}
     data["images"] = release.get("image_ids", release["images"])
-    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def save_images(path, identities):
@@ -139,7 +141,13 @@ def read_json(path):
 def seal_release(directory):
     directory = Path(directory)
     hashes = {}
-    for name in ("manifest.json", "source.tar", "images.tar.gz"):
+    names = {"manifest.json", "source.tar", "source.bundle", "images.tar.gz"}
+    names.update(
+        name
+        for name in ("source-check.json", "image-check.json", "runtime-check.json")
+        if (directory / name).exists()
+    )
+    for name in sorted(names):
         with (directory / name).open("rb") as stream:
             hashes[name] = hashlib.file_digest(stream, "sha256").hexdigest()
         (directory / name).chmod(0o600)
@@ -149,8 +157,14 @@ def seal_release(directory):
 def verify_seal(directory):
     directory = Path(directory)
     hashes = read_json(directory / "integrity.json")
+    expected = {"manifest.json", "source.tar", "source.bundle", "images.tar.gz"}
+    expected.update(
+        name
+        for name in ("source-check.json", "image-check.json", "runtime-check.json")
+        if (directory / name).exists()
+    )
     require(
-        set(hashes) == {"manifest.json", "source.tar", "images.tar.gz"},
+        set(hashes) == expected,
         "incomplete release integrity record",
     )
     for name, expected in hashes.items():

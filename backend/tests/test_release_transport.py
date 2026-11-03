@@ -48,6 +48,8 @@ def test_release_build_targets_platform_and_labels_exact_revision(
 
     def execute(*args: object, **kwargs: object) -> None:
         commands.append(args)
+        if args[:3] == ("git", "bundle", "create"):
+            Path(str(args[3])).write_bytes(b"committed history")
         if args[:3] == ("docker", "image", "save"):
             Path(str(args[args.index("--output") + 1])).write_bytes(b"image archive")
 

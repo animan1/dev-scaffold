@@ -7,7 +7,8 @@ remain authoritative; the examples add no implicit build, test, or deploy steps.
 
 ## 0. First-time installation
 
-Infra prepares the host with Git, Make, and Docker with Compose, then obtains
+Infra prepares the host with Git, Make, Python 3.12+ (standard-library
+orchestration only), and Docker with Compose, then obtains
 the tenant's deployment checkout. From that
 checkout, inspect the selected profiles and prepare their tooling/dependencies:
 
@@ -110,6 +111,9 @@ For interactive administration of the running development application, use
 
 On one host, with the intended source committed and production configuration
 available, run in order and stop at the first failure:
+
+This is also the hotfix workflow. Preserve the committed hotfix and reconcile it
+through the normal PR workflow after deployment; deployment does not replace that follow-up.
 
 ```sh
 make setup
