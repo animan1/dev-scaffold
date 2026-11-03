@@ -202,6 +202,39 @@ recovery, not a reversal of migrations. If the current schema and data are known
 to be compatible with the previous release, use `download RELEASE_REVISION=REVISION`,
 `setup`, `image-check`, `up-prod`, and `verify-prod` for an application-only rollback.
 
+## 6. Disaster recovery on a new host
+
+Infra prepares the replacement host with Docker, Make, a deployment checkout,
+the original logical deployment identity, configuration and credentials, backup
+repository access and decryption keys, and registry access. The matching release
+artifacts must be retained off-host, including locally built releases. Restore
+any application-specific non-database persistent data through its own procedure.
+Keep traffic and writers on the old host fenced off before cutover.
+
+Select the newest backup once and use its recorded revision, not the latest
+published release. Run in order, stopping at the first failure:
+
+```sh
+make snapshots-prod SELECT=newest ENV_FILE=.local/recovery.env
+. .local/recovery.env
+make download RELEASE_REVISION="$RELEASE_REVISION"
+make setup
+make image-check
+make restore-prod BACKUP_SNAPSHOT="$BACKUP_SNAPSHOT" CONFIRM=restore-prod
+make up-prod
+make verify-prod
+```
+
+Snapshot discovery requires neither the lost host nor its deployment history.
+Missing release metadata or unavailable matching artifacts stop recovery rather
+than selecting an older backup, rebuilding, or guessing a compatible revision.
+Restore invokes the normal service-scoped lifecycle commands to stop writers and
+start the database (`down-prod-<writer>` and `up-prod-db` for the dummy project).
+Database-only startup does not migrate or start the application; `up-prod`
+follows only after successful restore. Infra directs traffic to
+the replacement after verification. Database writes after the selected snapshot
+are not recovered by this workflow.
+
 ## Service-level operations
 
 Examples using the dummy project's Compose service names, run independently:
