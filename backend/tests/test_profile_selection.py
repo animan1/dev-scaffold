@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -40,7 +41,10 @@ def test_committed_profile_selects_its_make_and_ci_contracts() -> None:
     }
 
     assert selected_profile in ci_profiles
-    assert _make("ci-profiles").stdout.strip().split() == ci_profiles
+    metadata = json.loads(_make("profiles").stdout)
+    assert metadata["selected"]["application"] == selected_profile
+    assert metadata["selected"]["backup"] == "none"
+    assert metadata["validation"]["application"] == ci_profiles
     assert expected_compose[selected_profile] in _make("--dry-run", "up").stdout
 
 
@@ -55,8 +59,9 @@ def test_ci_routes_profiles_without_duplicate_pr_push_runs() -> None:
     workflow = (_repository_root() / ".github/workflows/ci.yml").read_text()
 
     assert "branches: [main]" in workflow
-    assert "make --no-print-directory ci-profiles" in workflow
-    assert "make --no-print-directory selected-profile" in workflow
+    assert "make --no-print-directory profiles" in workflow
+    assert ".validation.application" in workflow
+    assert ".selected.application" in workflow
     assert "contains(needs.profile-selection.outputs.ci-profiles, 'react-vite')" in workflow
     assert (
         "contains(needs.profile-selection.outputs.ci-profiles, 'server-rendered-django')"
@@ -65,9 +70,7 @@ def test_ci_routes_profiles_without_duplicate_pr_push_runs() -> None:
     server_job = workflow.split("  server-rendered-profile:", 1)[1].split("\n  backend:", 1)[0]
     assert "SCAFFOLD_PROFILE ?= server-rendered-django" in server_job
     assert "CI_PROFILES ?= server-rendered-django" in server_job
-    assert (
-        'test "$(make --no-print-directory ci-profiles)" = "server-rendered-django"' in server_job
-    )
+    assert "make --no-print-directory profiles | jq -r '.selected.application'" in server_job
     assert "run: make verify" in server_job
     assert "SCAFFOLD_PROFILE:" not in server_job
     assert "pnpm" not in server_job

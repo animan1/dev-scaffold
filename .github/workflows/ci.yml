@@ -17,9 +17,10 @@ jobs:
       - uses: actions/checkout@v4
       - id: profiles
         run: |
-          echo "backup=$(make --no-print-directory ci-backup-profiles)" >> "$GITHUB_OUTPUT"
-          echo "value=$(make --no-print-directory ci-profiles)" >> "$GITHUB_OUTPUT"
-          echo "selected=$(make --no-print-directory selected-profile)" >> "$GITHUB_OUTPUT"
+          metadata="$(make --no-print-directory profiles)"
+          echo "backup=$(jq -r '.validation.backup | join(" ")' <<< "$metadata")" >> "$GITHUB_OUTPUT"
+          echo "value=$(jq -r '.validation.application | join(" ")' <<< "$metadata")" >> "$GITHUB_OUTPUT"
+          echo "selected=$(jq -r '.selected.application' <<< "$metadata")" >> "$GITHUB_OUTPUT"
 
   server-rendered-profile:
     needs: profile-selection
@@ -36,7 +37,7 @@ jobs:
             'SCAFFOLD_PROFILE ?= server-rendered-django' \
             'CI_PROFILES ?= server-rendered-django' \
             > .scaffold-profile
-          test "$(make --no-print-directory ci-profiles)" = "server-rendered-django"
+          test "$(make --no-print-directory profiles | jq -r '.selected.application')" = "server-rendered-django"
 
       - name: Verify the downstream profile through its shared Make contract
         env:
