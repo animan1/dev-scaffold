@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import sys
 import time
 from pathlib import Path
@@ -41,6 +40,27 @@ GATES = (
     "migrations",
     "format",
 )
+
+GENERATED_OWNERSHIP = """
+import os
+import sys
+from pathlib import Path
+uid, gid = map(int, sys.argv[1:])
+for name in ('backend/.coverage', 'backend/coverage.xml', 'backend/.pytest_cache',
+             'backend/.mypy_cache', 'backend/.ruff_cache', 'frontend/coverage'):
+    path = Path('/workspace') / name
+    if path.is_symlink() or not path.exists():
+        continue
+    paths = [path]
+    if path.is_dir():
+        paths.extend(Path(base) / child
+                     for base, dirs, files in os.walk(path, followlinks=False)
+                     for child in dirs + files)
+    for item in paths:
+        info = item.lstat()
+        if (info.st_uid, info.st_gid) != (uid, gid):
+            os.chown(item, uid, gid, follow_symlinks=False)
+"""
 
 
 class SourceOperator:
@@ -135,6 +155,8 @@ class SourceOperator:
             "run",
             "--rm",
             "--pull=never",
+            "--user",
+            f"{os.getuid()}:{os.getgid()}",
             "--init",
             "--volume",
             f"{self.root}:/workspace",
@@ -381,6 +403,28 @@ class SourceOperator:
                 ".",
                 cwd=self.root,
             )
+        # Only generated check outputs are repaired; source, secrets and app data
+        # retain their existing ownership. Isolated Python loads no project code.
+        self.execute(
+            "docker",
+            "run",
+            "--rm",
+            "--pull=never",
+            "--network",
+            "none",
+            "--user",
+            "0:0",
+            "--volume",
+            f"{self.root}:/workspace",
+            self.tool_image,
+            "python",
+            "-I",
+            "-S",
+            "-c",
+            GENERATED_OWNERSHIP,
+            str(os.getuid()),
+            str(os.getgid()),
+        )
         if self.profile == "react-vite":
             if release and "frontend-tooling" in release["images"]:
                 self.execute(
@@ -410,17 +454,35 @@ class SourceOperator:
             cache.mkdir(parents=True, exist_ok=True)
             # This directory contains only regenerated container dependencies.
             if (cache / "node_modules").exists():
-                shutil.rmtree(cache / "node_modules")
+                self.execute(
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--pull=never",
+                    "--network",
+                    "none",
+                    "--user",
+                    "0:0",
+                    "--volume",
+                    f"{cache}:/cache",
+                    self.node_image,
+                    "rm",
+                    "-rf",
+                    "/cache/node_modules",
+                )
             self.execute(
                 "docker",
                 "run",
                 "--rm",
                 "--pull=never",
+                "--user",
+                f"{os.getuid()}:{os.getgid()}",
                 "--volume",
                 f"{cache}:/cache",
                 self.node_image,
                 "cp",
                 "-a",
+                "--no-preserve=ownership",
                 "/opt/frontend/node_modules",
                 "/cache/node_modules",
             )
