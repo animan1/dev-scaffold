@@ -1,6 +1,8 @@
-FROM ghcr.io/astral-sh/uv:0.8.17 AS uv
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
+ARG PYTHON_IMAGE=python:3.12.11-slim-bookworm
+FROM ${UV_IMAGE} AS uv
 
-FROM python:3.12.11-slim-bookworm AS base
+FROM ${PYTHON_IMAGE} AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -13,7 +15,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --create-home app
 
-COPY --from=uv /uv /uvx /usr/local/bin/
+COPY --from=uv /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
 
 WORKDIR /workspace/profiles/server-rendered-django
 COPY profiles/server-rendered-django/pyproject.toml profiles/server-rendered-django/uv.lock ./

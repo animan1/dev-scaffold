@@ -1,4 +1,5 @@
-FROM nginx:1.27.5-alpine
+ARG NGINX_IMAGE=nginx:1.27.5-alpine
+FROM ${NGINX_IMAGE} AS runtime
 
 RUN rm -f /etc/nginx/conf.d/default.conf \
     && mkdir -p /tmp/nginx/client-body /tmp/nginx/fastcgi /tmp/nginx/proxy \
