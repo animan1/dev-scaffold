@@ -71,6 +71,6 @@ def test_ci_routes_profiles_without_duplicate_pr_push_runs() -> None:
     assert "SCAFFOLD_PROFILE ?= server-rendered-django" in server_job
     assert "CI_PROFILES ?= server-rendered-django" in server_job
     assert "make --no-print-directory profiles | jq -r '.selected.application'" in server_job
-    assert "run: make verify" in server_job
+    assert "run: make setup check" in server_job
     assert "SCAFFOLD_PROFILE:" not in server_job
     assert "pnpm" not in server_job

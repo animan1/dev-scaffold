@@ -24,7 +24,7 @@ def _make(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[st
 
 def test_precommit_runs_as_a_recipe() -> None:
     output = _make("--dry-run", "precommit").stdout
-    assert "uv run --extra dev pre-commit run --all-files" in output
+    assert 'scripts/scaffold_source.py "check"' in output
 
 
 def test_react_profile_dependency_lock_uses_pinned_dockerized_uv() -> None:

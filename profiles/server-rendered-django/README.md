@@ -119,8 +119,9 @@ improvements.
 Then exercise the profile through its stable contract:
 
 ```bash
-make verify
-make precommit
+make setup
+make check
+make hooks # optional
 make deps.lock
 ```
 

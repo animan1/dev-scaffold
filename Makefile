@@ -68,7 +68,7 @@ PY_DIR := backend
 URL_ROOT ?= http://localhost:8080
 CURL_FLAGS ?=
 VERBOSE ?= 0
-FEATURED := 'up down restart logs verify smoke up-prod smoke-prod help help-verbose'
+FEATURED := 'up down restart logs check smoke up-prod smoke-prod help help-verbose'
 
 .DEFAULT_GOAL := help
 
@@ -144,14 +144,6 @@ be.wait: ## Wait for backend health (dev)
 	$(COMPOSE_DEV) logs backend || true; \
 	exit 1
 
-.PHONY: be.ci
-be.ci: ## (Docker) Run backend verify inside dev container
-	$(COMPOSE_DEV) run --rm backend bash -lc 'REPO_DIR=/workspace make -f /workspace/Makefile PY_DIR=/app be.verify'
-
-.PHONY: fe.ci
-fe.ci: ## (Docker) Run frontend verify inside dev container
-	$(COMPOSE_DEV) run --rm frontend sh -lc 'apk add --no-cache make >/dev/null 2>&1 || true; corepack enable; make -f /workspace/Makefile FRONTEND_DIR=/app fe.setup fe.verify'
-
 .PHONY: smoke
 smoke: ## Dev smoketest (API + static + FE root)
 smoke: CURL_CMD = curl $(CURL_FLAGS) -fsS
@@ -162,7 +154,7 @@ smoke:
 
 .PHONY: ci
 ci: ## (Docker) One-shot CI recipe (dev stack + FE/BE verify + smoke)
-ci: up be.wait be.ci fe.ci smoke
+ci: setup up be.wait check smoke
 	@echo "CI checks passed"
 
 # Prod
@@ -432,22 +424,13 @@ be.wait-prod: be.wait
 # ---- Django dev helpers ----
 DJANGO_DEV_MANAGE ?= cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage
 
-.PHONY: be.run
-be.run: ## Run Django dev server (app.settings.dev)
-	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage runserver 0.0.0.0:8000
-
-# ---- Setup / Hooks ----
-.PHONY: setup
-setup: ## Install Python/FE deps and pre-commit hooks
-setup: be.setup fe.setup
-
-.PHONY: be.setup
-be.setup: ## Sync backend deps (uv) and install hooks
-be.setup: be.sync hooks
-
-.PHONY: be.sync
-be.sync:
-	cd $(PY_DIR) && uv sync --all-extras
+.PHONY: be.setup be.sync be.verify verify preflight precommit fmt-check coverage no-any be.ci fe.ci
+be.setup be.sync: setup
+be.verify verify preflight precommit be.ci fe.ci: check
+fmt-check: format-check
+coverage:
+	$(MAKE) test COVERAGE=1
+no-any: lint
 
 .PHONY: deps.lock
 deps.lock: ## Update the selected profile's Python lockfile with pinned Dockerized uv
@@ -457,60 +440,6 @@ deps.lock: ## Update the selected profile's Python lockfile with pinned Dockeriz
 		--volume "$(CURDIR)/$(PY_DIR):/workspace" \
 		--workdir /workspace --entrypoint /usr/local/bin/uv $(UV_IMAGE) lock
 
-.PHONY: hooks
-hooks: ## Install pre-commit hooks
-	cd $(PY_DIR) && uv run pre-commit install
-
-# ---- Quality gates ----
-.PHONY: verify
-verify: ## Run both backend and frontend verification
-verify: be.verify fe.verify
-
-.PHONY: be.verify
-be.verify: ## Backend format check + lint + typecheck + tests + coverage
-be.verify: fmt-check lint typecheck coverage
-
-.PHONY: preflight
-preflight: ## Format + lint + typecheck + coverage + precommit
-preflight: format lint typecheck coverage precommit
-	@echo "✅ Preflight complete."
-
-.PHONY: no-any
-no-any: ## Reject explicit typing.Any in backend Python
-	cd $(PY_DIR) && uv run python scripts/check_no_any.py
-
-.PHONY: lint
-lint: ## Ruff lint (backend)
-lint: no-any
-	cd $(PY_DIR) && uv run ruff check .
-
-.PHONY: format
-format: ## Apply Ruff fixes and formatting (backend)
-	cd $(PY_DIR) && uv run ruff check --fix .
-	cd $(PY_DIR) && uv run ruff format .
-
-.PHONY: fmt-check
-fmt-check: ## Check formatting (backend)
-	cd $(PY_DIR) && uv run ruff format --check .
-
-.PHONY: typecheck
-typecheck: ## MyPy type checking (backend)
-	cd $(PY_DIR) && uv run mypy .
-
-.PHONY: test
-test: ## Pytest (backend)
-	cd $(PY_DIR) && uv run pytest -q
-
-.PHONY: coverage
-coverage: ## Pytest coverage gate (backend)
-	cd $(PY_DIR) && uv run pytest --cov=src --cov-report=term-missing
-
-# ---- Pre-commit runner ----
-.PHONY: precommit
-precommit: ## Run pre-commit on all files
-precommit: fe.setup
-	cd $(PY_DIR) && uv run --extra dev pre-commit run --all-files
-
 # ---- Clean ----
 .PHONY: clean
 clean: ## Remove caches and build artifacts
@@ -518,52 +447,15 @@ clean: ## Remove caches and build artifacts
 	find . -name "*.pyc" -delete
 	rm -rf $(PY_DIR)/.pytest_cache $(PY_DIR)/.mypy_cache
 
-# ---- Frontend (Vite/React/TS) ----
-.PHONY: fe.setup
-fe.setup: ## Install frontend deps (pnpm)
-	@corepack enable || true
-	cd $(FRONTEND_DIR) && pnpm install
-
-.PHONY: fe.run
-fe.run: ## Run Vite dev server
-	cd $(FRONTEND_DIR) && pnpm dev
-
-.PHONY: fe.build
-fe.build: ## Build frontend (Vite)
-	cd $(FRONTEND_DIR) && pnpm build
-
-.PHONY: fe.lint
-fe.lint: ## ESLint (frontend)
-	cd $(FRONTEND_DIR) && pnpm lint
-
-.PHONY: fe.format
-fe.format: ## Prettier write (frontend)
-	cd $(FRONTEND_DIR) && pnpm format
-
-.PHONY: fe.fmt-check
-fe.fmt-check: ## Prettier check (frontend)
-	cd $(FRONTEND_DIR) && pnpm fmt-check
-
-.PHONY: fe.test
-FE_COVERAGE_ARGS :=
-ifeq ($(COVERAGE),1)
-FE_COVERAGE_ARGS := --coverage --coverage.all=true \
-	'--coverage.include=src/**/*.{ts,tsx}' \
-	'--coverage.exclude=src/**/__tests__/**' \
-	'--coverage.exclude=src/**/*.{test,spec}.{ts,tsx}' \
-	--coverage.exclude=src/setupTests.ts '--coverage.exclude=src/**/*.d.ts' \
-	--coverage.reporter=lcov --coverage.reporter=json-summary
-endif
-fe.test: ## Vitest (frontend)
-	cd $(FRONTEND_DIR) && pnpm run test $(FE_COVERAGE_ARGS)
-
-.PHONY: fe.typecheck
-fe.typecheck: ## TypeScript typecheck (frontend)
-	cd $(FRONTEND_DIR) && pnpm typecheck
-
-.PHONY: fe.verify
-fe.verify: ## Frontend lint + typecheck + tests + fmt-check
-	cd $(FRONTEND_DIR) && pnpm verify
+.PHONY: fe.setup fe.build fe.lint fe.format fe.fmt-check fe.test fe.typecheck fe.verify
+fe.setup: setup
+fe.build: build-release-images
+fe.lint: lint
+fe.format: format
+fe.fmt-check: format-check
+fe.test: test
+fe.typecheck: typecheck
+fe.verify: check
 
 else
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
@@ -588,3 +480,5 @@ SELECTED_OPTIONAL_PROFILE_MAKEFILES := $(SELECTED_OPTIONAL_PROFILE_MAKEFILES) $(
 endif
 
 include $(SCAFFOLD_ROOT)profiles/release-transport.mk
+
+include $(SCAFFOLD_ROOT)profiles/source-commands.mk

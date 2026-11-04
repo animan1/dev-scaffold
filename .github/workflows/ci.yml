@@ -31,6 +31,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Prepare the required containerd image store
+        uses: docker/setup-docker-action@v5
+        with:
+          daemon-config: |
+            {"features": {"containerd-snapshotter": true}}
+
       - name: Select the downstream-only server-rendered profile
         run: |
           printf '%s\n' \
@@ -42,7 +48,7 @@ jobs:
       - name: Verify the downstream profile through its shared Make contract
         env:
           DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
-        run: make verify
+        run: make setup check
 
       - name: Exercise the local production ingress simulation
         run: make up-prod smoke-prod
@@ -61,6 +67,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare the required containerd image store
+        uses: docker/setup-docker-action@v5
+        with:
+          daemon-config: |
+            {"features": {"containerd-snapshotter": true}}
 
       - name: Compose up (detached) via Make
         run: make up
@@ -68,8 +82,10 @@ jobs:
       - name: Wait for backend
         run: make be.wait
 
-      - name: Verify (inside container) via Make
-        run: make be.ci fe.ci
+      - name: Verify source through the shared Docker tooling
+        env:
+          DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
+        run: make setup check
 
       - name: Smoke test via Nginx
         run: make smoke

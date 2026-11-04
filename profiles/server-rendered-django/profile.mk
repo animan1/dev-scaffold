@@ -58,7 +58,8 @@ LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
 .PHONY: help
 help: ## Show available commands
 	@{ \
-		grep -E '^[a-zA-Z0-9_.-]+:.*?## ' $(SERVER_PROFILE_MAKEFILE); \
+		grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' $(SERVER_PROFILE_MAKEFILE) \
+			$(GLOBAL_COMMAND_MAKEFILES); \
 		if [[ -n "$(strip $(SELECTED_OPTIONAL_PROFILE_MAKEFILES))" ]]; then \
 			grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' \
 				$(SELECTED_OPTIONAL_PROFILE_MAKEFILES); \
@@ -110,33 +111,6 @@ wait: ## Wait for the routed Django health endpoint
 	$(COMPOSE) logs app; \
 	exit 1
 
-.PHONY: format
-format: ## Apply the single deterministic Python formatter and safe lint fixes
-	$(RUN) $(UV_RUN) ruff check --config $(PROFILE_PROJECT) --fix .
-	$(RUN) $(UV_RUN) ruff format --config $(PROFILE_PROJECT) .
-
-.PHONY: format-check
-format-check: ## Check Python formatting without mutation
-	$(RUN) $(UV_RUN) ruff format --config $(PROFILE_PROJECT) --check .
-
-.PHONY: lint
-lint: ## Run strict Ruff linting
-	$(RUN) $(UV_RUN) ruff check --config $(PROFILE_PROJECT) .
-
-.PHONY: typecheck
-typecheck: ## Run strict MyPy type checking
-	$(RUN) $(UV_RUN) mypy --config-file $(PROFILE_PROJECT) .
-
-.PHONY: test
-test: ## Run backend tests once without the coverage gate
-	$(RUN) $(UV_RUN) pytest -c $(PROFILE_PROJECT) /workspace/backend
-
-.PHONY: coverage
-coverage: ## Run the single coverage-enabled test suite and write coverage.xml
-	$(RUN) $(UV_RUN) pytest -c $(PROFILE_PROJECT) --cov=src \
-		--cov-config=$(PROFILE_PROJECT) --cov-report=term-missing --cov-report=xml \
-		/workspace/backend
-
 .PHONY: deps.lock
 deps.lock: ## Update this profile's lockfile with pinned Dockerized uv
 	docker run --rm --user "$$(id -u):$$(id -g)" \
@@ -146,31 +120,11 @@ deps.lock: ## Update this profile's lockfile with pinned Dockerized uv
 		--workdir /workspace --entrypoint /usr/local/bin/uv $(UV_IMAGE) \
 		lock --project profiles/server-rendered-django
 
-.PHONY: changed-coverage
-changed-coverage: ## Enforce coverage on Python lines changed from DIFF_BASE
-	$(RUN) sh -lc 'cd /workspace/backend && $(UV_RUN) diff-cover \
-		coverage.xml --compare-branch=$(DIFF_BASE) --fail-under=90'
-
-.PHONY: migrations-check
-migrations-check: ## Reject model changes without migrations
-	$(RUN) $(UV_RUN) python -m app.manage makemigrations --check --dry-run
-
-.PHONY: django-check
-django-check: ## Run Django's production deployment checks
-	$(RUN) sh -lc 'DJANGO_SETTINGS_MODULE=app.project.settings.prod \
-		DJANGO_SECRET_KEY=check-only-abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ \
-		DATABASE_URL=postgresql://app:app@db:5432/app \
-		$(UV_RUN) python -m app.manage check --deploy'
-
-.PHONY: check
-check: ## Run every non-image quality gate through the shared Docker toolchain
-	$(MAKE) format-check
-	$(MAKE) lint
-	$(MAKE) typecheck
-	$(MAKE) coverage
-	$(MAKE) changed-coverage
-	$(MAKE) migrations-check
-	$(MAKE) django-check
+.PHONY: coverage changed-coverage django-check
+coverage:
+	$(MAKE) test COVERAGE=1
+changed-coverage: coverage
+django-check: framework-check
 
 .PHONY: build-production
 build-production: ## Build the multi-stage non-root production image
@@ -354,6 +308,4 @@ verify: ## Run the identical aggregate contract used by developers and CI
 	$(MAKE) smoke
 
 .PHONY: precommit
-precommit: ## Run repository pre-commit hooks in the Docker toolchain
-	$(RUN) $(UV_RUN) pre-commit run \
-		--config /workspace/profiles/server-rendered-django/pre-commit-config.yaml --all-files
+precommit: check

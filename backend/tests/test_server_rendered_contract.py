@@ -27,6 +27,9 @@ def _make(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[st
 
 def test_server_rendered_make_contract_and_quality_gates() -> None:
     makefile = (_repository_root() / "profiles/server-rendered-django/profile.mk").read_text()
+    source = "".join(
+        path.read_text() for path in (_repository_root() / "profiles").glob("*-commands.mk")
+    )
 
     for target in (
         "build",
@@ -50,7 +53,7 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "down-prod",
         "smoke",
     ):
-        assert f"\n{target}:" in makefile
+        assert f"\n{target}:" in makefile + source
     for gate in (
         "format-check",
         "lint",
@@ -60,7 +63,7 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "migrations-check",
         "django-check",
     ):
-        assert f"$(MAKE) {gate}" in makefile
+        assert gate in source or f"\n{gate}:" in makefile
 
 
 def test_server_rendered_teardown_is_safe_and_reset_is_guarded() -> None:
@@ -92,8 +95,7 @@ def test_server_rendered_diagnostics_use_selected_compose_and_help() -> None:
 
 def test_server_rendered_precommit_is_a_recipe() -> None:
     output = _make("--dry-run", "precommit").stdout
-    assert "pre-commit run" in output
-    assert "--all-files" in output
+    assert 'scripts/scaffold_source.py "check"' in output
 
 
 def test_server_rendered_up_prod_uses_isolated_production_simulation() -> None:
@@ -240,24 +242,20 @@ def test_server_rendered_help_includes_selected_optional_profiles() -> None:
 
 
 def test_server_rendered_tools_explicitly_load_profile_configuration() -> None:
-    profile_config = "/workspace/profiles/server-rendered-django/pyproject.toml"
-
-    assert f"ruff check --config {profile_config}" in _make("--dry-run", "lint").stdout
-    assert f"mypy --config-file {profile_config}" in _make("--dry-run", "typecheck").stdout
+    assert 'scripts/scaffold_source.py "lint"' in _make("--dry-run", "lint").stdout
+    assert 'scripts/scaffold_source.py "typecheck"' in _make("--dry-run", "typecheck").stdout
     test_output = _make("--dry-run", "test").stdout
-    assert f"pytest -c {profile_config}" in test_output
+    assert 'scripts/scaffold_source.py "test"' in test_output
     coverage_output = _make("--dry-run", "coverage").stdout
-    assert f"pytest -c {profile_config}" in coverage_output
-    assert f"--cov-config={profile_config}" in coverage_output
+    assert 'scripts/scaffold_source.py "test"' in coverage_output
+    assert "COVERAGE=1" in coverage_output
 
 
 def test_changed_coverage_runs_from_backend() -> None:
     output = _make("--dry-run", "changed-coverage").stdout
 
-    assert "cd /workspace/backend" in output
-    assert "diff-cover" in output
-    assert "coverage.xml" in output
-    assert "backend/coverage.xml" not in output
+    assert 'scripts/scaffold_source.py "test"' in output
+    assert "COVERAGE=1" in output
 
 
 @pytest.mark.skipif(shutil.which("diff-cover") is None, reason="diff-cover is profile-only")
