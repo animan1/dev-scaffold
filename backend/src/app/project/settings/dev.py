@@ -4,6 +4,7 @@ from pathlib import Path
 from django.core.management.utils import get_random_secret_key
 
 from .base import *  # noqa: F403,F401
+from .base import env
 
 DEBUG = True
 
@@ -12,6 +13,8 @@ databases = globals().get("DATABASES")
 if databases and "default" in databases:
     # already defined in base.py from env
     pass
+elif env("DATABASE_URL", default=""):
+    DATABASES = {"default": env.db("DATABASE_URL")}
 else:
     BASE_DIR = Path(__file__).resolve().parent.parent.parent
     DATABASES = {
