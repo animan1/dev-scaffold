@@ -1,5 +1,7 @@
 import importlib.util
 import os
+import socket
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,13 @@ SPEC.loader.exec_module(bundle)
 
 REVISION = "a" * 40
 APP_ID = "sha256:" + "1" * 64
+
+
+@pytest.fixture
+def occupied_port() -> Iterator[str]:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        yield str(listener.getsockname()[1])
 
 
 def _install_git_fixture(
@@ -41,16 +50,22 @@ def _arguments(tmp_path: Path) -> tuple[Path, dict[str, str], dict[str, object]]
     source.mkdir()
     return (
         source,
-        {"SCAFFOLD_PROFILE": "example", "RELEASE_PLATFORM": "linux/arm64"},
+        {
+            "SCAFFOLD_PROFILE": "example",
+            "RELEASE_PLATFORM": "linux/arm64",
+            "RELEASE_COMPOSE_PROJECT": "existing-project",
+        },
         {"images": {"app": "RELEASE_BACKEND_IMAGE"}, "check_targets": ["release-check"]},
     )
 
 
 def test_hotfix_builds_target_platform_and_checks_same_image_ids(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, occupied_port: str
 ) -> None:
     source, values, spec = _arguments(tmp_path)
     root = tmp_path / "checkout"
+    values.update({"RELEASE_HTTP_PORT": occupied_port, "RELEASE_HTTPS_PORT": occupied_port})
+    monkeypatch.setenv("RELEASE_IMAGE_PREFIX", "local/existing-app")
     env = {"PATH": "/bin"}
     git_calls = _install_git_fixture(monkeypatch)
     make_calls: list[tuple[Path, str, dict[str, str], dict[str, str]]] = []
@@ -70,19 +85,24 @@ def test_hotfix_builds_target_platform_and_checks_same_image_ids(
     assert manifest.read_text().splitlines() == [
         f"RELEASE_REVISION={REVISION}",
         "SCAFFOLD_PROFILE=example",
-        f"RELEASE_IMAGE_PREFIX=local/emergency-{REVISION}",
-        f"RELEASE_BACKEND_IMAGE=local/emergency-{REVISION}-backend:{REVISION}",
+        "RELEASE_IMAGE_PREFIX=local/existing-app",
+        f"RELEASE_BACKEND_IMAGE=local/existing-app-backend:{REVISION}",
     ]
-    assert build_values["RELEASE_IMAGE_PREFIX"] == f"local/emergency-{REVISION}"
+    assert build_values["RELEASE_IMAGE_PREFIX"] == "local/existing-app"
     assert build_values["RELEASE_REVISION"] == REVISION
     assert build_values["RELEASE_PLATFORM"] == "linux/arm64"
-    assert roles == {"RELEASE_BACKEND_IMAGE": f"local/emergency-{REVISION}-backend:{REVISION}"}
+    assert roles == {"RELEASE_BACKEND_IMAGE": f"local/existing-app-backend:{REVISION}"}
     assert env["DOCKER_DEFAULT_PLATFORM"] == "linux/arm64"
     assert [call[1] for call in make_calls] == ["build-release-images", "release-check"]
     assert all(call[3]["DOCKER_DEFAULT_PLATFORM"] == "linux/arm64" for call in make_calls)
     check_values = make_calls[1][2]
-    assert check_values["PROJECT_NAME"] == f"emergency-check-{REVISION[:16]}"
-    assert check_values["RELEASE_COMPOSE_PROJECT"] == f"emergency-check-{REVISION[:16]}-release"
+    assert "PROJECT_NAME" not in check_values
+    assert "RELEASE_COMPOSE_PROJECT" not in check_values
+    assert check_values["RELEASE_HTTP_PORT"] != occupied_port
+    assert check_values["RELEASE_HTTPS_PORT"] != occupied_port
+    assert check_values["RELEASE_HTTP_PORT"] != check_values["RELEASE_HTTPS_PORT"]
+    assert check_values["HOST_INGRESS_PORT"] == check_values["RELEASE_HTTP_PORT"]
+    assert build_values["RELEASE_HTTP_PORT"] == occupied_port
     assert evidence["source"] == "local-checks"
     assert evidence["revision"] == REVISION
     assert evidence["platform"] == "linux/arm64"

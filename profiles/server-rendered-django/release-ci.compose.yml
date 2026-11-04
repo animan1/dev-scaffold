@@ -1,0 +1,30 @@
+x-validation: &validation
+  platform: "${RELEASE_PLATFORM:-}"
+  labels:
+    io.dev-scaffold.validation: release-ci
+
+services:
+  db:
+    <<: *validation
+  app:
+    <<: *validation
+  web:
+    <<: *validation
+  monitor:
+    <<: *validation
+
+volumes:
+  postgres_data:
+    labels:
+      io.dev-scaffold.validation: release-ci
+  staticfiles:
+    labels:
+      io.dev-scaffold.validation: release-ci
+  media:
+    labels:
+      io.dev-scaffold.validation: release-ci
+
+networks:
+  default:
+    labels:
+      io.dev-scaffold.validation: release-ci
