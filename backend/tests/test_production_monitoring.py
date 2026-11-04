@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from types import ModuleType
+
+import pytest
 
 
 def _repository_root() -> Path:
@@ -23,15 +26,22 @@ def _make(*arguments: str) -> str:
     return result.stdout
 
 
-def test_production_operational_check_runs_once() -> None:
-    output = _make("ops.check-prod")
-    assert "docker compose -f deploy/docker-compose.prod.yml" in output
-    assert "run --rm backend python -m app.manage monitor_operational_integrity" in output
-    assert "--watch" not in output
+def test_production_operational_check_runs_once(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(op, "state_dir", lambda *a: tmp_path / "state")
+    monkeypatch.setattr(op, "current_compose", lambda *a, **k: calls.append(a))
+    op.dispatch("monitor-check-prod")
+    assert len(calls) == 1
+    assert calls[0][-1] == "monitor_operational_integrity"
+    assert "--watch" not in calls[0]
+    assert "--no-deps" in calls[0]
 
 
 def test_production_monitor_target_follows_service_logs() -> None:
-    assert "logs -f monitor" in _make("ops.monitor-prod")
+    assert 'scaffold.py "logs-prod-monitor"' in _make("logs-prod-monitor")
 
 
 def test_backup_status_volume_is_shared_with_operational_monitor() -> None:

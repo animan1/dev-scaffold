@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -69,6 +70,7 @@ fi
         "restic": """#!/bin/sh
 case "$1" in
   cat) exit 0 ;;
+  snapshots) printf '[{"id":"%064d"}]\\n' 0 ;;
   dump) printf 'fake custom dump' ;;
   *) exit 0 ;;
 esac
@@ -101,6 +103,44 @@ def test_backup_script_has_valid_bash_syntax() -> None:
     )
 
 
+def test_retention_preserves_exact_active_and_pending_points(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    _fake_backup_commands(fake_bin)
+    status = tmp_path / "status"
+    status.mkdir()
+    active, pending, expired = (character * 64 for character in "abc")
+    (status / "rollback-active").write_text(active)
+    (status / "rollback-pending").write_text(pending)
+    log = tmp_path / "forgotten"
+    plan = json.dumps([{"remove": [{"id": value} for value in (active, pending, expired)]}])
+    restic = fake_bin / "restic"
+    restic.write_text(
+        '#!/bin/sh\ncase " $* " in\n'
+        '  *" --dry-run "*) printf "%s\\n" "$RETENTION_PLAN" ;;\n'
+        '  *) printf "%s\\n" "$*" >> "$FORGOTTEN" ;;\nesac\n'
+    )
+    functions = tmp_path / "functions.sh"
+    functions.write_text(_script().split('case "${1:-watch}"', 1)[0])
+    environment = _verification_environment(fake_bin, status) | {
+        "RETENTION_PLAN": plan,
+        "FORGOTTEN": str(log),
+    }
+    subprocess.run(
+        ["bash", "-c", 'source "$1"; retention_lock; retain_snapshots', "bash", str(functions)],
+        env=environment,
+        check=True,
+    )
+    assert log.read_text().strip() == f"forget {expired} --prune"
+    subprocess.run(
+        ["bash", "profiles/immutable-backup/backup.sh", "commit-point"],
+        cwd=_repository_root(),
+        env=environment | {"BACKUP_RESTORE_SNAPSHOT": pending},
+        check=True,
+    )
+    assert (status / "rollback-active").read_text().strip() == pending
+    assert not (status / "rollback-pending").exists()
+
+
 def test_backup_is_custom_format_and_validated_before_success() -> None:
     backup = _operation("backup_once()", "verify_restore()")
 
@@ -122,7 +162,7 @@ def test_verification_uses_and_removes_an_isolated_database() -> None:
     assert verification.index("pg_restore") < verification.index(
         'command "SELECT current_database()"'
     )
-    assert verification.index('record_success "last-restore-verification"') < (
+    assert verification.index('record_success "last-restore-verification"') > (
         verification.rindex("cleanup")
     )
     assert "dropdb" in verification
@@ -234,15 +274,15 @@ def test_backup_freshness_comes_from_latest_recoverable_snapshot() -> None:
 def test_worker_schedules_backup_verification_and_repository_inspection() -> None:
     worker = _operation("watch()", 'case "${1:-watch}"')
 
-    assert "backup_once" in worker
-    assert "verify_restore" in worker
+    assert 'bash "${BASH_SOURCE[0]}" once' in worker
+    assert 'bash "${BASH_SOURCE[0]}" verify' in worker
     assert "inspect_repository" in worker
     assert "BACKUP_INTERVAL_SECONDS" in worker
     assert "BACKUP_INSPECTION_INTERVAL_SECONDS" in worker
 
 
 def test_active_make_targets_dispatch_through_selected_backup_container() -> None:
-    for primary_profile, primary_compose in (
+    for primary_profile, _ in (
         ("react-vite", "deploy/docker-compose.prod.yml"),
         ("server-rendered-django", "profiles/server-rendered-django/release.compose.yml"),
     ):
@@ -251,43 +291,28 @@ def test_active_make_targets_dispatch_through_selected_backup_container() -> Non
             "SCAFFOLD_BACKUP_PROFILE=immutable-backup",
         )
         backup = _make(*common, "backup-prod").stdout
-        verification = _make(*common, "verify-backup-prod").stdout
+        verification = _make(*common, "backup-test-prod").stdout
         snapshots = _make(*common, "snapshots-prod").stdout
 
-        for output in (backup, verification, snapshots):
-            assert primary_compose in output
-            assert "profiles/immutable-backup/compose.yml" in output
-            assert "run --rm --no-deps backup" in output
-        assert "backup once" in backup
-        assert "backup verify" in verification
-        assert "backup snapshots" in snapshots
+        assert 'scaffold.py "backup-prod"' in backup
+        assert 'scaffold.py "backup-test-prod"' in verification
+        assert 'scaffold.py "snapshots-prod"' in snapshots
 
 
 def test_resolved_compose_contract_shares_project_scoped_monitor_status() -> None:
-    output = _make(
-        "SCAFFOLD_PROFILE=server-rendered-django",
-        "SCAFFOLD_BACKUP_PROFILE=immutable-backup",
-        "verify-backup-compose",
-    ).stdout
-
-    assert "config --format json" in output
-    assert "docker run --rm -i --entrypoint jq" in output
-    assert ".services.backup.volumes" in output
-    assert ".services.monitor.volumes" in output
-    assert "BACKUP_STATUS_DIR" in output
-    assert '$project + "_backup_status"' in output
+    source = (_repository_root() / "profiles/immutable-backup/compose.yml").read_text()
+    assert "backup_status:/backup-status:ro" in source
+    assert "BACKUP_STATUS_DIR: /backup-status" in source
 
 
-def test_restore_stops_configured_writers_before_destructive_container() -> None:
+def test_restore_uses_the_explicit_data_administration_interface() -> None:
     output = _make(
         "SCAFFOLD_BACKUP_PROFILE=immutable-backup",
         "restore-prod",
         "CONFIRM=restore-prod",
-        "BACKUP_WRITER_SERVICES=writer worker backup",
     ).stdout
 
-    assert output.index("stop writer worker backup") < output.index("backup restore")
-    assert "BACKUP_RESTORE_CONFIRMATION=restore-production-database" in output
+    assert 'scaffold.py "restore-prod"' in output
 
 
 def test_backup_configuration_boundaries_remain_project_owned() -> None:
@@ -324,7 +349,7 @@ def test_routine_teardown_preserves_all_persistent_volume_classes() -> None:
     server_down = _make(
         "SCAFFOLD_PROFILE=server-rendered-django",
         "SCAFFOLD_BACKUP_PROFILE=immutable-backup",
-        "down",
+        "down-dev",
     ).stdout
     react_compose = (_repository_root() / "deploy/docker-compose.prod.yml").read_text()
     server_compose = (
@@ -344,30 +369,22 @@ def test_routine_teardown_preserves_all_persistent_volume_classes() -> None:
 def test_non_root_storage_is_prepared_without_initializing_restic() -> None:
     compose = (_repository_root() / "profiles/immutable-backup/compose.yml").read_text()
     initialization = compose.split("  backup-init:", 1)[1].split("  backup:", 1)[0]
-    snapshots = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "snapshots-prod").stdout
 
     assert 'user: "0:0"' in initialization
     assert "install -d" in initialization
     assert "restic init" not in initialization
-    assert snapshots.index("backup-init") < snapshots.index("backup snapshots")
 
 
-def test_make_exercises_real_backup_and_isolated_restore_entrypoints() -> None:
-    exercise = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "exercise-backup-profile").stdout
-
-    assert ".tmp/immutable-backup-exercise" in exercise
-    assert "exercise.compose.yml" in exercise
-    assert exercise.index("backup once") < exercise.index("backup verify")
-    assert exercise.index("backup verify") < exercise.index("backup snapshots")
-    assert "/backup-status/last-backup" in exercise
-    assert "/backup-status/last-restore-verification" in exercise
-    assert "backup_restore_verify_%" in exercise
-    assert "down -v --remove-orphans" in exercise
+def test_ci_uses_the_normal_disposable_acceptance_interface() -> None:
+    output = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "ci-ephemeral").stdout
+    assert 'scaffold.py "ci-ephemeral"' in output
 
 
 def test_worker_uses_bounded_retry_interval_after_failure() -> None:
     worker = _operation("watch()", 'case "${1:-watch}"')
-    success = worker.split("if backup_once && verify_restore; then", 1)[1].split("else", 1)[0]
+    success = worker.split(
+        'if bash "${BASH_SOURCE[0]}" once && bash "${BASH_SOURCE[0]}" verify; then', 1
+    )[1].split("else", 1)[0]
     failure = worker.split("else", 1)[1].split("\n      fi", 1)[0]
 
     assert "BACKUP_RETRY_INTERVAL_SECONDS:-${inspection_interval}" in worker

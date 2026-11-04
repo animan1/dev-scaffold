@@ -1,13 +1,13 @@
 # Makefile workflows
 
-Proposed workflows for the Makefile redesign, using the command convention in
-[the command contract](makefile-design.md). These are design examples,
-not instructions for the current implementation. Existing command definitions
+Workflows using the command convention in
+[the command contract](makefile-design.md). Existing command definitions
 remain authoritative; the examples add no implicit build, test, or deploy steps.
 
 ## 0. First-time installation
 
-Infra prepares the host with Git, Make, and Docker with Compose, then obtains
+Infra prepares the host with Git, Make, Python 3.12+ (standard-library
+orchestration only), and Docker with Compose and the containerd image store, then obtains
 the tenant's deployment checkout. From that
 checkout, inspect the selected profiles and prepare their tooling/dependencies:
 
@@ -111,11 +111,15 @@ For interactive administration of the running development application, use
 On one host, with the intended source committed and production configuration
 available, run in order and stop at the first failure:
 
+This is also the hotfix workflow. Preserve the committed hotfix and reconcile it
+through the normal PR workflow after deployment; deployment does not replace that follow-up.
+
 ```sh
 make setup
 make check
 make build
 make image-check
+make prepare-ephemeral
 make up-ephemeral
 make integration-test-ephemeral
 make verify-ephemeral
@@ -138,6 +142,7 @@ make setup
 make check
 make build
 make image-check
+make prepare-ephemeral
 make up-ephemeral
 make integration-test-ephemeral
 make verify-ephemeral
@@ -193,7 +198,7 @@ Replace `SNAPSHOT_ID` below with an ID from that list. Use an application checko
 compatible with the chosen snapshot. First check recovery with disposable data:
 
 ```sh
-make restore-ephemeral BACKUP_SNAPSHOT=SNAPSHOT_ID CONFIRM=restore-ephemeral
+make restore-ephemeral BACKUP_SOURCE_ENV=prod BACKUP_SNAPSHOT=SNAPSHOT_ID CONFIRM=restore-ephemeral
 make up-ephemeral
 make verify-ephemeral
 make rm-ephemeral
@@ -241,7 +246,7 @@ then `make download`, `make setup`, `make image-check`, `make up-prod`, and
 
 ## 6. Disaster recovery on a new host
 
-Infra prepares the replacement host with Docker, Make, a deployment checkout,
+Infra prepares the replacement host with Docker's containerd image store, Make, a deployment checkout,
 the original logical deployment identity, configuration and credentials, backup
 repository access and decryption keys, and registry access. The matching release
 artifacts must be retained off-host, including locally built releases. Restore
@@ -252,6 +257,7 @@ Select the newest backup once and use its recorded revision, not the latest
 published release. Run in order, stopping at the first failure:
 
 ```sh
+make setup
 make snapshots-prod SELECT=newest ENV_FILE=.local/recovery.env
 . .local/recovery.env
 git switch --detach "$RELEASE_REVISION"
@@ -261,6 +267,7 @@ make image-check
 make restore-prod BACKUP_SNAPSHOT="$BACKUP_SNAPSHOT" CONFIRM=restore-prod
 make up-prod
 make verify-prod
+unset BACKUP_SNAPSHOT RELEASE_REVISION RELEASE_IDENTITY
 ```
 
 Snapshot discovery requires neither the lost host nor its deployment history.

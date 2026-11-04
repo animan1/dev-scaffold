@@ -8,15 +8,12 @@ future scaffold merges can update both profiles normally.
 ## What the profile provides
 
 - Full-Docker development with one Django application service and PostgreSQL.
-- PostgreSQL for development, tests, and CI; the supported workflow does not
-  use the development SQLite fallback.
+- PostgreSQL for development and release acceptance; source checks use isolated
+  test configuration without accessing a deployment database.
 - Project-scoped Compose resources and a configurable loopback-only port.
-- A persistent PostgreSQL volume. `make down` preserves it; `make reset
-  CONFIRM_RESET=1` is the explicit destructive operation.
-- The same Make interface for developers and CI: `build`, `up`, `down`,
-  `reset`, `deps.lock`, `format`, `lint`, `typecheck`, `test`, `coverage`,
-  `migrations`, `migrate`, `superuser`, `shell`, `check`, `verify`, `precommit`,
-  `build-production`, and `smoke`.
+- A persistent PostgreSQL volume. `make down-dev` preserves it; `make rm-dev`
+  deliberately removes it.
+- The same [Make interface](../../docs/makefile-design.md) for developers and CI.
 - Ruff formatting and linting, strict MyPy, pytest, total and changed-line
   coverage, migration-drift checks, Django deployment checks, a multi-stage
   non-root production image, and routed smoke tests.
@@ -52,7 +49,7 @@ release Make interface. Initialization starts only PostgreSQL, then uses
 one-shot containers from the recorded backend image for the production check,
 migrations, and static collection. A failed operation therefore leaves the
 currently deployed application and web containers in place; only successful
-initialization permits `deploy-release` or `verify-release-images` to start the
+initialization permits `up-prod` to start the
 persistent application and web services. Neither path builds an image during
 deployment.
 
@@ -71,31 +68,11 @@ belong in the generic scaffold web image.
 
 ### Exercise the production topology locally
 
-In the multi-profile scaffold repository, use the profile-local wrapper so the
-React/Vite default selection remains unchanged:
-
-```sh
-profiles/server-rendered-django/prod-sim up
-profiles/server-rendered-django/prod-sim smoke
-profiles/server-rendered-django/prod-sim down
-```
-
-`up` builds local backend and Nginx images, initializes an isolated
-`<project>-prod-sim` database and static volume, and starts the production-shaped
-origin behind a local-only TLS ingress without a published release manifest.
-The private application origin is not exposed to the host. HTTP at
-`http://localhost:18081` redirects to HTTPS at `https://localhost:18444`; the
-locally generated certificate causes the expected browser warning. `smoke`
-accepts that test certificate and verifies the redirect, customer page, admin
-redirect, and secure CSRF cookie. `down` stops the stack while preserving its
-database, static, and media volumes. Override `PROD_SIM_HTTP_PORT` and
-`PROD_SIM_HTTPS_PORT` when those loopback ports are occupied.
-
-In a downstream repository that selects this profile, the equivalent commands
-are `make up-prod`, `make smoke-prod`, and `make down-prod`. The local ingress is
-test infrastructure in `prod-sim.compose.yml`; it is not part of the deployable
-application topology. Digest-pinned deployment remains the separate
-`make deploy-release` operation.
+Use [the local production workflow](../../docs/makefile-workflows.md#2-local-prod-lifecycle)
+with `SCAFFOLD_PROFILE=server-rendered-django` on every command, or select the
+profile in the committed configuration below. Development, production and
+ephemeral acceptance use the existing dummy application and the same commands
+as the React profile. No separate production-simulation wrapper is needed.
 
 ## Select the profile
 
@@ -119,22 +96,23 @@ improvements.
 Then exercise the profile through its stable contract:
 
 ```bash
-make verify
-make precommit
-make deps.lock
+make setup
+make check
+make ci-ephemeral
 ```
 
-`make deps.lock` updates only the selected profile's lockfile using a uv 0.8.17
-container with the profile's Python 3.12 and Bookworm runtime. It does not
+`make deps-lock` updates the selected profile's lockfile and declared image pins
+using Docker-based tools. It does not
 require uv on the host.
 
-Set a unique project name and unused port when the directory defaults are not
-suitable:
+Set the tenant's stable project name when the directory default is unsuitable;
+configure `APP_PORT` in its private environment file before startup:
 
 ```bash
-make up PROJECT_NAME=example-site APP_PORT=18123
-make smoke PROJECT_NAME=example-site APP_PORT=18123
-make down PROJECT_NAME=example-site APP_PORT=18123
+make prepare-dev PROJECT_NAME=example-site
+make up-dev PROJECT_NAME=example-site
+make verify-dev PROJECT_NAME=example-site
+make down-dev PROJECT_NAME=example-site
 ```
 
 ## Downstream boundary

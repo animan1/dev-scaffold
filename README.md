@@ -20,63 +20,62 @@ application work. Once a project contains real code, use the separate
 - **Backend**: Django with type hints, Ruff formatting and linting, MyPy type checking, pytest, and coverage enforcement.
 - **Frontend**: React (Vite + pnpm) with ESLint, Prettier, and TypeScript.
 - **Dev Experience**:
-  - Unified `Makefile` with common targets (`verify`, `check`, `test`, `smoke`, `up`, `down`, etc.)
-  - Pre-commit hooks (Ruff, ESLint, Prettier, end-of-file fixes).
+  - Unified `Makefile` with explicit environment selectors (`up-dev`, `up-prod`, `verify-prod`).
+  - Pre-commit hooks run the same read-only `check` gates as CI.
   - VS Code integration via workspace settings.
   - `.editorconfig` for consistent formatting across tools/editors.
 - **Deployment**:
   - Dockerized backend and frontend.
   - Multi-stage Nginx image builds and serves the frontend.
   - Docker Compose setups for dev and prod.
-  - HTTPS with self-signed certs for local prod-like testing.
+  - Loopback origins behind separately owned TLS ingress.
 - **CI**:
   - Uses Make targets for reproducibility.
-  - Separate jobs for backend (lint, typecheck, test, coverage) and frontend (lint, typecheck, build).
+  - The same `ci-ephemeral` source and release acceptance used locally.
   - Smoke tests run against containers to validate API, static, and frontend.
 
 ## Quickstart
 
-### Local Dev (no Docker)
-
-```bash
-make setup verify # bootstrap the environment
-make setup be.run # run Django
-```
-
-```bash
-# run React
-make fe.run
-```
-
 ### Docker Dev
 
+The host needs Git, Make, Python 3.12+ (standard-library orchestration only), and
+Docker with Compose and the containerd image store. Infra owns engine
+configuration; scaffold commands reject the classic store. Application tools run in containers.
+
 ```bash
-make up        # start backend + nginx (proxying API, static, and frontend)
-make smoke     # run API, static, and FE smokes
-make down      # stop stack while preserving development volumes
+make setup
+make prepare-dev
+make up-dev
+make verify-dev
+make down-dev  # preserve development data
 ```
 
-To deliberately remove development volumes and reset local state, run
-`make reset CONFIRM_RESET=1`. The confirmation is required because this cannot
-be undone.
+`make rm-dev` deliberately removes the environment's containers and volumes.
+Use `make check` for source validation and `make hooks` to install it as the
+pre-commit hook. Commands never apply source fixes unless you invoke `make format`.
 
 ### Docker Prod (local)
 
 ```bash
-make bootstrap-prod  # once
-make up-prod         # build & start prod stack with nginx + Django + Postgres
-make smoke-prod      # run API, static, and FE smokes
-make down-prod       # stop stack
+make prepare-prod
+make ci-ephemeral  # setup, check, committed build, image/runtime checks, cleanup
+make up-prod       # deploy the tested images; preserve configuration and volumes
+make verify-prod
+make down-prod     # stop while preserving data
 ```
 
-### Optional immutable releases
+Commit the intended source before building. For individual commands, published
+releases, backup/rollback and new-host recovery, use the
+[command contract](docs/makefile-design.md) and
+[workflows](docs/makefile-workflows.md).
 
-The default local-production workflow remains intentionally simple and builds
-from the checkout. Projects that need a pull-only host can opt into the
-immutable-release profile.
+### Immutable releases
 
-CI reads the committed scaffold selector and waits for that profile's
-verification. A skipped inactive-profile job does not suppress the release.
+Production uses recorded immutable images. Local builds and GHCR releases use
+the same deployment commands; startup never builds or runs writable tests.
+
+CI reads the committed scaffold selector and validates its configured profiles
+before publishing the selected application's exact tested image set.
 Both profiles retain the same two-package contract (`-backend` and `-web`),
 tagged with the full commit SHA, but each profile supplies its own build and
 production topology:
@@ -88,8 +87,8 @@ production topology:
   files, and serves uploaded media from a persistent volume mounted read-only.
 
 CI verifies and smoke-tests the exact selected images before pushing them to
-the repository's GHCR namespace. A successful `main` run publishes an ordinary
-workflow artifact containing digest-pinned image references, release identity
+the repository's GHCR namespace. A successful `main` run publishes a GitHub
+Release containing digest-pinned image references, release identity
 metadata, and an SPDX JSON SBOM for each image. When GitHub artifact
 attestations are available, the workflow also signs each SBOM and attaches the
 attestation to the corresponding image digest in GHCR. Public repositories
@@ -114,69 +113,16 @@ digests match GHCR. The public health endpoint reports release identity so
 deployment automation can compare environments without application-data
 access.
 
-Download that run's `release-<sha>` artifact onto the host. Keep the project's
-production configuration in `deploy/.env.prod`, then deploy without building:
+On a prepared destination, `make download-latest`, `make setup`, `make up-prod`
+and `make verify-prod` select and deploy the newest successful main release.
+`make download` instead obtains the current checkout's exact release without
+changing Git HEAD. Both reject unavailable artifacts rather than choosing an
+older release. Authenticate only to the tenant's GHCR packages when downloading.
 
-```bash
-make deploy-release RELEASE_FILE=/path/to/release-<sha>.env
-```
-
-The same workflow can run on a development laptop using production images.
-`make build-release-images RELEASE_PLATFORM=linux/arm64` builds both images and
-records their verified content IDs in `RELEASE_FILE`, without publishing them.
-Use the machine's destination platform. For this repository's existing laptop
-dummy, use the actual production workflow without a second Compose project:
-
-```bash
-make prepare-prod LOCAL_TLS=1
-make build-release-images RELEASE_PLATFORM=linux/arm64
-make release-bundle-config RELEASE_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_CONFIG_FILE=.tmp/private-release-compose.json
-make deploy-release RELEASE_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_PULL=true
-make smoke-prod CURL_FLAGS='--cacert deploy/nginx/certs/server.crt'
-```
-
-Run from the existing `dev-scaffold` checkout, with its private `deploy/.env.prod`
-prepared for the laptop and `localhost` in its allowed hosts. The existing
-backend/proxy are replaced by production images under the same project; this
-is an intentional deployment, not ordinary development smoke. Existing
-PostgreSQL volumes remain in place. The development SQLite file remains on
-disk; switching to production PostgreSQL does not migrate SQLite data.
-Port 18080 avoids the laptop's existing Cuplr listener on 8080 and redirects to
-the same Nginx service's HTTPS listener on loopback port 443. The browser health
-URL is `https://127.0.0.1/api/healthz` (`/api/health` is not a route).
-`prepare-prod LOCAL_TLS=1` creates or renews a self-signed certificate for
-localhost and 127.0.0.1 without replacing the private env file. A browser needs
-a one-time local certificate trust decision. The smoke command verifies the
-certificate explicitly; it does not bypass TLS validation or supply a fake
-forwarded-HTTPS header. For production domains, install the real TLS certificate
-and run `prepare-prod` without `LOCAL_TLS=1`; it rejects missing/expired inputs.
-These commands
-leave the dummy running; do not use volume-deleting CI cleanup on it.
-Downstream applications supply their own existing project name, private
-configuration and ingress settings. `RELEASE_PULL=true` uses the local
-images; the initialization, migrations and service startup are the same recipe
-used for a registry release. `make up` remains the development-server workflow.
-
-`release-bundle-config` is machine-readable and can contain resolved credentials.
-For a local review, pass `RELEASE_CONFIG_FILE=/absolute/private-compose.json` to
-save it privately instead of displaying it. Keep that file out of version control.
-
-For `server-rendered-django`, the `deploy-release` recipe depends on the
-profile's explicit `initialize-release` operation. That operation pulls the
-recorded digests, starts PostgreSQL and the recorded backend image with
-`--no-build`, runs `migrate`, and runs `collectstatic --clear` to populate even
-a fresh static volume. Deployment then starts the complete recorded image set.
-The React profile retains its existing release recipe. The server-rendered
-Compose project retains the PostgreSQL and uploaded-media volumes across
-releases and rollbacks, and Nginx can continue serving static and media files
-while Gunicorn is restarted. Registry login is host- and project-specific;
-authenticate the host only to the GHCR packages belonging to that project.
-
-Rollback is selection of an older retained manifest, not a rebuild:
-
-```bash
-make rollback-release RELEASE_FILE=/path/to/previous-release.env
-```
+`make history-prod` inspects deployment records. `make rollback-prod
+CONFIRM=rollback-prod` restores the recorded previous release and pre-migration
+database snapshot. This replaces database contents; migrations are not assumed
+reversible. See the workflows for application-only rollback and disaster recovery.
 
 The monitoring package also includes the staged-release comparison proven in
 Cuplr. Given staging and production review URLs, it derives each
@@ -193,7 +139,7 @@ gh attestation verify oci://ghcr.io/<owner>/<repo>-backend@<digest> \
   --repo <owner>/<repo>
 ```
 
-Set `RELEASE_COMPOSE_PROJECT` when a host runs multiple projects. Its default is
+Set `PROJECT_NAME` when a host runs multiple projects. Its default is
 derived from the current repository directory so unrelated projects do not
 share Compose resources.
 
@@ -210,18 +156,14 @@ application secrets, volume access, or Docker-socket access; static and media
 delivery remain inside the application's Compose boundary.
 
 ```bash
-make up-prod HOST_INGRESS=1 HOST_INGRESS_PORT=18080
-make smoke-host-ingress HOST_INGRESS_PORT=18080 \
-  HOST_INGRESS_HOST=app.example.com
-make down-prod HOST_INGRESS=1 HOST_INGRESS_PORT=18080
+make config-prod
+make up-prod
+make verify-prod
+make down-prod
 ```
 
-Digest-pinned deployments use the same opt-in flag:
-
-```bash
-make deploy-release HOST_INGRESS=1 HOST_INGRESS_PORT=18080 \
-  RELEASE_FILE=/path/to/release-<sha>.env
-```
+Set `APP_PORT=18080` and `HOST_INGRESS_HOST=app.example.com` in the private
+production env file. Use `make config-prod` to inspect the resolved model.
 
 Configure the host ingress to route `app.example.com` to
 `http://127.0.0.1:18080` and to replace the `Host`, `X-Forwarded-Proto`, and
@@ -239,14 +181,13 @@ another service name without copying the template. Substitution is deliberately
 restricted to `BACKEND_HOST`, preserving Nginx runtime variables such as `$host`
 and `$remote_addr`. API and Django admin requests go to that backend, while
 static files, built frontend assets, and client-side routes remain owned by
-Nginx. Ordinary `up-prod`, `bootstrap-prod`, and `deploy-release` operations
-recreate Nginx after replacing the backend so it cannot retain the old
-container address. Its bare `/admin` redirect remains relative so the private
+Nginx. Docker DNS resolution refreshes the backend address after replacement.
+Its bare `/admin` redirect remains relative so the private
 HTTP origin never downgrades the public HTTPS scheme.
 
 Existing React/Vite children adopting this behavior should copy the host-ingress
-Compose overlay and Nginx template together, plus the Nginx refresh lines and
-admin checks from the root Makefile. Keep the child's hostnames, loopback ports,
+Compose overlay and Nginx template together with the command implementation.
+Keep the child's hostnames, loopback ports,
 Compose identity, release registry, CSP additions, and application-specific
 promotion or backup checks in the child. Server-rendered children already use
 their profile-owned Nginx release topology and should retain that boundary.

@@ -1,0 +1,267 @@
+"""Small, dependency-free primitives for the public Make interface."""
+
+import contextlib
+import fcntl
+import gzip
+import hashlib
+import json
+import os
+import re
+import subprocess
+from pathlib import Path
+
+from scaffold_common import (
+    Rejected as Rejected,
+)
+from scaffold_common import (
+    atomic as atomic,
+)
+from scaffold_common import (
+    immutable as immutable,
+)
+from scaffold_common import (
+    read_json as read_json,
+)
+from scaffold_common import (
+    require as require,
+)
+from scaffold_common import (
+    revision as revision,
+)
+from scaffold_common import (
+    run as run,
+)
+from scaffold_common import (
+    write_json as write_json,
+)
+
+
+def release_identity(release):
+    data = {key: release[key] for key in ("revision", "profile", "platform")}
+    data["images"] = release.get("image_ids", release["images"])
+    return hashlib.sha256(
+        json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def save_images(path, identities):
+    """Stream image transport without needing a second uncompressed archive."""
+    path = Path(path)
+    temporary = path.with_suffix(path.suffix + ".pending")
+    try:
+        with (
+            temporary.open("wb") as output,
+            subprocess.Popen(
+                ["docker", "image", "save", *dict.fromkeys(identities)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            ) as process,
+        ):
+            try:
+                with gzip.GzipFile(
+                    fileobj=output, mode="wb", mtime=0, compresslevel=1
+                ) as compressed:
+                    while chunk := process.stdout.read(1024 * 1024):
+                        compressed.write(chunk)
+            except BaseException:
+                process.kill()
+                raise
+            require(process.wait() == 0, "Docker image capture failed")
+        temporary.chmod(0o600)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def compose_literals(value):
+    """A resolved model must not interpolate credentials a second time."""
+    if isinstance(value, str):
+        return value.replace("$", "$$")
+    if isinstance(value, list):
+        return [compose_literals(item) for item in value]
+    if isinstance(value, dict):
+        return {key: compose_literals(item) for key, item in value.items()}
+    return value
+
+
+def seal_release(directory):
+    directory = Path(directory)
+    hashes = {}
+    names = {"manifest.json", "source.tar", "source.bundle", "images.tar.gz"}
+    names.update(
+        name
+        for name in ("source-check.json", "image-check.json", "runtime-check.json")
+        if (directory / name).exists()
+    )
+    for name in sorted(names):
+        with (directory / name).open("rb") as stream:
+            hashes[name] = hashlib.file_digest(stream, "sha256").hexdigest()
+        (directory / name).chmod(0o600)
+    write_json(directory / "integrity.json", hashes)
+
+
+def verify_seal(directory):
+    directory = Path(directory)
+    hashes = read_json(directory / "integrity.json")
+    expected = {"manifest.json", "source.tar", "source.bundle", "images.tar.gz"}
+    expected.update(
+        name
+        for name in ("source-check.json", "image-check.json", "runtime-check.json")
+        if (directory / name).exists()
+    )
+    require(
+        set(hashes) == expected,
+        "incomplete release integrity record",
+    )
+    for name, expected in hashes.items():
+        with (directory / name).open("rb") as stream:
+            require(
+                hashlib.file_digest(stream, "sha256").hexdigest() == expected,
+                "release bundle integrity mismatch",
+            )
+
+
+def read_env(path):
+    """Read literal Compose inputs; never evaluate shell or Make expressions."""
+    require(Path(path).is_file(), f"missing configuration: {path}; run make prepare-<env>")
+    result = {}
+    for raw in Path(path).read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, separator, value = line.partition("=")
+        require(
+            separator and re.fullmatch("[A-Z][A-Z0-9_]*", key),
+            "invalid configuration key",
+        )
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        require("\n" not in value and "\0" not in value, "configuration must be literal")
+        result[key] = value
+    return result
+
+
+def validate_release(data, selected=None, platform=None):
+    require(isinstance(data, dict), "release manifest must be an object")
+    require(data.get("schema") == 1, "unsupported release manifest")
+    revision(data.get("revision"))
+    require(
+        data.get("profile") in ("react-vite", "server-rendered-django"),
+        "unknown release profile",
+    )
+    require(not selected or data["profile"] == selected, "release profile mismatch")
+    require(
+        re.fullmatch(r"linux/(amd64|arm64)", data.get("platform", "")),
+        "unsupported release architecture",
+    )
+    require(not platform or data["platform"] == platform, "release architecture mismatch")
+    images = data.get("images", {})
+    require(isinstance(images, dict), "invalid runtime image inventory")
+    require(
+        {"backend", "web", "db", "backup"} <= images.keys(),
+        "release runtime image inventory is incomplete",
+    )
+    for value in images.values():
+        immutable(value)
+    if "image_ids" in data:
+        require(
+            isinstance(data["image_ids"], dict) and data["image_ids"].keys() == images.keys(),
+            "incomplete published image identity mapping",
+        )
+        for value in data["image_ids"].values():
+            require(
+                re.fullmatch("sha256:[0-9a-f]{64}", value),
+                "invalid published content identity",
+            )
+    require(
+        data.get("backup_profile") in ("none", "immutable-backup"),
+        "unknown backup profile",
+    )
+    return data
+
+
+@contextlib.contextmanager
+def locked(directory):
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with (directory / "operator.lock").open("a") as stream:
+        os.chmod(stream.name, 0o600)
+        try:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise Rejected("another operation owns this environment") from error
+        try:
+            yield
+        finally:
+            fcntl.flock(stream, fcntl.LOCK_UN)
+
+
+def target(goal):
+    plain = {
+        "help",
+        "profiles",
+        "setup",
+        "hooks",
+        "build",
+        "publish",
+        "download",
+        "download-latest",
+        "check",
+        "format-check",
+        "lint",
+        "typecheck",
+        "migrations-check",
+        "framework-check",
+        "test",
+        "image-check",
+        "deps-lock",
+        "migrations",
+        "format",
+        "clean",
+    }
+    if goal in plain:
+        return goal, None, None
+    for operation in (
+        "integration-test",
+        "monitor-check",
+        "backup-test",
+        "prepare",
+        "restart",
+        "rollback",
+        "snapshots",
+        "restore",
+        "migrate",
+        "superuser",
+        "console",
+        "history",
+        "config",
+        "verify",
+        "backup",
+        "shell",
+        "logs",
+        "down",
+        "up",
+        "ps",
+        "rm",
+        "ci",
+    ):
+        for environment in ("dev", "prod", "ephemeral"):
+            prefix = operation + "-" + environment
+            if goal == prefix:
+                require(
+                    operation != "ci" or environment == "ephemeral",
+                    "CI uses ephemeral only",
+                )
+                return operation, environment, None
+            if goal.startswith(prefix + "-"):
+                service = goal[len(prefix) + 1 :]
+                require(
+                    operation in ("up", "down", "restart", "ps", "logs", "shell"),
+                    "this command has no service selector",
+                )
+                require(
+                    re.fullmatch("[a-z][a-z0-9_-]*", service),
+                    "invalid service selector",
+                )
+                return operation, environment, service
+    raise Rejected(f"unknown command: {goal}; run make help")

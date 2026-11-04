@@ -1,4 +1,5 @@
 import copy
+import gzip
 import hashlib
 import importlib.util
 import io
@@ -74,6 +75,64 @@ class BoundaryTests(unittest.TestCase):
         self.save(b"changed layer")
         with self.assertRaisesRegex(bundle.Rejected, "layer digest"):
             bundle.validate_images(self.archive, self.images, "linux/arm64")
+
+    def save_oci(self, *, corrupt_layer: bool = False, corrupt_manifest: bool = False) -> str:
+        layer = gzip.compress(self.layer, mtime=0)
+        layer_id = "sha256:" + hashlib.sha256(layer).hexdigest()
+        manifest = json.dumps(
+            {
+                "schemaVersion": 2,
+                "config": {"digest": self.identity},
+                "layers": [{"digest": layer_id}],
+            }
+        ).encode()
+        manifest_id = "sha256:" + hashlib.sha256(manifest).hexdigest()
+        index = json.dumps(
+            {
+                "schemaVersion": 2,
+                "manifests": [
+                    {"digest": manifest_id, "platform": {"os": "linux", "architecture": "arm64"}},
+                    {
+                        "digest": "sha256:" + "c" * 64,
+                        "platform": {"os": "linux", "architecture": "amd64"},
+                    },
+                ],
+            }
+        ).encode()
+        identity = "sha256:" + hashlib.sha256(index).hexdigest()
+        config_path = "blobs/sha256/" + self.identity.removeprefix("sha256:")
+        layer_path = "blobs/sha256/" + layer_id.removeprefix("sha256:")
+        with tarfile.open(self.archive, "w:gz") as archive:
+            add(
+                archive,
+                "manifest.json",
+                json.dumps([{"Config": config_path, "Layers": [layer_path]}]).encode(),
+            )
+            add(archive, "index.json", json.dumps({"manifests": [{"digest": identity}]}).encode())
+            add(archive, "blobs/sha256/" + identity.removeprefix("sha256:"), index)
+            add(
+                archive,
+                "blobs/sha256/" + manifest_id.removeprefix("sha256:"),
+                b"changed" if corrupt_manifest else manifest,
+            )
+            add(archive, config_path, self.config_bytes)
+            add(archive, layer_path, gzip.compress(b"changed", mtime=0) if corrupt_layer else layer)
+        return identity
+
+    def test_accepts_containerd_index_identity_and_compressed_layers(self) -> None:
+        identity = self.save_oci()
+        self.images["app"]["id"] = identity
+        self.assertEqual(
+            bundle.validate_images(self.archive, self.images, "linux/arm64")[identity], self.config
+        )
+
+    def test_rejects_changed_oci_manifest_or_compressed_layer(self) -> None:
+        for corruption in ("corrupt_layer", "corrupt_manifest"):
+            with self.subTest(corruption=corruption):
+                identity = self.save_oci(**{corruption: True})
+                self.images["app"]["id"] = identity
+                with self.assertRaisesRegex(bundle.Rejected, "digest mismatch"):
+                    bundle.validate_images(self.archive, self.images, "linux/arm64")
 
     def test_rejects_wrong_architecture(self) -> None:
         with self.assertRaisesRegex(bundle.Rejected, "architecture"):

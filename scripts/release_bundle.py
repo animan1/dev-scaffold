@@ -4,14 +4,15 @@ The independently transferred bundle SHA256 remains the trust boundary;
 content checks detect damage, not authorship. Uses only the Python standard library.
 """
 
+import gzip
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import tarfile
 import time
+from pathlib import Path, PurePosixPath
 
 
 class Rejected(Exception):
@@ -192,8 +193,87 @@ def extract(path, destination):
                 target.chmod(item.mode & 0o755)
 
 
+def layer_digests(archive, files, name, checked):
+    if name not in checked:
+        require(name in files, "incomplete image layer archive")
+        with archive.extractfile(files[name]) as stream:
+            raw = "sha256:" + hashlib.file_digest(stream, "sha256").hexdigest()
+        with archive.extractfile(files[name]) as stream:
+            compressed = stream.read(2) == b"\x1f\x8b"
+            stream.seek(0)
+            if compressed:
+                with gzip.GzipFile(fileobj=stream) as decoded:
+                    diff = (
+                        "sha256:" + hashlib.file_digest(decoded, "sha256").hexdigest()
+                    )
+            else:
+                diff = raw
+        checked[name] = raw, diff
+    return checked[name]
+
+
+def oci_aliases(archive, files, configs, target, checked):
+    """Resolve verified OCI manifest/index identities to the captured configs."""
+    aliases = {identity: identity for identity in configs}
+    resolved = {}
+
+    def resolve(identity):
+        if identity in resolved:
+            return resolved[identity]
+        require(re.fullmatch(r"sha256:[0-9a-f]{64}", identity), "invalid OCI identity")
+        name = "blobs/sha256/" + identity.removeprefix("sha256:")
+        require(name in files, "incomplete OCI metadata archive")
+        raw = archive.extractfile(files[name]).read()
+        require(
+            "sha256:" + hashlib.sha256(raw).hexdigest() == identity,
+            "OCI metadata digest mismatch",
+        )
+        data = json.loads(raw)
+        require(isinstance(data, dict), "invalid OCI metadata")
+        if "manifests" in data:
+            selected = []
+            for item in data["manifests"]:
+                platform = item.get("platform", {})
+                actual = platform.get("os", "") + "/" + platform.get("architecture", "")
+                child = "blobs/sha256/" + item["digest"].removeprefix("sha256:")
+                if actual in ("/", target) and child in files:
+                    selected.append(resolve(item["digest"]))
+            require(
+                len(set(selected)) == 1,
+                "OCI index has no unique captured target architecture",
+            )
+            config_id = selected[0]
+        else:
+            config_id = data.get("config", {}).get("digest")
+            require(config_id in configs, "OCI manifest has no captured runtime config")
+            config_path = "blobs/sha256/" + config_id.removeprefix("sha256:")
+            require(config_path in files, "incomplete OCI config archive")
+            config_bytes = archive.extractfile(files[config_path]).read()
+            require(
+                "sha256:" + hashlib.sha256(config_bytes).hexdigest() == config_id,
+                "OCI config digest mismatch",
+            )
+            diffs = configs[config_id]["rootfs"]["diff_ids"]
+            layers = data.get("layers", [])
+            require(len(layers) == len(diffs), "OCI image layer count mismatch")
+            for item, expected in zip(layers, diffs):
+                name = "blobs/sha256/" + item["digest"].removeprefix("sha256:")
+                raw_digest, diff_digest = layer_digests(archive, files, name, checked)
+                require(raw_digest == item["digest"], "OCI layer digest mismatch")
+                require(diff_digest == expected, "image layer digest mismatch")
+        aliases[identity] = config_id
+        resolved[identity] = config_id
+        return config_id
+
+    if "index.json" in files:
+        index = json.load(archive.extractfile(files["index.json"]))
+        for item in index.get("manifests", []):
+            resolve(item["digest"])
+    return aliases
+
+
 def validate_images(path, images, target):
-    """Verify config identities, platform and uncompressed layer digests before load."""
+    """Verify Docker/OCI identities, architecture and decoded layers before load."""
     with tarfile.open(path) as archive:
         files = {item.name: item for item in members(archive) if item.isfile()}
         require("manifest.json" in files, "Docker save manifest missing")
@@ -211,21 +291,19 @@ def validate_images(path, images, target):
             diffs = config["rootfs"]["diff_ids"]
             require(len(diffs) == len(item["Layers"]), "image layer count mismatch")
             for layer, expected in zip(item["Layers"], diffs):
-                if layer not in checked_layers:
-                    with archive.extractfile(files[layer]) as stream:
-                        checked_layers[layer] = (
-                            "sha256:"
-                            + hashlib.file_digest(stream, "sha256").hexdigest()
-                        )
                 require(
-                    checked_layers[layer] == expected, "image layer digest mismatch"
+                    layer_digests(archive, files, layer, checked_layers)[1] == expected,
+                    "image layer digest mismatch",
                 )
             configs[identity] = config
+        aliases = oci_aliases(archive, files, configs, target, checked_layers)
+        requested = {item["id"] for item in images.values()}
         require(
-            set(configs) == {item["id"] for item in images.values()},
+            requested <= aliases.keys()
+            and {aliases[item] for item in requested} == configs.keys(),
             "incomplete/extra image archive",
         )
-        return configs
+        return {identity: configs[aliases[identity]] for identity in requested}
 
 
 def read_json(path):
@@ -399,9 +477,8 @@ def frozen_config(config, data, spec, destination, source):
         for volume in definition.get("volumes", []):
             if volume["type"] == "bind":
                 path = Path(volume["source"])
-                if path.is_relative_to(source):
-                    if not path.exists():
-                        path = destination / path.relative_to(source)
+                if path.is_relative_to(source) and not path.exists():
+                    path = destination / path.relative_to(source)
                 require(path.exists(), "required bind input missing: " + str(path))
                 volume["source"] = str(path)
                 volume.setdefault("bind", {})["create_host_path"] = False
@@ -410,9 +487,8 @@ def frozen_config(config, data, spec, destination, source):
         for value in config.get(group, {}).values():
             if "file" in value:
                 path = Path(value["file"])
-                if path.is_relative_to(source):
-                    if not path.exists():
-                        path = destination / path.relative_to(source)
+                if path.is_relative_to(source) and not path.exists():
+                    path = destination / path.relative_to(source)
                 require(path.is_file(), "required config/secret missing")
                 value["file"] = str(path)
     return config

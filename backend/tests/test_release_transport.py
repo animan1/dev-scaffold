@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import io
 import json
 import os
 import subprocess
+import tarfile
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -30,44 +33,142 @@ def dry_run(profile: str, target: str, *options: str) -> str:
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
-def test_release_build_targets_platform_and_labels_exact_revision(profile: str) -> None:
+def test_release_build_targets_platform_and_labels_exact_revision(
+    profile: str, operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SCAFFOLD_PROFILE", profile)
+    op = operator_module.Operator(tmp_path)
     revision = "a" * 40
-    output = dry_run(
-        profile,
-        "build-release-images",
-        "RELEASE_PLATFORM=linux/arm64",
-        f"RELEASE_REVISION={revision}",
+    commands: list[tuple[object, ...]] = []
+    monkeypatch.setattr(op, "head", lambda: revision)
+    monkeypatch.setattr(op, "clean_source", lambda: revision)
+    monkeypatch.setattr(op, "architecture", lambda: "linux/arm64")
+    monkeypatch.setattr(op, "build_inputs", lambda: [])
+    monkeypatch.setattr(op, "prepared_tool", lambda *a: True)
+    monkeypatch.setattr(op, "tooling_inputs", lambda *a: "prepared-inputs")
+    monkeypatch.setattr(op, "inspect_image", lambda *a: {"Id": "sha256:" + "b" * 64})
+
+    def execute(*args: object, **kwargs: object) -> None:
+        commands.append(args)
+        if args[:3] == ("git", "bundle", "create"):
+            Path(str(args[3])).write_bytes(b"committed history")
+        if args[:3] == ("docker", "image", "save"):
+            Path(str(args[args.index("--output") + 1])).write_bytes(b"image archive")
+
+    monkeypatch.setattr(operator_module, "run", execute)
+    monkeypatch.setattr(
+        operator_module, "save_images", lambda path, identities: path.write_bytes(b"image archive")
     )
-    build_commands = output.split("python3 scripts/record_local_release.py", 1)[0]
-    assert build_commands.count("--platform linux/arm64") == 2
-    assert output.count(f"--label org.opencontainers.image.revision={revision}") == 2
-
-
-@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
-def test_normal_release_keeps_native_build_and_pull_behavior(profile: str) -> None:
-    assert "--platform" not in dry_run(profile, "build-release-images", "RELEASE_PLATFORM=")
-    output = dry_run(profile, "deploy-release")
-    assert "pull " in output
-    assert output.index("pull ") < output.index("up -d")
-
-
-@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
-def test_installer_can_reuse_migrations_with_an_explicit_no_pull_command(profile: str) -> None:
-    output = dry_run(
-        profile, "deploy-release", "RELEASE_PULL=true", "COMPOSE_RELEASE=validated-compose"
+    source = io.BytesIO()
+    with tarfile.open(fileobj=source, mode="w"):
+        pass
+    monkeypatch.setattr(
+        operator_module.subprocess, "check_output", lambda *a, **k: source.getvalue()
     )
-    assert "pull " not in output
-    assert "validated-compose" in output
-    assert "python -m app.manage migrate" in output
-    assert "python -m app.manage collectstatic" in output
-    assert "--no-build" in output
+    operator_module.write_json(
+        tmp_path / "deploy/dependencies.json",
+        {
+            "images": {
+                name: {"pin": "example/" + name + "@sha256:" + "c" * 64}
+                for name in ("postgres", "restic", "rclone")
+            }
+        },
+    )
+    op.build()
+    builds = [command for command in commands if command[:2] == ("docker", "build")]
+    assert len(builds) == 3
+    for command in builds:
+        assert "--provenance=false" in command
+        assert command[command.index("--platform") + 1] == "linux/arm64"
+        assert (
+            command[command.index("--label") + 1] == "org.opencontainers.image.revision=" + revision
+        )
+    manifest = operator_module.read_json(op.release_dir() / "manifest.json")
+    assert {"backend", "web", "db", "backup", "tooling"} <= manifest["images"].keys()
+    assert manifest["images"]["db"] == "example/postgres@sha256:" + "c" * 64
+    assert manifest["image_ids"]["db"] == "sha256:" + "b" * 64
+
+
+@pytest.mark.parametrize("containerd", [False, True])
+def test_image_store_requirement_precedes_architecture_selection(
+    operator_module: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    containerd: bool,
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    monkeypatch.setenv("RELEASE_PLATFORM", "linux/arm64")
+    calls = []
+
+    def execute(*args: object, **kwargs: object) -> str:
+        calls.append(args)
+        assert args == ("docker", "info", "--format", "{{json .DriverStatus}}")
+        return json.dumps(
+            [["driver-type", "io.containerd.snapshotter.v1"]]
+            if containerd
+            else [["Backing Filesystem", "extfs"]]
+        )
+
+    monkeypatch.setattr(operator_module, "run", execute)
+    if containerd:
+        assert op.architecture() == "linux/arm64"
+        assert op.architecture() == "linux/arm64"
+        assert len(calls) == 1
+    else:
+        with pytest.raises(operator_module.Rejected, match="containerd image store is required"):
+            op.architecture()
+        assert not op.local.exists()
+
+
+def test_pinned_dependency_can_use_captured_digest_without_registry_access(
+    operator_module: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    identity = "sha256:" + "b" * 64
+    reference = "example/db@" + identity
+    candidates = []
+
+    def inspect(candidate: str, platform: str) -> dict[str, str]:
+        candidates.append(candidate)
+        assert platform == "linux/arm64"
+        if candidate == reference:
+            raise operator_module.Rejected("registry alias absent after archive load")
+        return {"Id": identity}
+
+    monkeypatch.setattr(op, "inspect_image", inspect)
+    monkeypatch.setattr(
+        operator_module, "run", lambda *a, **k: pytest.fail("unexpected registry call")
+    )
+    assert op.pinned_image(reference, "linux/arm64") == {"Id": identity}
+    assert candidates == [reference, identity]
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
-def test_runtime_inventory_includes_optional_services(profile: str) -> None:
-    output = dry_run(profile, "release-bundle-config", "PROD_ENV_FILE=/tmp/private-production.env")
-    assert "--profile '*' config --format json" in output
-    assert "PROD_ENV_FILE=/tmp/private-production.env" in output
+def test_normal_startup_neither_rebuilds_nor_pulls(
+    profile: str, operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SCAFFOLD_PROFILE", profile)
+    op = operator_module.Operator(tmp_path)
+    data = {"revision": "a" * 40}
+    commands: list[tuple[object, ...]] = []
+    monkeypatch.setattr(op, "head", lambda: "a" * 40)
+    monkeypatch.setattr(op, "release", lambda: data)
+    monkeypatch.setattr(
+        op, "config", lambda *a: (None, {"services": {"db": {}, op.app: {}, op.web: {}}})
+    )
+    monkeypatch.setattr(op, "preflight_release", lambda *a: None)
+    monkeypatch.setattr(op, "retain", lambda *a: None)
+    monkeypatch.setattr(op, "state_dir", lambda *a: tmp_path / "state")
+    monkeypatch.setattr(op, "migrate", lambda *a: None)
+    monkeypatch.setattr(op, "manage", lambda *a, **k: None)
+    monkeypatch.setattr(op, "compose", lambda *a, **k: commands.append(a))
+    op.up("prod")
+    assert len(commands) == 2
+    for command in commands:
+        assert "--no-build" in command
+        assert command[command.index("--pull") + 1] == "never"
 
 
 @pytest.mark.parametrize("failure", [None, "revision", "platform"])
