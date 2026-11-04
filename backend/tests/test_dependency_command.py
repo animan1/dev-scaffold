@@ -51,6 +51,7 @@ def test_locking_refreshes_declared_images_and_uses_only_selected_container_tool
     assert len(containers) == (2 if profile == "react-vite" else 1)
     for command in containers:
         assert "--user" in command
+        assert "HOME=/tmp" in command
         assert "compose" not in command
         assert any("@sha256:" in str(part) for part in command)
     assert "--entrypoint" in containers[0]

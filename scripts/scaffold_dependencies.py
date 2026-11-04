@@ -12,7 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def lock_dependencies(root, profile, execute=run):
-    require(profile in ("react-vite", "server-rendered-django"), "unknown application profile")
+    require(
+        profile in ("react-vite", "server-rendered-django"),
+        "unknown application profile",
+    )
     path = root / "deploy/dependencies.json"
     data = read_json(path)
     for dependency in data["images"].values():
@@ -36,7 +39,9 @@ def lock_dependencies(root, profile, execute=run):
         digest = info["digest"]
         dependency["pin"] = immutable(source + "@" + digest)
     write_json(path, data)
-    project = "backend" if profile == "react-vite" else "profiles/server-rendered-django"
+    project = "backend"
+    if profile == "server-rendered-django":
+        project = "profiles/server-rendered-django"
     execute(
         "docker",
         "run",
@@ -47,6 +52,8 @@ def lock_dependencies(root, profile, execute=run):
         f"{root}:/workspace",
         "--workdir",
         "/workspace",
+        "--env",
+        "HOME=/tmp",
         "--env",
         "UV_CACHE_DIR=/tmp/uv-cache",
         "--env",
@@ -65,6 +72,8 @@ def lock_dependencies(root, profile, execute=run):
             "--rm",
             "--user",
             f"{os.getuid()}:{os.getgid()}",
+            "--env",
+            "HOME=/tmp",
             "--env",
             "CI=true",
             "--env",
