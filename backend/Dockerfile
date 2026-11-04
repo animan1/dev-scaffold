@@ -1,13 +1,15 @@
 # ---- base image with uv ----
-FROM python:3.12-slim AS base
+ARG PYTHON_IMAGE=python:3.12.11-slim-bookworm
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
+FROM ${UV_IMAGE} AS uv
+FROM ${PYTHON_IMAGE} AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:${PATH}"
+# Use the same committed tool input for source checks and release builds.
+COPY --from=uv /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
 
 WORKDIR /app
 # Only copy files that influence deps first for caching
@@ -17,8 +19,8 @@ ENV PYTHONPATH="/app/src"
 
 # ---- dev image ----
 FROM base AS dev
-# For dev, allow lock to drift; for prod we'll use --frozen in the image build stage
-RUN uv sync --all-extras
+# Source preparation and production builds both honor the committed lock.
+RUN uv sync --frozen --all-extras
 # COPY src ./src
 # Install tools needed by CI and committed-release history validation
 RUN apt-get update && apt-get install -y --no-install-recommends bash git make && rm -rf /var/lib/apt/lists/*
@@ -32,6 +34,6 @@ ENV DJANGO_SETTINGS_MODULE=app.project.settings.prod
 RUN uv sync --frozen
 COPY src ./src
 RUN mkdir -p /static
-RUN python -m app.manage collectstatic --noinput
+RUN DJANGO_SECRET_KEY=build-only-not-for-runtime python -m app.manage collectstatic --noinput
 # Gunicorn default for prod
 CMD ["gunicorn", "app.project.wsgi:application", "-b", "0.0.0.0:8000", "--workers", "2", "--threads", "4", "--timeout", "60"]
