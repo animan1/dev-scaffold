@@ -45,11 +45,14 @@ def run(*command, cwd=None, env=None, capture=False, input=None, sensitive=()):
                 )
             )
         ]
-        for value in sorted((str(value) for value in private if value), key=len, reverse=True):
+        for value in sorted(
+            (str(value) for value in private if value),
+            key=len,
+            reverse=True,
+        ):
             detail = detail.replace(value, "[redacted]")
-        raise Rejected(
-            f"{command[0]} failed (exit {result.returncode})" + (": " + detail if detail else "")
-        )
+        detail = ": " + detail if detail else ""
+        raise Rejected(f"{command[0]} failed (exit {result.returncode}){detail}")
     return result.stdout.strip() if capture else ""
 
 
@@ -59,7 +62,11 @@ def atomic(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as stream:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=path.parent,
+            delete=False,
+        ) as stream:
             temporary = Path(stream.name)
             stream.write(content)
             stream.flush()
