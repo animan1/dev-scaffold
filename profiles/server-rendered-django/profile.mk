@@ -72,6 +72,9 @@ help: ## Show available commands
 build: ## Build the deterministic development application image
 	$(COMPOSE) build app
 
+.PHONY: setup
+setup: build ## Prepare Docker development dependencies from the committed lockfile
+
 .PHONY: up
 up: ## Start Django and PostgreSQL in full-Docker development
 	$(COMPOSE) up -d --build db app

@@ -438,16 +438,13 @@ be.run: ## Run Django dev server (app.settings.dev)
 
 # ---- Setup / Hooks ----
 .PHONY: setup
-setup: ## Install Python/FE deps and pre-commit hooks
-setup: be.setup fe.setup
-
-.PHONY: be.setup
-be.setup: ## Sync backend deps (uv) and install hooks
-be.setup: be.sync hooks
-
-.PHONY: be.sync
-be.sync:
-	cd $(PY_DIR) && uv sync --all-extras
+setup: ## Prepare Docker development dependencies from committed lockfiles
+	$(COMPOSE_DEV) build backend
+	@mkdir -p frontend/node_modules
+	$(COMPOSE_DEV) run --rm --no-deps --user "$$(id -u):$$(id -g)" \
+		--env HOME=/tmp --env COREPACK_HOME=/tmp/corepack \
+		--volume "$(CURDIR)/frontend/node_modules:/app/node_modules" \
+		frontend corepack pnpm install --frozen-lockfile
 
 .PHONY: deps.lock
 deps.lock: ## Update the selected profile's Python lockfile with pinned Dockerized uv

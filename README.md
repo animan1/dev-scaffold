@@ -36,21 +36,15 @@ application work. Once a project contains real code, use the separate
 
 ## Quickstart
 
-### Local Dev (no Docker)
-
-```bash
-make setup verify # bootstrap the environment
-make setup be.run # run Django
-```
-
-```bash
-# run React
-make fe.run
-```
-
 ### Docker Dev
 
+`make setup` prepares the selected profile's Docker development dependencies from
+committed lockfiles without starting the application or installing Git hooks.
+Git hooks remain an explicit `make hooks` operation.
+
 ```bash
+make setup     # prepare dependencies without starting services
+make hooks     # install Git hooks explicitly
 make up        # start backend + nginx (proxying API, static, and frontend)
 make smoke     # run API, static, and FE smokes
 make down      # stop stack while preserving development volumes
