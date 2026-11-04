@@ -36,16 +36,18 @@ application work. Once a project contains real code, use the separate
 
 ## Quickstart
 
-### Local Dev (no Docker)
+### Source checks
+
+The host needs Git, Make, Python 3.12+, and Docker with Compose and the
+containerd image store. Application tools run in containers.
 
 ```bash
-make setup verify # bootstrap the environment
-make setup be.run # run Django
+make setup
+make check
 ```
 
 ```bash
-# run React
-make fe.run
+make hooks # optionally install this checkout's Docker validation hook
 ```
 
 ### Docker Dev
