@@ -545,8 +545,17 @@ fe.fmt-check: ## Prettier check (frontend)
 	cd $(FRONTEND_DIR) && pnpm fmt-check
 
 .PHONY: fe.test
+FE_COVERAGE_ARGS :=
+ifeq ($(COVERAGE),1)
+FE_COVERAGE_ARGS := --coverage --coverage.all=true \
+	'--coverage.include=src/**/*.{ts,tsx}' \
+	'--coverage.exclude=src/**/__tests__/**' \
+	'--coverage.exclude=src/**/*.{test,spec}.{ts,tsx}' \
+	--coverage.exclude=src/setupTests.ts '--coverage.exclude=src/**/*.d.ts' \
+	--coverage.reporter=lcov --coverage.reporter=json-summary
+endif
 fe.test: ## Vitest (frontend)
-	cd $(FRONTEND_DIR) && pnpm test
+	cd $(FRONTEND_DIR) && pnpm run test $(FE_COVERAGE_ARGS)
 
 .PHONY: fe.typecheck
 fe.typecheck: ## TypeScript typecheck (frontend)
