@@ -44,6 +44,7 @@ Git hooks remain an explicit `make hooks` operation.
 
 ```bash
 make setup     # prepare dependencies without starting services
+make hooks     # install Git hooks explicitly
 make up        # start backend + nginx (proxying API, static, and frontend)
 make smoke     # run API, static, and FE smokes
 make down      # stop stack while preserving development volumes
