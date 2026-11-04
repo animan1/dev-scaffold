@@ -130,8 +130,10 @@ def test_local_tls_preparation_requires_opt_in_and_covers_browser_hosts(
 
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Needs the Docker Compose client")
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
 def test_prepare_prod_generates_private_inputs_and_revalidates_without_overwriting(
     tmp_path: Path,
+    profile: str,
 ) -> None:
     (tmp_path / "deploy").mkdir()
     shutil.copyfile(
@@ -142,12 +144,25 @@ def test_prepare_prod_generates_private_inputs_and_revalidates_without_overwriti
         _repo_root() / "deploy/docker-compose.host-ingress.yml",
         tmp_path / "deploy/docker-compose.host-ingress.yml",
     )
+    server_profile = tmp_path / "profiles/server-rendered-django"
+    server_profile.mkdir(parents=True)
+    shutil.copyfile(
+        _repo_root() / "profiles/server-rendered-django/release.compose.yml",
+        server_profile / "release.compose.yml",
+    )
+    revision = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"],
+        cwd=_repo_root(),
+        text=True,
+    ).strip()
     command = [
         "make",
         "--no-print-directory",
         "-f",
         str(_repo_root() / "Makefile"),
-        "SCAFFOLD_PROFILE=react-vite",
+        f"SCAFFOLD_PROFILE={profile}",
+        f"RELEASE_REVISION={revision}",
+        "DOCKER_HOST=unix:///nonexistent",
         "HOST_INGRESS=1",
         "prepare-prod",
     ]
@@ -155,6 +170,8 @@ def test_prepare_prod_generates_private_inputs_and_revalidates_without_overwriti
     private_env = tmp_path / "deploy/.env.prod"
     original = private_env.read_bytes()
     assert private_env.stat().st_mode & 0o077 == 0
+    assert not (tmp_path / "deploy/nginx/certs").exists()
+    assert not (tmp_path / "deploy/releases").exists()
     private_env.chmod(0o644)
     subprocess.run(command, cwd=tmp_path, capture_output=True, check=True)
     assert private_env.read_bytes() == original
@@ -186,9 +203,11 @@ def test_prepare_prod_generates_private_inputs_and_revalidates_without_overwriti
         ("postgresql://app:private-password@db:invalid/app", False),
     ],
 )
+@pytest.mark.parametrize("application_service", ["backend", "app"])
 def test_production_input_validation_checks_resolved_credentials_without_leaking_values(
     database_url: str,
     accepted: bool,
+    application_service: str,
 ) -> None:
     environment = {
         "DJANGO_SECRET_KEY": "private-key",
@@ -199,9 +218,17 @@ def test_production_input_validation_checks_resolved_credentials_without_leaking
         "DATABASE_URL": database_url,
     }
     result = subprocess.run(
-        [sys.executable, str(_repo_root() / "scripts/validate_prod_config.py")],
+        [
+            sys.executable,
+            str(_repo_root() / "scripts/validate_prod_config.py"),
+            application_service,
+        ],
         input=json.dumps(
-            {"services": {name: {"environment": environment} for name in ("backend", "db")}}
+            {
+                "services": {
+                    name: {"environment": environment} for name in (application_service, "db")
+                }
+            }
         ),
         capture_output=True,
         text=True,

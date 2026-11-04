@@ -3,6 +3,16 @@ include $(SCAFFOLD_ROOT).scaffold-profile
 UV_IMAGE ?= ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
 SCAFFOLD_BACKUP_PROFILE ?= none
 CI_BACKUP_PROFILES ?= immutable-backup
+PROD_ENV_FILE ?= deploy/.env.prod
+PROD_APPLICATION_SERVICE ?= backend
+PROD_CONFIG = $(COMPOSE_PROD)
+
+.PHONY: prepare-prod
+prepare-prod: ## Prepare and validate private production inputs without starting services
+	@PROD_ENV_FILE="$(PROD_ENV_FILE)" bash "$(SCAFFOLD_ROOT)deploy/setup-env.sh"
+	@set -o pipefail; $(PROD_CONFIG) config --format json 2>/dev/null | \
+		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" "$(PROD_APPLICATION_SERVICE)"
+	$(PREPARE_PROD_TLS)
 
 .PHONY: profiles
 profiles:
@@ -45,7 +55,6 @@ RELEASE_REVISION ?= $(shell git rev-parse HEAD)
 RELEASE_BACKEND_TAG = $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG = $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
 RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
-PROD_ENV_FILE ?= deploy/.env.prod
 RELEASE_PLATFORM ?=
 RELEASE_PULL ?= $(COMPOSE_RELEASE) pull backend nginx
 RELEASE_HTTP_PORT ?= 18080
@@ -167,13 +176,9 @@ ci: up be.wait be.ci fe.ci smoke
 
 # Prod
 LOCAL_TLS ?= 0
-.PHONY: prepare-prod
-prepare-prod: ## Prepare private production inputs; LOCAL_TLS=1 permits localhost certificate creation/renewal
-	@PROD_ENV_FILE="$(PROD_ENV_FILE)" bash "$(SCAFFOLD_ROOT)deploy/setup-env.sh"
-	@set -o pipefail; $(COMPOSE_PROD) config --format json 2>/dev/null | \
-		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py"
-	# Self-signed certificate renewal is explicitly local-only.
-	@if [ "$(HOST_INGRESS)" = "1" ]; then \
+# Self-signed certificate renewal is explicitly local-only.
+define PREPARE_PROD_TLS
+@if [ "$(HOST_INGRESS)" = "1" ]; then \
 		echo "Host ingress owns TLS; skipping application certificate generation"; \
 	elif [ "$(LOCAL_TLS)" = "1" ]; then \
 		if [ ! -f deploy/nginx/certs/server.key ] || \
@@ -190,6 +195,7 @@ prepare-prod: ## Prepare private production inputs; LOCAL_TLS=1 permits localhos
 			openssl x509 -in deploy/nginx/certs/server.crt -noout -checkend 0 >/dev/null || \
 			{ echo 'Install valid production TLS inputs, or use LOCAL_TLS=1 for the laptop dummy'; exit 1; }; \
 	fi
+endef
 
 .PHONY: bootstrap-prod
 bootstrap-prod: prepare-prod ## Prepare inputs and start the production stack

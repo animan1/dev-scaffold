@@ -5,10 +5,10 @@ import sys
 from urllib.parse import unquote, urlsplit
 
 
-def validate(config):
+def validate(config, application_service="backend"):
     services = config["services"]
     database = services["db"]["environment"]
-    application = services["backend"]["environment"]
+    application = services[application_service]["environment"]
     for environment, names in (
         (database, ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB")),
         (application, ("DJANGO_SECRET_KEY", "DJANGO_ALLOWED_HOSTS", "DATABASE_URL")),
@@ -37,7 +37,7 @@ def validate(config):
 if __name__ == "__main__":
     try:
         config = json.load(sys.stdin)
-        validate(config)
+        validate(config, sys.argv[1] if len(sys.argv) > 1 else "backend")
     except (KeyError, TypeError, json.JSONDecodeError):
         sys.exit("Invalid production configuration; check the private input file")
     except ValueError:
