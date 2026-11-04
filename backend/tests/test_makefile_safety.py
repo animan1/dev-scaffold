@@ -3,71 +3,88 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from types import ModuleType
+
+import pytest
 
 
-def _repository_root() -> Path:
-    configured_root = os.getenv("REPO_DIR")
-    if configured_root is not None:
-        return Path(configured_root)
-    return Path(__file__).resolve().parents[2]
+def test_legacy_and_host_native_commands_are_not_public() -> None:
+    root = Path(os.getenv("REPO_DIR", Path(__file__).resolve().parents[2]))
+    for name in ("up", "reset", "be.run", "fe.run", "precommit", "wait", "deploy-release"):
+        result = subprocess.run(["make", "--dry-run", name], cwd=root, capture_output=True)
+        assert result.returncode != 0, name
 
 
-def _make(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["make", "SCAFFOLD_PROFILE=react-vite", "PY_DIR=backend", *arguments],
-        cwd=_repository_root(),
-        check=check,
-        capture_output=True,
-        text=True,
-    )
+@pytest.mark.parametrize("environment", ["dev", "prod", "ephemeral"])
+def test_normal_stop_never_removes_data(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    calls = []
+    monkeypatch.setattr(op, "current_model", lambda *a: (None, {"services": {"backend": {}}}))
+    monkeypatch.setattr(op, "current_compose", lambda *a, **k: calls.append(a))
+    op.down(environment)
+    assert calls == [(environment, "stop")]
 
 
-def test_precommit_runs_as_a_recipe() -> None:
-    output = _make("--dry-run", "precommit").stdout
-    assert "uv run --extra dev pre-commit run --all-files" in output
+def test_unknown_selector_never_reaches_a_mutating_command(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    calls = []
+    monkeypatch.setattr(op, "current_model", lambda *a: (None, {"services": {"backend": {}}}))
+    monkeypatch.setattr(op, "current_compose", lambda *a, **k: calls.append(a))
+    with pytest.raises(operator_module.Rejected, match="unknown service"):
+        op.down("prod", "typo")
+    assert not calls
 
 
-def test_react_profile_dependency_lock_uses_pinned_dockerized_uv() -> None:
-    output = _make("--dry-run", "deps.lock").stdout
-
-    assert "docker run --rm" in output
-    assert "ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim lock" in output
-    assert 'backend:/workspace"' in output
-    assert "--entrypoint /usr/local/bin/uv" in output
-
-
-def test_react_profile_exposes_django_migration_commands() -> None:
-    migrations = _make("--dry-run", "migrations").stdout
-    migrate = _make("--dry-run", "migrate").stdout
-
-    assert "python -m app.manage makemigrations" in migrations
-    assert "python -m app.manage migrate" in migrate
+def test_cleanup_rejects_another_environments_project(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    calls = []
+    monkeypatch.setattr(op, "config", lambda *a: (None, {"name": "dev-scaffold-prod"}))
+    monkeypatch.setattr(op, "compose", lambda *a, **k: calls.append(a))
+    with pytest.raises(operator_module.Rejected, match="namespace"):
+        op.remove("ephemeral")
+    assert not calls
 
 
-def test_react_profile_exposes_django_development_helpers() -> None:
-    superuser = _make("--dry-run", "superuser").stdout
-    shell = _make("--dry-run", "shell").stdout
-
-    assert superuser.index("python -m app.manage migrate") < superuser.index(
-        "python -m app.manage createsuperuser"
-    )
-    assert "python -m app.manage createsuperuser" in superuser
-    assert "python -m app.manage shell" in shell
-
-
-def test_down_preserves_development_volumes() -> None:
-    output = _make("--dry-run", "down").stdout
-    assert "docker compose -f deploy/docker-compose.dev.yml down" in output
-    assert "down -v" not in output
+def test_database_only_start_does_not_migrate_or_touch_other_services(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    calls = []
+    monkeypatch.setattr(op, "config", lambda *a: (None, {"services": {"db": {}, "backend": {}}}))
+    monkeypatch.setattr(op, "compose", lambda *a, **k: calls.append(a))
+    op.up("dev", "db")
+    assert calls == [("dev", "up", "--detach", "--no-build", "--no-deps", "--wait", "db")]
 
 
-def test_reset_requires_explicit_confirmation() -> None:
-    result = _make("reset", check=False)
-    assert result.returncode != 0
-    assert "Refusing to remove development volumes." in result.stdout
-    assert "make reset CONFIRM_RESET=1" in result.stdout
+@pytest.mark.parametrize("command", ["restore", "rollback"])
+def test_data_replacement_requires_per_invocation_confirmation(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    monkeypatch.delenv("CONFIRM", raising=False)
+    with pytest.raises(operator_module.Rejected, match="CONFIRM"):
+        getattr(op, command)("prod")
 
 
-def test_confirmed_reset_removes_development_volumes() -> None:
-    output = _make("--dry-run", "reset", "CONFIRM_RESET=1").stdout
-    assert "docker compose -f deploy/docker-compose.dev.yml down -v" in output
+def test_failed_backup_prevents_migration(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    calls = []
+    monkeypatch.setattr(op, "compose", lambda *a, **k: None)
+    monkeypatch.setattr(op, "database_state", lambda *a: {"status": "ready"})
+    monkeypatch.setattr(op, "manage", lambda *a, **k: calls.append(a))
+
+    def failed(*args: object, **kwargs: object) -> None:
+        raise operator_module.Rejected("backup failed")
+
+    monkeypatch.setattr(op, "backup", failed)
+    with pytest.raises(operator_module.Rejected, match="backup failed"):
+        op.migrate("dev")
+    assert not calls

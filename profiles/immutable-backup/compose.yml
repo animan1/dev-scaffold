@@ -41,6 +41,7 @@ services:
 
   monitor:
     profiles: ["monitoring"]
+    image: "${RELEASE_BACKEND_IMAGE:?Set RELEASE_BACKEND_IMAGE through the application adapter}"
     environment:
       BACKUP_STATUS_DIR: /backup-status
     volumes:

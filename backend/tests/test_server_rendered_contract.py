@@ -1,301 +1,52 @@
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
 
-def _repository_root() -> Path:
-    configured_root = os.getenv("REPO_DIR")
-    if configured_root is not None:
-        return Path(configured_root)
-    return Path(__file__).resolve().parents[2]
-
-
-def _make(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["make", "--no-print-directory", "SCAFFOLD_PROFILE=server-rendered-django", *arguments],
-        cwd=_repository_root(),
-        check=check,
-        capture_output=True,
-        text=True,
-    )
-
-
-def test_server_rendered_make_contract_and_quality_gates() -> None:
-    makefile = (_repository_root() / "profiles/server-rendered-django/profile.mk").read_text()
-
-    for target in (
-        "build",
-        "up",
-        "down",
-        "logs",
-        "ps",
-        "reset",
-        "deps.lock",
-        "format",
-        "lint",
-        "typecheck",
-        "test",
-        "coverage",
-        "check",
-        "verify",
-        "precommit",
-        "build-production",
-        "up-prod",
-        "smoke-prod",
-        "down-prod",
-        "smoke",
-    ):
-        assert f"\n{target}:" in makefile
-    for gate in (
-        "format-check",
-        "lint",
-        "typecheck",
-        "coverage",
-        "changed-coverage",
-        "migrations-check",
-        "django-check",
-    ):
-        assert f"$(MAKE) {gate}" in makefile
-
-
-def test_server_rendered_teardown_is_safe_and_reset_is_guarded() -> None:
-    down = _make("--dry-run", "down").stdout
-    assert "down --remove-orphans" in down
-    assert "down -v" not in down
-
-    reset = _make("reset", check=False)
-    assert reset.returncode != 0
-    assert "Refusing to remove development volumes." in reset.stdout
-
-    confirmed = _make("--dry-run", "reset", "CONFIRM_RESET=1").stdout
-    assert "down -v --remove-orphans" in confirmed
-    assert " up " not in confirmed
-
-
-def test_server_rendered_diagnostics_use_selected_compose_and_help() -> None:
-    help_output = _make("help").stdout
-    logs = _make("--dry-run", "logs").stdout
-    ps = _make("--dry-run", "ps").stdout
-
-    assert "logs" in help_output
-    assert "ps" in help_output
-    assert "profiles/server-rendered-django/compose.yml logs -f --tail=200" in logs
-    assert "COMPOSE_PROJECT_NAME=" in logs
-    assert "profiles/server-rendered-django/compose.yml ps" in ps
-    assert "COMPOSE_PROJECT_NAME=" in ps
-
-
-def test_server_rendered_precommit_is_a_recipe() -> None:
-    output = _make("--dry-run", "precommit").stdout
-    assert "pre-commit run" in output
-    assert "--all-files" in output
-
-
-def test_server_rendered_up_prod_uses_isolated_production_simulation() -> None:
-    output = _make("--dry-run", "up-prod").stdout
-    project_name = _repository_root().name
-
-    assert "profiles/server-rendered-django/backend.Dockerfile" in output
-    assert "profiles/server-rendered-django/release-nginx.Dockerfile" in output
-    assert "profiles/server-rendered-django/prod-sim-ingress.Dockerfile" in output
-    assert "profiles/server-rendered-django/prod-sim.compose.yml" in output
-    assert f"COMPOSE_PROJECT_NAME={project_name}-prod-sim" in output
-    assert "server-rendered-prod-sim.env" in output
-    assert "DJANGO_SECURE_SSL_REDIRECT" not in output
-    assert "pull app web" not in output
-    assert "Set RELEASE_FILE" not in output
-    database_start = output.index("up -d --no-build db")
-    production_check = output.index("python -m app.manage check --deploy")
-    migration = output.index("python -m app.manage migrate")
-    static_collection = output.index("python -m app.manage collectstatic --noinput --clear")
-    application_start = output.index("app web prod-sim-ingress")
-    assert database_start < production_check < migration < static_collection < application_start
-
-    down = _make("--dry-run", "down-prod").stdout
-    assert f"COMPOSE_PROJECT_NAME={project_name}-prod-sim" in down
-    assert "down --remove-orphans" in down
-    assert "down -v" not in down
-
-
-def test_server_rendered_prod_sim_uses_local_tls_ingress() -> None:
-    root = _repository_root()
-    overlay = (root / "profiles/server-rendered-django/prod-sim.compose.yml").read_text()
-    ingress = (root / "profiles/server-rendered-django/prod-sim-ingress.conf.template").read_text()
-    release = (root / "profiles/server-rendered-django/release.compose.yml").read_text()
-    smoke = _make("--dry-run", "smoke-prod").stdout
-
-    assert "ports: !override []" in overlay
-    assert "127.0.0.1:${PROD_SIM_HTTP_PORT:-18081}:80" in overlay
-    assert "127.0.0.1:${PROD_SIM_HTTPS_PORT:-18444}:443" in overlay
-    assert "prod-sim-ingress" not in release
-    assert "return 308 https://$host:${PROD_SIM_HTTPS_PORT}$request_uri" in ingress
-    assert "proxy_pass http://web:8080" in ingress
-    assert "proxy_set_header Host $http_host" in ingress
-    assert "proxy_set_header X-Forwarded-Proto https" in ingress
-    assert "http://127.0.0.1:18081/" in smoke
-    assert "https://127.0.0.1:18444/" in smoke
-    assert "/admin/login/\\?next=/admin/" in smoke
-    assert "set-cookie: csrftoken=.*; secure" in smoke
-
-
 def test_server_rendered_production_security_fails_closed() -> None:
-    settings = (_repository_root() / "backend/src/app/project/settings/prod.py").read_text()
-
-    assert "SECURE_SSL_REDIRECT = True" in settings
-    assert "SESSION_COOKIE_SECURE = True" in settings
-    assert "CSRF_COOKIE_SECURE = True" in settings
-    assert 'env.bool("DJANGO_SECURE_SSL_REDIRECT"' not in settings
-    assert 'env.bool("DJANGO_SESSION_COOKIE_SECURE"' not in settings
-    assert 'env.bool("DJANGO_CSRF_COOKIE_SECURE"' not in settings
+    root = Path(os.getenv("REPO_DIR", Path(__file__).resolve().parents[2]))
+    settings = (root / "backend/src/app/project/settings/prod.py").read_text()
+    for name in ("SECURE_SSL_REDIRECT", "SESSION_COOKIE_SECURE", "CSRF_COOKIE_SECURE"):
+        assert name + " = True" in settings
+        assert 'env.bool("DJANGO_' + name not in settings
 
 
 def test_server_rendered_profile_exposes_django_admin() -> None:
-    urls = (_repository_root() / "backend/src/app/project/urls.py").read_text()
-
-    assert "from django.contrib import admin" in urls
+    root = Path(os.getenv("REPO_DIR", Path(__file__).resolve().parents[2]))
+    urls = (root / "backend/src/app/project/urls.py").read_text()
     assert 'path("admin/", admin.site.urls)' in urls
 
 
-def test_server_rendered_prod_sim_wrapper_selects_the_profile() -> None:
-    script = _repository_root() / "profiles/server-rendered-django/prod-sim"
-    project_name = _repository_root().name
-
-    assert os.access(script, os.X_OK)
-    output = subprocess.run(
-        [script, "up", "--dry-run"],
-        cwd=_repository_root(),
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-
-    assert "profiles/server-rendered-django/backend.Dockerfile" in output
-    assert f"COMPOSE_PROJECT_NAME={project_name}-prod-sim" in output
-    assert "deploy/docker-compose.prod.yml" not in output
-
-    smoke = subprocess.run(
-        [script, "smoke", "--dry-run"],
-        cwd=_repository_root(),
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    assert "http://127.0.0.1:18081/" in smoke
-    assert "https://127.0.0.1:18444/" in smoke
+@pytest.mark.parametrize("gate", ["format-check", "lint", "typecheck", "test"])
+def test_server_rendered_checks_use_its_committed_configuration(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gate: str
+) -> None:
+    monkeypatch.setenv("SCAFFOLD_PROFILE", "server-rendered-django")
+    monkeypatch.setenv("COVERAGE", "0")
+    op = operator_module.Operator(tmp_path)
+    calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(op, "tool", lambda *a, **k: calls.append(a))
+    op.gate(gate)
+    assert len(calls) == 1
+    assert any("profiles/server-rendered-django/pyproject.toml" in str(value) for value in calls[0])
 
 
-def test_server_rendered_dependency_lock_uses_pinned_dockerized_uv() -> None:
-    output = _make("--dry-run", "deps.lock").stdout
+def test_source_gate_composition_stops_at_the_first_failure(
+    operator_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    op = operator_module.Operator(tmp_path)
+    calls: list[str] = []
 
-    assert "docker run --rm" in output
-    assert "ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim" in output
-    assert "lock --project profiles/server-rendered-django" in output
+    def gate(name: str) -> None:
+        calls.append(name)
+        if name == "lint":
+            raise operator_module.Rejected("lint failed")
 
-
-def test_server_rendered_django_migration_commands_use_docker() -> None:
-    migrations = _make("--dry-run", "migrations").stdout
-    migrate = _make("--dry-run", "migrate").stdout
-
-    assert "docker compose" in migrations
-    assert "python -m app.manage makemigrations" in migrations
-    assert "docker compose" in migrate
-    assert "python -m app.manage migrate" in migrate
-
-
-def test_server_rendered_django_development_helpers_use_docker() -> None:
-    help_output = _make("help").stdout
-    superuser = _make("--dry-run", "superuser").stdout
-    shell = _make("--dry-run", "shell").stdout
-
-    assert "superuser" in help_output
-    assert "shell" in help_output
-    assert "fe.run" not in help_output
-    assert "be.run" not in help_output
-    assert "docker compose" in superuser
-    assert "run --rm app" in superuser
-    assert superuser.index("python -m app.manage migrate") < superuser.index(
-        "python -m app.manage createsuperuser"
-    )
-    assert "python -m app.manage createsuperuser" in superuser
-    assert "cd backend/src" not in superuser
-    assert "docker compose" in shell
-    assert "run --rm app" in shell
-    assert "python -m app.manage shell" in shell
-    assert "cd backend/src" not in shell
-
-
-def test_server_rendered_help_includes_selected_optional_profiles() -> None:
-    help_output = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "help").stdout
-
-    assert "build-backup-image" in help_output
-    assert "verify-backup-image" in help_output
-    assert "backup-image-versions" in help_output
-    assert "fe.run" not in help_output
-    assert "be.run" not in help_output
-
-
-def test_server_rendered_tools_explicitly_load_profile_configuration() -> None:
-    profile_config = "/workspace/profiles/server-rendered-django/pyproject.toml"
-
-    assert f"ruff check --config {profile_config}" in _make("--dry-run", "lint").stdout
-    assert f"mypy --config-file {profile_config}" in _make("--dry-run", "typecheck").stdout
-    test_output = _make("--dry-run", "test").stdout
-    assert f"pytest -c {profile_config}" in test_output
-    coverage_output = _make("--dry-run", "coverage").stdout
-    assert f"pytest -c {profile_config}" in coverage_output
-    assert f"--cov-config={profile_config}" in coverage_output
-
-
-def test_changed_coverage_runs_from_backend() -> None:
-    output = _make("--dry-run", "changed-coverage").stdout
-
-    assert "cd /workspace/backend" in output
-    assert "diff-cover" in output
-    assert "coverage.xml" in output
-    assert "backend/coverage.xml" not in output
-
-
-@pytest.mark.skipif(shutil.which("diff-cover") is None, reason="diff-cover is profile-only")
-def test_diff_cover_matches_changed_backend_application_lines(tmp_path: Path) -> None:
-    repository = tmp_path / "repository"
-    backend = repository / "backend"
-    application = backend / "src" / "app" / "example.py"
-    application.parent.mkdir(parents=True)
-    application.write_text("def answer() -> int:\n    return 1\n")
-
-    subprocess.run(["git", "init", "--quiet"], cwd=repository, check=True)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
-    subprocess.run(["git", "config", "user.name", "Test"], cwd=repository, check=True)
-    subprocess.run(["git", "add", "backend/src/app/example.py"], cwd=repository, check=True)
-    subprocess.run(["git", "commit", "--quiet", "-m", "baseline"], cwd=repository, check=True)
-
-    application.write_text("def answer() -> int:\n    return 2\n")
-    (backend / "coverage.xml").write_text(
-        """<?xml version="1.0" ?>
-<coverage version="7.0" lines-valid="2" lines-covered="1" line-rate="0.5">
-  <sources><source>.</source></sources>
-  <packages><package name="app"><classes>
-    <class name="example" filename="src/app/example.py">
-      <lines><line number="1" hits="1"/><line number="2" hits="0"/></lines>
-    </class>
-  </classes></package></packages>
-</coverage>
-"""
-    )
-
-    result = subprocess.run(
-        ["diff-cover", "coverage.xml", "--compare-branch=HEAD", "--fail-under=90"],
-        cwd=backend,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode != 0
-    assert "src/app/example.py" in result.stdout
-    assert "No lines with coverage information" not in result.stdout
+    monkeypatch.setattr(op, "gate", gate)
+    with pytest.raises(operator_module.Rejected, match="lint failed"):
+        op.check()
+    assert calls == ["format-check", "lint"]

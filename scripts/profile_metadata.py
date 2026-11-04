@@ -14,6 +14,8 @@ def metadata(application, backup, applications, backups):
         raise ValueError("unknown or empty application validation matrix")
     if any(name not in BACKUPS for name in backups):
         raise ValueError("unknown backup validation profile")
+    if application not in applications or (backup != "none" and backup not in backups):
+        raise ValueError("selected profiles must be included in the validation matrix")
     return {
         "selected": {"application": application, "backup": backup},
         "validation": {"application": applications, "backup": backups},

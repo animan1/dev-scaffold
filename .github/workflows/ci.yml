@@ -4,173 +4,67 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: ["**"]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
-  profile-selection:
+  immutable-release:
     runs-on: ubuntu-latest
-    outputs:
-      ci-backup-profiles: ${{ steps.profiles.outputs.backup }}
-      ci-profiles: ${{ steps.profiles.outputs.value }}
-      selected-profile: ${{ steps.profiles.outputs.selected }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: profiles
-        run: |
-          metadata="$(make --no-print-directory profiles)"
-          echo "backup=$(jq -r '.validation.backup | join(" ")' <<< "$metadata")" >> "$GITHUB_OUTPUT"
-          echo "value=$(jq -r '.validation.application | join(" ")' <<< "$metadata")" >> "$GITHUB_OUTPUT"
-          echo "selected=$(jq -r '.selected.application' <<< "$metadata")" >> "$GITHUB_OUTPUT"
-
-  server-rendered-profile:
-    needs: profile-selection
-    if: contains(needs.profile-selection.outputs.ci-profiles, 'server-rendered-django')
-    runs-on: ubuntu-latest
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+      packages: write
+    env:
+      RELEASE_PLATFORM: linux/amd64
+      DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
+      RELEASE_BACKEND_SBOM: .local/sbom/backend.spdx.json
+      RELEASE_WEB_SBOM: .local/sbom/web.spdx.json
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Select the downstream-only server-rendered profile
+      - name: Read selected profiles and release namespace
+        id: profiles
+        shell: bash
         run: |
-          printf '%s\n' \
-            'SCAFFOLD_PROFILE ?= server-rendered-django' \
-            'CI_PROFILES ?= server-rendered-django' \
-            > .scaffold-profile
-          test "$(make --no-print-directory profiles | jq -r '.selected.application')" = "server-rendered-django"
+          metadata="$(make --no-print-directory profiles)"
+          echo "selected=$(jq -r '.selected.application' <<< "$metadata")" >> "$GITHUB_OUTPUT"
+          echo "applications=$(jq -r '.validation.application | join(" ")' <<< "$metadata")" >> "$GITHUB_OUTPUT"
+          echo "backups=$(jq -r 'if (.validation.backup | length) == 0 then "none" else (.validation.backup | join(" ")) end' <<< "$metadata")" >> "$GITHUB_OUTPUT"
+          echo "backup=$(jq -r '.selected.backup' <<< "$metadata")" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
-      - name: Verify the downstream profile through its shared Make contract
+      - name: Run the same source and ephemeral acceptance commands locally and in CI
         env:
-          DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
-        run: make verify
-
-      - name: Exercise the local production ingress simulation
-        run: make up-prod smoke-prod
-
-      - name: Exercise the server-rendered immutable-release contract
-        if: needs.profile-selection.outputs.selected-profile != 'server-rendered-django'
-        run: make build-release-images verify-release-images
-
-      - name: Stop profile services without deleting volumes
-        if: always()
-        run: make down down-release-ci down-prod
-
-  backend:
-    needs: profile-selection
-    if: contains(needs.profile-selection.outputs.ci-profiles, 'react-vite')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Compose up (detached) via Make
-        run: make up
-
-      - name: Wait for backend
-        run: make be.wait
-
-      - name: Verify (inside container) via Make
-        run: make be.ci fe.ci
-
-      - name: Smoke test via Nginx
-        run: make smoke
-
-      - name: Tear down
-        if: always()
-        run: make down
-
-  immutable-backup-profile:
-    needs: profile-selection
-    if: contains(needs.profile-selection.outputs.ci-backup-profiles, 'immutable-backup')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Verify resolved backup status wiring for both application profiles
+          APPLICATIONS: ${{ steps.profiles.outputs.applications }}
+          BACKUPS: ${{ steps.profiles.outputs.backups }}
         run: |
-          make SCAFFOLD_PROFILE=react-vite SCAFFOLD_BACKUP_PROFILE=immutable-backup verify-backup-compose
-          make SCAFFOLD_PROFILE=server-rendered-django SCAFFOLD_BACKUP_PROFILE=immutable-backup verify-backup-compose
-      - name: Verify the exact immutable backup image
-        run: make SCAFFOLD_BACKUP_PROFILE=immutable-backup verify-backup-image
-      - name: Exercise backup and isolated restore verification end to end
-        run: make SCAFFOLD_BACKUP_PROFILE=immutable-backup exercise-backup-profile
-      - name: Show disposable backup exercise logs
-        if: failure()
-        run: make SCAFFOLD_BACKUP_PROFILE=immutable-backup logs-backup-exercise
-      - name: Remove disposable backup exercise
-        if: always()
-        run: make SCAFFOLD_BACKUP_PROFILE=immutable-backup down-backup-exercise
+          for profile in $APPLICATIONS; do
+            for backup in $BACKUPS; do
+              make SCAFFOLD_PROFILE="$profile" SCAFFOLD_BACKUP_PROFILE="$backup" ci-ephemeral
+            done
+          done
 
-  immutable-release-gate:
-    needs: [profile-selection, server-rendered-profile, backend]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Require every selected profile verification
+      # All configured profiles must pass before publication. Keeping their
+      # images on one runner lets publish reuse exact tested IDs without rebuilds.
+      - name: Select the tested primary image set
+        id: images
+        env:
+          PROFILE: ${{ steps.profiles.outputs.selected }}
         run: |
-          scripts/check-immutable-release-gate \
-            --ci-profiles '${{ needs.profile-selection.outputs.ci-profiles }}' \
-            --selected-profile '${{ needs.profile-selection.outputs.selected-profile }}' \
-            --react-result '${{ needs.backend.result }}' \
-            --server-rendered-result '${{ needs.server-rendered-profile.result }}'
-
-  immutable-release:
-    needs: [profile-selection, immutable-release-gate]
-    if: >-
-      ${{
-        always() &&
-        needs.profile-selection.result == 'success' &&
-        needs.immutable-release-gate.result == 'success'
-      }}
-    runs-on: ubuntu-latest
-    permissions:
-      attestations: write
-      contents: read
-      id-token: write
-      packages: write
-    env:
-      RELEASE_BACKEND_SBOM: deploy/releases/${{ github.sha }}-backend.spdx.json
-      RELEASE_REVISION: ${{ github.sha }}
-      RELEASE_FILE: deploy/releases/${{ github.sha }}.env
-      RELEASE_WEB_SBOM: deploy/releases/${{ github.sha }}-web.spdx.json
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Detect artifact attestation support
-        id: provenance
-        shell: bash
-        run: |
-          supported="$(scripts/release-attestation-support \
-            --visibility '${{ github.event.repository.visibility }}' \
-            --owner-type '${{ github.event.repository.owner.type }}' \
-            --nonpublic-opt-in '${{ vars.ENABLE_NONPUBLIC_ATTESTATIONS }}')"
-          echo "supported=${supported}" >> "$GITHUB_OUTPUT"
-
-      - name: Configure project-owned release packages
-        shell: bash
-        run: |
-          prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
-          echo "RELEASE_IMAGE_PREFIX=${prefix}" >> "$GITHUB_ENV"
-          echo "RELEASE_BACKEND_TAG=${prefix}-backend:${GITHUB_SHA}" >> "$GITHUB_ENV"
-          echo "RELEASE_WEB_TAG=${prefix}-web:${GITHUB_SHA}" >> "$GITHUB_ENV"
-          project="${GITHUB_REPOSITORY//\//-}"
-          echo "RELEASE_COMPOSE_PROJECT=${project,,}-release-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
-
-      - name: Build production images once
-        run: make build-release-images
-
-      - name: Verify and smoke-test exact images
-        run: make verify-release-images
-
-      - name: Verify host-ingress routing
-        run: make verify-host-ingress
-
-      - name: Verify optional monitoring profile
-        run: make verify-monitoring-config
+          manifest=".local/releases/${GITHUB_SHA}/${PROFILE}/amd64/manifest.json"
+          echo "backend=$(jq -r '.images.backend' "$manifest")" >> "$GITHUB_OUTPUT"
+          echo "web=$(jq -r '.images.web' "$manifest")" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_MANIFEST=${manifest}" >> "$GITHUB_ENV"
 
       - name: Generate backend SPDX SBOM
         uses: anchore/sbom-action@v0
         with:
-          image: ${{ env.RELEASE_BACKEND_TAG }}
+          image: ${{ steps.images.outputs.backend }}
           format: spdx-json
           output-file: ${{ env.RELEASE_BACKEND_SBOM }}
           upload-artifact: false
@@ -179,15 +73,20 @@ jobs:
       - name: Generate web SPDX SBOM
         uses: anchore/sbom-action@v0
         with:
-          image: ${{ env.RELEASE_WEB_TAG }}
+          image: ${{ steps.images.outputs.web }}
           format: spdx-json
           output-file: ${{ env.RELEASE_WEB_SBOM }}
           upload-artifact: false
           upload-release-assets: false
 
-      - name: Tear down release verification
-        if: always()
-        run: make down-release-ci
+      - name: Detect artifact attestation support
+        id: provenance
+        run: |
+          supported="$(scripts/release-attestation-support \
+            --visibility '${{ github.event.repository.visibility }}' \
+            --owner-type '${{ github.event.repository.owner.type }}' \
+            --nonpublic-opt-in '${{ vars.ENABLE_NONPUBLIC_ATTESTATIONS }}')"
+          echo "supported=${supported}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to this repository's GHCR packages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -197,45 +96,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push verified images and record digests
+      - name: Publish the exact tested release through the operator command
         id: release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCAFFOLD_PROFILE: ${{ steps.profiles.outputs.selected }}
+          SCAFFOLD_BACKUP_PROFILE: ${{ steps.profiles.outputs.backup }}
         run: |
-          make push-release-images
-          backend="$(sed -n 's/^RELEASE_BACKEND_IMAGE=//p' "$RELEASE_FILE")"
-          web="$(sed -n 's/^RELEASE_WEB_IMAGE=//p' "$RELEASE_FILE")"
-          test -n "$backend" && test -n "$web"
+          make publish
+          backend="$(jq -r '.images.backend' "$RELEASE_MANIFEST")"
+          web="$(jq -r '.images.web' "$RELEASE_MANIFEST")"
           echo "backend_name=${backend%@*}" >> "$GITHUB_OUTPUT"
           echo "backend_digest=${backend#*@}" >> "$GITHUB_OUTPUT"
           echo "web_name=${web%@*}" >> "$GITHUB_OUTPUT"
           echo "web_digest=${web#*@}" >> "$GITHUB_OUTPUT"
 
-      - name: Publish digest-pinned release manifest and SBOMs
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-${{ github.sha }}
-          path: |
-            ${{ env.RELEASE_FILE }}
-            ${{ env.RELEASE_BACKEND_SBOM }}
-            ${{ env.RELEASE_WEB_SBOM }}
-          if-no-files-found: error
-          retention-days: 90
-
       - name: Report reduced provenance fallback
         if: >-
-          github.event_name == 'push' &&
-          github.ref == 'refs/heads/main' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
           steps.provenance.outputs.supported != 'true'
-        run: >-
-          echo '::warning title=Artifact attestations unavailable::The release manifest
-          and SPDX SBOMs were published without GitHub artifact attestations.'
+        run: echo '::warning title=Artifact attestations unavailable::The recorded release and SPDX SBOMs were published without GitHub artifact attestations.'
 
       - name: Attest backend SBOM
         if: >-
-          github.event_name == 'push' &&
-          github.ref == 'refs/heads/main' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
           steps.provenance.outputs.supported == 'true'
         uses: actions/attest@v4
         with:
@@ -247,8 +132,7 @@ jobs:
 
       - name: Attest web SBOM
         if: >-
-          github.event_name == 'push' &&
-          github.ref == 'refs/heads/main' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
           steps.provenance.outputs.supported == 'true'
         uses: actions/attest@v4
         with:

@@ -35,24 +35,19 @@ def _committed_profiles() -> tuple[str, list[str]]:
 
 def test_committed_profile_selects_its_make_and_ci_contracts() -> None:
     selected_profile, ci_profiles = _committed_profiles()
-    expected_compose = {
-        "react-vite": "deploy/docker-compose.dev.yml",
-        "server-rendered-django": "profiles/server-rendered-django/compose.yml",
-    }
-
     assert selected_profile in ci_profiles
     metadata = json.loads(_make("profiles").stdout)
     assert metadata["selected"]["application"] == selected_profile
     assert metadata["selected"]["backup"] == "none"
     assert metadata["validation"]["application"] == ci_profiles
-    assert expected_compose[selected_profile] in _make("--dry-run", "up").stdout
+    assert 'scaffold.py "up-dev"' in _make("--dry-run", "up-dev").stdout
 
 
 def test_unknown_profile_requires_its_own_implementation() -> None:
     result = _make("SCAFFOLD_PROFILE=missing", "help", check=False)
 
     assert result.returncode != 0
-    assert "profiles/missing/profile.mk" in result.stderr
+    assert "unknown selected scaffold profile" in result.stderr
 
 
 def test_ci_routes_profiles_without_duplicate_pr_push_runs() -> None:
@@ -62,15 +57,14 @@ def test_ci_routes_profiles_without_duplicate_pr_push_runs() -> None:
     assert "make --no-print-directory profiles" in workflow
     assert ".validation.application" in workflow
     assert ".selected.application" in workflow
-    assert "contains(needs.profile-selection.outputs.ci-profiles, 'react-vite')" in workflow
+    assert "for profile in $APPLICATIONS" in workflow
+    assert "for backup in $BACKUPS" in workflow
     assert (
-        "contains(needs.profile-selection.outputs.ci-profiles, 'server-rendered-django')"
+        'make SCAFFOLD_PROFILE="$profile" SCAFFOLD_BACKUP_PROFILE="$backup" ci-ephemeral'
         in workflow
     )
-    server_job = workflow.split("  server-rendered-profile:", 1)[1].split("\n  backend:", 1)[0]
-    assert "SCAFFOLD_PROFILE ?= server-rendered-django" in server_job
-    assert "CI_PROFILES ?= server-rendered-django" in server_job
-    assert "make --no-print-directory profiles | jq -r '.selected.application'" in server_job
-    assert "run: make verify" in server_job
-    assert "SCAFFOLD_PROFILE:" not in server_job
-    assert "pnpm" not in server_job
+    assert "make publish" in workflow
+    assert workflow.index("ci-ephemeral") < workflow.index("make publish")
+    assert "github.event_name == 'push' && github.ref == 'refs/heads/main'" in workflow
+    assert "> .scaffold-profile" not in workflow
+    assert "pnpm" not in workflow

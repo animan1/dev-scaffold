@@ -51,7 +51,7 @@ def test_release_attestation_support_policy(
 def test_release_workflow_uploads_before_optional_attestations() -> None:
     workflow = (_repository_root() / ".github/workflows/ci.yml").read_text()
     release_job = workflow.split("  immutable-release:", 1)[1]
-    upload = release_job.index("Publish digest-pinned release manifest and SBOMs")
+    upload = release_job.index("Publish the exact tested release through the operator command")
     fallback = release_job.index("Report reduced provenance fallback")
     backend_attestation = release_job.index("Attest backend SBOM")
     web_attestation = release_job.index("Attest web SBOM")
@@ -61,10 +61,10 @@ def test_release_workflow_uploads_before_optional_attestations() -> None:
     assert "vars.ENABLE_NONPUBLIC_ATTESTATIONS" in release_job
     assert release_job.count("steps.provenance.outputs.supported == 'true'") == 2
     assert "steps.provenance.outputs.supported != 'true'" in release_job
-    assert "${{ env.RELEASE_FILE }}" in upload_step
-    assert "${{ env.RELEASE_BACKEND_SBOM }}" in upload_step
-    assert "${{ env.RELEASE_WEB_SBOM }}" in upload_step
+    assert "make publish" in upload_step
+    assert "RELEASE_BACKEND_SBOM: .local/sbom/backend.spdx.json" in release_job
+    assert "RELEASE_WEB_SBOM: .local/sbom/web.spdx.json" in release_job
     assert "steps.provenance.outputs.supported" not in upload_step
     assert upload < fallback < backend_attestation < web_attestation
     assert release_job.count("uses: actions/attest@v4") == 2
-    assert release_job.count("uses: actions/upload-artifact@v4") == 1
+    assert "actions/upload-artifact" not in release_job

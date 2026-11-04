@@ -61,7 +61,8 @@ def test_server_rendered_web_owns_static_and_media_delivery_only() -> None:
     assert "DJANGO_SECRET_KEY" not in web
     assert "location /static/" in nginx
     assert "location /media/" in nginx
-    assert "proxy_pass http://app:8000" in nginx
+    assert "set $application_upstream app:8000;" in nginx
+    assert "proxy_pass http://$application_upstream;" in nginx
     assert "ssl_certificate" not in nginx
     assert "listen 443" not in nginx
     assert "USER nginx" in dockerfile

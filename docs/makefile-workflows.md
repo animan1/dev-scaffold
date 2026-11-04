@@ -193,7 +193,7 @@ Replace `SNAPSHOT_ID` below with an ID from that list. Use an application checko
 compatible with the chosen snapshot. First check recovery with disposable data:
 
 ```sh
-make restore-ephemeral BACKUP_SNAPSHOT=SNAPSHOT_ID CONFIRM=restore-ephemeral
+make restore-ephemeral BACKUP_SOURCE_ENV=prod BACKUP_SNAPSHOT=SNAPSHOT_ID CONFIRM=restore-ephemeral
 make up-ephemeral
 make verify-ephemeral
 make rm-ephemeral
