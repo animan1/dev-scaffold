@@ -5,18 +5,24 @@
 # - Generates a strong DJANGO_SECRET_KEY and POSTGRES_PASSWORD by default.
 # - Honors existing environment variables if you export them before running:
 #     DJANGO_SECRET_KEY=... POSTGRES_PASSWORD=... ./deploy/setup-env.sh
-# - Will not overwrite an existing deploy/.env.prod.
+# - Preserves an existing configuration and restricts its permissions.
 
 set -euo pipefail
 
-ENV_FILE="deploy/.env.prod"
+ENV_FILE="${PROD_ENV_FILE:-deploy/.env.prod}"
+umask 077
 
-mkdir -p deploy
+mkdir -p "$(dirname "$ENV_FILE")"
+
+if [ -L "$ENV_FILE" ]; then
+  echo "Refusing a symlink configuration file" >&2
+  exit 1
+fi
 
 if [ -f "$ENV_FILE" ]; then
-  echo "⚠️  $ENV_FILE already exists. Refusing to overwrite."
-  echo "Remove or rename the file if you want to regenerate it."
-  exit 1
+  chmod 600 "$ENV_FILE"
+  echo "Existing production configuration preserved"
+  exit 0
 fi
 
 # Generate a random Django secret key unless provided
@@ -45,6 +51,7 @@ DJANGO_EMAIL_HOST="${DJANGO_EMAIL_HOST:-}"
 RELEASE_DEPLOYED_AT="${RELEASE_DEPLOYED_AT:-$(date -u +%Y-%m-%dT%H:%M:%S%z)}"
 RELEASE_IMAGE_PREFIX="${RELEASE_IMAGE_PREFIX:-local/app}"
 
+set -o noclobber
 cat > "$ENV_FILE" <<EOF
 # Django settings
 DJANGO_SECRET_KEY=${SECRET_KEY}

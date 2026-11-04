@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -72,13 +75,24 @@ def test_host_ingress_normalizes_forwarding_headers_at_the_proxy_boundary() -> N
     assert "proxy_set_header X-Forwarded-Proto $trusted_forwarded_proto;" in nginx
 
 
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Needs the Docker Compose client")
 def test_local_tls_preparation_requires_opt_in_and_covers_browser_hosts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("SCAFFOLD_PROFILE", "server-rendered-django")
     (tmp_path / "deploy").mkdir()
+    shutil.copyfile(
+        _repo_root() / "deploy/docker-compose.prod.yml",
+        tmp_path / "deploy/docker-compose.prod.yml",
+    )
     private_env = tmp_path / "deploy/.env.prod"
-    private_env.write_text("existing-private-configuration\n")
+    existing = (
+        "DJANGO_SECRET_KEY=existing-private-configuration\n"
+        "DJANGO_ALLOWED_HOSTS=localhost\nPOSTGRES_USER=app\n"
+        "POSTGRES_PASSWORD=existing-password\nPOSTGRES_DB=app\n"
+        "DATABASE_URL=postgresql://app:existing-password@db:5432/app\n"
+    )
+    private_env.write_text(existing)
     command = [
         "make",
         "--no-print-directory",
@@ -110,5 +124,88 @@ def test_local_tls_preparation_requires_opt_in_and_covers_browser_hosts(
     )
     assert "DNS:localhost" in inspected.stdout
     assert "IP Address:127.0.0.1" in inspected.stdout
-    assert private_env.read_text() == "existing-private-configuration\n"
+    assert private_env.read_text() == existing
+    assert private_env.stat().st_mode & 0o077 == 0
     assert (tmp_path / "deploy/nginx/certs/server.key").stat().st_mode & 0o077 == 0
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Needs the Docker Compose client")
+def test_prepare_prod_generates_private_inputs_and_revalidates_without_overwriting(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "deploy").mkdir()
+    shutil.copyfile(
+        _repo_root() / "deploy/docker-compose.prod.yml",
+        tmp_path / "deploy/docker-compose.prod.yml",
+    )
+    shutil.copyfile(
+        _repo_root() / "deploy/docker-compose.host-ingress.yml",
+        tmp_path / "deploy/docker-compose.host-ingress.yml",
+    )
+    command = [
+        "make",
+        "--no-print-directory",
+        "-f",
+        str(_repo_root() / "Makefile"),
+        "SCAFFOLD_PROFILE=react-vite",
+        "HOST_INGRESS=1",
+        "prepare-prod",
+    ]
+    subprocess.run(command, cwd=tmp_path, capture_output=True, check=True)
+    private_env = tmp_path / "deploy/.env.prod"
+    original = private_env.read_bytes()
+    assert private_env.stat().st_mode & 0o077 == 0
+    private_env.chmod(0o644)
+    subprocess.run(command, cwd=tmp_path, capture_output=True, check=True)
+    assert private_env.read_bytes() == original
+    assert private_env.stat().st_mode & 0o077 == 0
+    incomplete = b"\n".join(
+        line for line in original.split(b"\n") if not line.startswith(b"DJANGO_SECRET_KEY=")
+    )
+    private_env.write_bytes(incomplete)
+    rejected = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
+    assert rejected.returncode != 0
+    assert "Missing required production input: DJANGO_SECRET_KEY" in rejected.stderr
+    assert "POSTGRES_PASSWORD=" not in rejected.stdout + rejected.stderr
+    assert private_env.read_bytes() == incomplete
+    private_env.write_bytes(original + b"\nDATABASE_URL=postgresql://app:wrong@db/app\n")
+    mismatched = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
+    assert mismatched.returncode != 0
+    assert "DATABASE_URL does not match" in mismatched.stderr
+    private_env.write_text('DJANGO_SECRET_KEY="private-value-with-unclosed-quote\n')
+    malformed = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
+    assert malformed.returncode != 0
+    assert "private-value-with-unclosed-quote" not in malformed.stdout + malformed.stderr
+
+
+@pytest.mark.parametrize(
+    "database_url,accepted",
+    [
+        ("postgresql://app:private-password@db/app", True),
+        ("postgresql://app:wrong@db/app", False),
+        ("postgresql://app:private-password@db:invalid/app", False),
+    ],
+)
+def test_production_input_validation_checks_resolved_credentials_without_leaking_values(
+    database_url: str,
+    accepted: bool,
+) -> None:
+    environment = {
+        "DJANGO_SECRET_KEY": "private-key",
+        "DJANGO_ALLOWED_HOSTS": "localhost",
+        "POSTGRES_USER": "app",
+        "POSTGRES_PASSWORD": "private-password",
+        "POSTGRES_DB": "app",
+        "DATABASE_URL": database_url,
+    }
+    result = subprocess.run(
+        [sys.executable, str(_repo_root() / "scripts/validate_prod_config.py")],
+        input=json.dumps(
+            {"services": {name: {"environment": environment} for name in ("backend", "db")}}
+        ),
+        capture_output=True,
+        text=True,
+    )
+    assert (result.returncode == 0) is accepted
+    assert "private-password" not in result.stdout + result.stderr
+    assert "private-key" not in result.stdout + result.stderr
