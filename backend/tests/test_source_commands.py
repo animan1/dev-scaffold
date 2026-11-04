@@ -45,6 +45,7 @@ def test_source_tests_use_isolated_tools_and_never_compose(
     assert len(containers) == (2 if profile == "react-vite" else 1)
     for command in containers:
         assert "--pull=never" in command
+        assert "--user" in command
         assert "DATABASE_URL=sqlite:////tmp/scaffold-source-check.sqlite3" in command
         assert "compose" not in command
     backend = containers[0]
@@ -64,6 +65,25 @@ def test_source_entrypoint_rejects_deployment_operations(
     with pytest.raises(source_module.Rejected, match="unknown source command"):
         op.dispatch("up-prod")
     assert not op.local.exists()
+
+
+def test_setup_keeps_regenerated_frontend_dependencies_owned_by_the_host_user(
+    source_module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SCAFFOLD_PROFILE", "react-vite")
+    op = source_module.SourceOperator(tmp_path)
+    commands: list[tuple[object, ...]] = []
+    monkeypatch.setattr(op, "prepared_tool", lambda *a: True)
+    monkeypatch.setattr(op, "tooling_inputs", lambda *a: "prepared-inputs")
+    monkeypatch.setattr(op, "execute", lambda *a, **k: commands.append(a))
+    op.setup()
+    assert len(commands) == 2
+    assert "0:0" in commands[0]
+    assert "-I" in commands[0] and "-S" in commands[0]
+    assert "db.sqlite3" not in str(commands[0])
+    assert commands[-1][:2] == ("docker", "run")
+    assert "--user" in commands[-1]
+    assert "--no-preserve=ownership" in commands[-1]
 
 
 def test_changed_coverage_fails_even_when_total_coverage_would_pass(tmp_path: Path) -> None:
