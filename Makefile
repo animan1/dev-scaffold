@@ -4,17 +4,11 @@ UV_IMAGE ?= ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
 SCAFFOLD_BACKUP_PROFILE ?= none
 CI_BACKUP_PROFILES ?= immutable-backup
 
-.PHONY: ci-profiles
-ci-profiles:
-	@printf '%s\n' "$(CI_PROFILES)"
-
-.PHONY: ci-backup-profiles
-ci-backup-profiles:
-	@printf '%s\n' "$(CI_BACKUP_PROFILES)"
-
-.PHONY: selected-profile
-selected-profile:
-	@printf '%s\n' "$(SCAFFOLD_PROFILE)"
+.PHONY: profiles
+profiles:
+	@python3 scripts/profile_metadata.py --application '$(SCAFFOLD_PROFILE)' \
+		--backup '$(SCAFFOLD_BACKUP_PROFILE)' --applications $(CI_PROFILES) \
+		--backups $(CI_BACKUP_PROFILES)
 
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 

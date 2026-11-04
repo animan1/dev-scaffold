@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 .uv/
 .coverage
+/backend/coverage.xml
 
 # Node
 node_modules/
@@ -27,6 +28,7 @@ coverage/
 # Docker
 *.log
 .tmp/
+.local/
 
 # OS
 .DS_Store
