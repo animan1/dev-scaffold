@@ -141,7 +141,7 @@ be.wait: ## Wait for backend health (dev)
 		sleep 1; \
 	done; \
 	echo "Backend did not become ready in time"; \
-	$(COMPOSE_DEV) logs backend || true; \
+	$(COMPOSE_DEV) logs || true; \
 	exit 1
 
 .PHONY: be.ci
