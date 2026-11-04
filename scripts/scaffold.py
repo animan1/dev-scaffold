@@ -25,9 +25,10 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from profile_metadata import metadata
 from release_bundle import Rejected as ArchiveRejected
 from release_bundle import validate_images
+from scaffold_dependencies import lock_dependencies
+from scaffold_source import SourceOperator
 from scaffold_support import (
     Rejected,
     atomic,
@@ -49,88 +50,11 @@ from scaffold_support import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_SOURCES = (
-    "/workspace/scripts/scaffold.py",
-    "/workspace/scripts/scaffold_support.py",
-    "/workspace/scripts/profile_metadata.py",
-    "/workspace/scripts/changed_coverage.py",
-)
 
 
-class Operator:
-    def __init__(self, root=ROOT):
-        self.root = Path(root)
-        self.local = self.root / ".local"
-        self.profile = os.environ.get("SCAFFOLD_PROFILE", "react-vite")
-        self.backup_profile = os.environ.get("SCAFFOLD_BACKUP_PROFILE", "none")
-        self.profiles = metadata(
-            self.profile,
-            self.backup_profile,
-            os.environ.get("CI_PROFILES", "react-vite server-rendered-django").split(),
-            os.environ.get("CI_BACKUP_PROFILES", "immutable-backup").split(),
-        )
-        self.project = os.environ.get("PROJECT_NAME", self.root.name)
-        require(re.fullmatch("[a-z0-9][a-z0-9_-]*", self.project), "invalid project name")
-        self.app = "backend" if self.profile == "react-vite" else "app"
-        self.web = "nginx" if self.profile == "react-vite" else "web"
-        self.tool_image = f"local/{self.project}-tooling:{self.profile}"
-        self.node_image = f"local/{self.project}-tooling:frontend"
-        self.pyproject = (
-            "backend/pyproject.toml"
-            if self.profile == "react-vite"
-            else "profiles/server-rendered-django/pyproject.toml"
-        )
-        self.prefix = os.environ.get("RELEASE_IMAGE_PREFIX") or f"local/{self.project}"
-        require(
-            re.fullmatch("[a-z0-9][a-z0-9._:/-]*", self.prefix),
-            "invalid release image prefix",
-        )
-        self._platform = None
-        self._store_checked = False
-
-    def git(self, *arguments):
-        return run("git", *arguments, cwd=self.root, capture=True)
-
-    def head(self):
-        return revision(self.git("rev-parse", "HEAD"))
-
-    def clean_source(self):
-        require(
-            not self.git("status", "--porcelain"),
-            "commit all source changes before building a release",
-        )
-        return self.head()
-
-    def architecture(self):
-        self.require_image_store()
-        if self._platform:
-            return self._platform
-        value = os.environ.get("RELEASE_PLATFORM")
-        if not value:
-            value = self.native_architecture()
-        require(
-            value in ("linux/amd64", "linux/arm64"),
-            "unsupported destination architecture",
-        )
-        self._platform = value
-        return value
-
-    def native_architecture(self):
-        return run("docker", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}", capture=True)
-
-    def require_image_store(self):
-        if not self._store_checked:
-            status = (
-                json.loads(
-                    run("docker", "info", "--format", "{{json .DriverStatus}}", capture=True)
-                )
-                or []
-            )
-            require(
-                ["driver-type", "io.containerd.snapshotter.v1"] in status,
-                "Docker's containerd image store is required; infra must configure the engine before building or deploying",
-            )
-            self._store_checked = True
+class Operator(SourceOperator):
+    def execute(self, *arguments, **options):
+        return run(*arguments, **options)
 
     def release_dir(self, rev=None):
         return (
@@ -204,75 +128,6 @@ class Operator:
         )
         return base / self.project / environment
 
-    def tool(self, *command, frontend=False, env=None):
-        image = self.node_image if frontend else self.tool_image
-        info = self.inspect_image(image, self.architecture())
-        require(
-            (info["Config"].get("Labels") or {}).get("io.scaffold.tooling-inputs")
-            == self.tooling_inputs(frontend),
-            "tooling inputs changed; run make setup",
-        )
-        options = [
-            "docker",
-            "run",
-            "--rm",
-            "--pull=never",
-            "--init",
-            "--volume",
-            f"{self.root}:/workspace",
-            "--workdir",
-            "/workspace/frontend" if frontend else "/workspace/backend",
-            "--env",
-            "HOME=/tmp",
-            "--env",
-            "REPO_DIR=/workspace",
-            "--env",
-            "DJANGO_SECRET_KEY=source-check-only-abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789",
-            "--env",
-            "DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1",
-            "--env",
-            "DATABASE_URL=sqlite:////tmp/scaffold-source-check.sqlite3",
-            "--env",
-            "DJANGO_SETTINGS_MODULE=app.project.settings.dev",
-        ]
-        common = Path(self.git("rev-parse", "--path-format=absolute", "--git-common-dir"))
-        if not common.is_relative_to(self.root):
-            options += ["--volume", f"{common}:{common}:ro"]
-        if frontend:
-            options += [
-                "--volume",
-                f"{self.local}/tooling/frontend/node_modules:/workspace/frontend/node_modules",
-            ]
-        for key, value in (env or {}).items():
-            options += ["--env", key + "=" + value]
-        run(*options, image, *command)
-
-    def tooling_inputs(self, frontend=False):
-        files = ["deploy/dependencies.json"]
-        if frontend:
-            files += [
-                "deploy/frontend-tooling.Dockerfile",
-                "frontend/package.json",
-                "frontend/pnpm-lock.yaml",
-            ]
-        else:
-            files += [
-                "deploy/tooling.Dockerfile",
-                self.pyproject,
-                str(Path(self.pyproject).with_name("uv.lock")),
-            ]
-        digest = hashlib.sha256(b"containerd-single-platform-v1")
-        for name in files:
-            digest.update(name.encode() + b"\0" + (self.root / name).read_bytes())
-        return digest.hexdigest()
-
-    def prepared_tool(self, image, expected):
-        try:
-            info = self.inspect_image(image, self.architecture())
-        except Rejected:
-            return False
-        return (info["Config"].get("Labels") or {}).get("io.scaffold.tooling-inputs") == expected
-
     def backup_inputs(self):
         digest = hashlib.sha256(b"containerd-single-platform-v1")
         for name in (
@@ -294,75 +149,7 @@ class Operator:
 
     def setup(self):
         release = self.captured_release()
-        if release and "tooling" in release["images"]:
-            run(
-                "docker",
-                "tag",
-                release.get("image_ids", release["images"])["tooling"],
-                self.tool_image,
-            )
-        elif not self.prepared_tool(self.tool_image, self.tooling_inputs()):
-            run(
-                "docker",
-                "build",
-                "--provenance=false",
-                "--platform",
-                self.architecture(),
-                *self.build_inputs(),
-                "--label",
-                "io.scaffold.tooling-inputs=" + self.tooling_inputs(),
-                "--file",
-                "deploy/tooling.Dockerfile",
-                "--build-arg",
-                "PROFILE=" + self.profile,
-                "--tag",
-                self.tool_image,
-                ".",
-                cwd=self.root,
-            )
-        if self.profile == "react-vite":
-            if release and "frontend-tooling" in release["images"]:
-                run(
-                    "docker",
-                    "tag",
-                    release.get("image_ids", release["images"])["frontend-tooling"],
-                    self.node_image,
-                )
-            elif not self.prepared_tool(self.node_image, self.tooling_inputs(True)):
-                run(
-                    "docker",
-                    "build",
-                    "--provenance=false",
-                    "--platform",
-                    self.architecture(),
-                    *self.build_inputs(),
-                    "--label",
-                    "io.scaffold.tooling-inputs=" + self.tooling_inputs(True),
-                    "--file",
-                    "deploy/frontend-tooling.Dockerfile",
-                    "--tag",
-                    self.node_image,
-                    ".",
-                    cwd=self.root,
-                )
-            cache = self.local / "tooling/frontend"
-            cache.mkdir(parents=True, exist_ok=True)
-            # This directory contains only regenerated container dependencies.
-            if (cache / "node_modules").exists():
-                shutil.rmtree(cache / "node_modules")
-            run(
-                "docker",
-                "run",
-                "--rm",
-                "--pull=never",
-                "--volume",
-                f"{cache}:/cache",
-                self.node_image,
-                "cp",
-                "-a",
-                "/opt/frontend/node_modules",
-                "/cache/node_modules",
-            )
+        super().setup(release)
         if release:
             run(
                 "docker",
@@ -463,14 +250,6 @@ class Operator:
             parents=True, exist_ok=True, mode=0o700
         )
         print(f"Prepared private {environment} inputs: {path}")
-
-    def inspect_image(self, reference, platform=None):
-        immutable(reference) if reference.startswith("sha256:") or "@" in reference else None
-        data = json.loads(run("docker", "image", "inspect", reference, capture=True))[0]
-        actual = data["Os"] + "/" + data["Architecture"]
-        require(not platform or actual == platform, "image architecture mismatch")
-        immutable(data["Id"])
-        return data
 
     def config(self, environment, release=None):  # noqa: C901 -- normalize existing profile Compose contracts
         settings = self.settings(environment)
@@ -898,140 +677,6 @@ class Operator:
             release=release,
             capture=capture,
         )
-
-    def gate(self, operation):
-        project = "/workspace/" + self.pyproject
-        commands = {
-            "format-check": [
-                ("ruff", "format", "--config", project, "--check", ".", *SCRIPT_SOURCES)
-            ],
-            "lint": [
-                ("python", "scripts/check_no_any.py"),
-                ("ruff", "check", "--config", project, ".", *SCRIPT_SOURCES),
-            ],
-            "typecheck": [("mypy", "--config-file", project, ".")],
-            "migrations-check": [
-                ("python", "-m", "app.manage", "makemigrations", "--check", "--dry-run")
-            ],
-            "framework-check": [("python", "-m", "app.manage", "check", "--deploy")],
-            "migrations": [("python", "-m", "app.manage", "makemigrations")],
-            "format": [
-                ("ruff", "check", "--config", project, "--fix", ".", *SCRIPT_SOURCES),
-                ("ruff", "format", "--config", project, ".", *SCRIPT_SOURCES),
-            ],
-        }
-        for command in commands.get(operation, []):
-            env = (
-                {
-                    "DJANGO_SETTINGS_MODULE": "app.project.settings.prod",
-                    "DATABASE_URL": "postgresql://check:check@unused/check",
-                }
-                if operation == "framework-check"
-                else None
-            )
-            self.tool(*command, env=env)
-        # Keep the existing archive library's root Ruff style; application
-        # configuration continues to govern the selected application's checks.
-        archive = "/workspace/scripts/release_bundle.py"
-        shared = {
-            "format-check": [
-                ("ruff", "format", "--isolated", "--line-length", "88", "--check", archive)
-            ],
-            "lint": [("ruff", "check", "--isolated", archive)],
-            "format": [
-                ("ruff", "check", "--isolated", "--fix", archive),
-                ("ruff", "format", "--isolated", "--line-length", "88", archive),
-            ],
-        }
-        for command in shared.get(operation, []):
-            self.tool(*command)
-        if operation == "test":
-            coverage = os.environ.get("COVERAGE", "0") == "1"
-            command = ["pytest", "-c", project, "."]
-            if coverage:
-                command += [
-                    "--cov=src/app",
-                    "--cov-config=" + project,
-                    "--cov-report=term-missing",
-                    "--cov-report=xml",
-                ]
-            self.tool(*command)
-        if self.profile == "react-vite" and operation in (
-            "format-check",
-            "lint",
-            "typecheck",
-            "test",
-            "format",
-        ):
-            command = [
-                "pnpm",
-                "run",
-                "fmt-check" if operation == "format-check" else operation,
-            ]
-            if operation == "test" and os.environ.get("COVERAGE") == "1":
-                command += [
-                    "--coverage",
-                    "--coverage.all=true",
-                    "--coverage.include=src/**/*.{ts,tsx}",
-                    "--coverage.exclude=src/**/__tests__/**",
-                    "--coverage.exclude=src/**/*.{test,spec}.{ts,tsx}",
-                    "--coverage.exclude=src/setupTests.ts",
-                    "--coverage.exclude=src/**/*.d.ts",
-                    "--coverage.reporter=lcov",
-                    "--coverage.reporter=json-summary",
-                ]
-            self.tool(*command, frontend=True)
-        if operation == "test" and os.environ.get("COVERAGE") == "1":
-            self.changed_coverage()
-
-    def changed_coverage(self):
-        # Uses the same coverage report and an explicit Git diff base; no second test run.
-        run(
-            sys.executable,
-            self.root / "scripts/changed_coverage.py",
-            "--root",
-            self.root,
-            "--base",
-            os.environ.get("DIFF_BASE") or "origin/main",
-            "--xml",
-            self.root / "backend/coverage.xml",
-        )
-
-    def check(self):
-        for name in (
-            "format-check",
-            "lint",
-            "typecheck",
-            "migrations-check",
-            "framework-check",
-            "test",
-        ):
-            previous = os.environ.get("COVERAGE")
-            try:
-                if name == "test":
-                    os.environ["COVERAGE"] = "1"
-                self.gate(name)
-            finally:
-                if previous is None:
-                    os.environ.pop("COVERAGE", None)
-                else:
-                    os.environ["COVERAGE"] = previous
-        evidence = self.local / "checks" / (self.head() + ".json")
-        if not self.git("status", "--porcelain"):
-            write_json(
-                evidence,
-                {
-                    "revision": self.head(),
-                    "profile": self.profile,
-                    "passed_at": time.time(),
-                    "source": "local-checks",
-                },
-            )
-        else:
-            evidence.unlink(missing_ok=True)
-            print(
-                "Source checks passed; commit changes and rerun checks before building a release."
-            )
 
     def build(self):
         rev = self.clean_source()
@@ -1828,86 +1473,7 @@ class Operator:
             shutil.rmtree(self.state_dir(environment), ignore_errors=False)
 
     def dependencies(self):
-        path = self.root / "deploy/dependencies.json"
-        data = read_json(path)
-        for dependency in data["images"].values():
-            source = dependency["source"]
-            require(
-                re.fullmatch("[a-z0-9][a-z0-9._:/-]*", source),
-                "invalid declared image source",
-            )
-            info = json.loads(
-                run(
-                    "docker",
-                    "buildx",
-                    "imagetools",
-                    "inspect",
-                    source,
-                    "--format",
-                    "{{json .Manifest}}",
-                    capture=True,
-                )
-            )
-            digest = info["digest"]
-            dependency["pin"] = immutable(source + "@" + digest)
-        write_json(path, data)
-        project = "backend" if self.profile == "react-vite" else "profiles/server-rendered-django"
-        run(
-            "docker",
-            "run",
-            "--rm",
-            "--volume",
-            f"{self.root}:/workspace",
-            "--workdir",
-            "/workspace",
-            "--env",
-            "UV_CACHE_DIR=/tmp/uv-cache",
-            "--env",
-            "UV_PROJECT_ENVIRONMENT=/tmp/lock-environment",
-            "--entrypoint",
-            "/usr/local/bin/uv",
-            data["images"]["uv"]["pin"],
-            "lock",
-            "--project",
-            project,
-        )
-        if self.profile == "react-vite":
-            run(
-                "docker",
-                "run",
-                "--rm",
-                "--env",
-                "CI=true",
-                "--volume",
-                f"{self.root}:/workspace",
-                "--workdir",
-                "/workspace/frontend",
-                data["images"]["node"]["pin"],
-                "sh",
-                "-c",
-                "corepack enable && pnpm install --lockfile-only --ignore-scripts",
-            )
-
-    def build_inputs(self):
-        pins = read_json(self.root / "deploy/dependencies.json")["images"]
-        result = []
-        for argument, name in (
-            ("UV_IMAGE", "uv"),
-            ("PYTHON_IMAGE", "python"),
-            ("NODE_IMAGE", "node"),
-            (
-                "NGINX_IMAGE",
-                "nginx-django" if self.profile == "server-rendered-django" else "nginx",
-            ),
-        ):
-            dependency = pins[name]
-            value = immutable(dependency["pin"])
-            require(
-                value.startswith(dependency["source"] + "@"),
-                "image source declaration changed; run make deps-lock",
-            )
-            result += ["--build-arg", argument + "=" + value]
-        return result
+        lock_dependencies(self.root, self.profile, run)
 
     def repository(self):
         remote = self.git("remote", "get-url", "origin")
@@ -2217,18 +1783,7 @@ class Operator:
         if operation == "setup":
             self.setup()
         elif operation == "hooks":
-            directory = self.local / "hooks"
-            directory.mkdir(parents=True, exist_ok=True)
-            atomic(
-                directory / "pre-commit",
-                "#!/bin/sh\nexec make --no-print-directory check\n",
-            )
-            (directory / "pre-commit").chmod(0o700)
-            previous = self.git("config", "--local", "--default", "", "--get", "core.hooksPath")
-            self.git("config", "extensions.worktreeConfig", "true")
-            self.git("config", "--worktree", "core.hooksPath", str(directory))
-            if previous == str(directory):
-                self.git("config", "--local", "--unset", "core.hooksPath")
+            self.hooks()
         elif operation == "check":
             self.check()
         elif operation in (

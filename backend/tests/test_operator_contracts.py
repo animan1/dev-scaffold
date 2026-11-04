@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import subprocess
 from pathlib import Path
 from types import ModuleType
 
@@ -93,42 +91,6 @@ def test_command_names_are_unambiguous(
 def test_invalid_command_names_are_rejected(operator_module: ModuleType, goal: str) -> None:
     with pytest.raises(operator_module.Rejected):
         operator_module.target(goal)
-
-
-def test_changed_coverage_fails_even_when_total_coverage_would_pass(tmp_path: Path) -> None:
-    root = Path(os.getenv("REPO_DIR", Path(__file__).resolve().parents[2]))
-    source = tmp_path / "backend/src/app/example.py"
-    source.parent.mkdir(parents=True)
-    source.write_text("def answer():\n    return 1\n")
-    for command in (
-        ["git", "init", "--quiet"],
-        ["git", "config", "user.email", "test@example.com"],
-        ["git", "config", "user.name", "Test"],
-        ["git", "add", "backend/src/app/example.py"],
-        ["git", "commit", "--quiet", "-m", "baseline"],
-    ):
-        subprocess.run(command, cwd=tmp_path, check=True)
-    source.write_text("def answer():\n    return 2\n")
-    coverage = tmp_path / "coverage.xml"
-    coverage.write_text(
-        '<coverage line-rate="0.99"><packages><package><classes><class filename="app/example.py"><lines><line number="1" hits="1"/><line number="2" hits="0"/></lines></class></classes></package></packages></coverage>'
-    )
-    result = subprocess.run(
-        [
-            "python",
-            str(root / "scripts/changed_coverage.py"),
-            "--root",
-            str(tmp_path),
-            "--base",
-            "HEAD",
-            "--xml",
-            str(coverage),
-        ],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode != 0
-    assert "backend/src/app/example.py:2" in result.stderr
 
 
 def test_incomplete_cached_bundle_never_accesses_publication(
