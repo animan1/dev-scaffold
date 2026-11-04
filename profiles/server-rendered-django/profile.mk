@@ -58,7 +58,8 @@ LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
 .PHONY: help
 help: ## Show available commands
 	@{ \
-		grep -E '^[a-zA-Z0-9_.-]+:.*?## ' $(SERVER_PROFILE_MAKEFILE); \
+		grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' $(SERVER_PROFILE_MAKEFILE) \
+			$(GLOBAL_COMMAND_MAKEFILES); \
 		if [[ -n "$(strip $(SELECTED_OPTIONAL_PROFILE_MAKEFILES))" ]]; then \
 			grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' \
 				$(SELECTED_OPTIONAL_PROFILE_MAKEFILES); \
@@ -136,15 +137,6 @@ coverage: ## Run the single coverage-enabled test suite and write coverage.xml
 	$(RUN) $(UV_RUN) pytest -c $(PROFILE_PROJECT) --cov=src \
 		--cov-config=$(PROFILE_PROJECT) --cov-report=term-missing --cov-report=xml \
 		/workspace/backend
-
-.PHONY: deps.lock
-deps.lock: ## Update this profile's lockfile with pinned Dockerized uv
-	docker run --rm --user "$$(id -u):$$(id -g)" \
-		--env UV_CACHE_DIR=/tmp/uv-cache \
-		--tmpfs /tmp:rw,mode=1777 \
-		--volume "$(CURDIR):/workspace" \
-		--workdir /workspace --entrypoint /usr/local/bin/uv $(UV_IMAGE) \
-		lock --project profiles/server-rendered-django
 
 .PHONY: changed-coverage
 changed-coverage: ## Enforce coverage on Python lines changed from DIFF_BASE

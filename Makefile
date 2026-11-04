@@ -449,14 +449,6 @@ be.setup: be.sync hooks
 be.sync:
 	cd $(PY_DIR) && uv sync --all-extras
 
-.PHONY: deps.lock
-deps.lock: ## Update the selected profile's Python lockfile with pinned Dockerized uv
-	docker run --rm --user "$$(id -u):$$(id -g)" \
-		--env UV_CACHE_DIR=/tmp/uv-cache \
-		--tmpfs /tmp:rw,mode=1777 \
-		--volume "$(CURDIR)/$(PY_DIR):/workspace" \
-		--workdir /workspace --entrypoint /usr/local/bin/uv $(UV_IMAGE) lock
-
 .PHONY: hooks
 hooks: ## Install pre-commit hooks
 	cd $(PY_DIR) && uv run pre-commit install
@@ -588,3 +580,5 @@ SELECTED_OPTIONAL_PROFILE_MAKEFILES := $(SELECTED_OPTIONAL_PROFILE_MAKEFILES) $(
 endif
 
 include $(SCAFFOLD_ROOT)profiles/release-transport.mk
+
+include $(SCAFFOLD_ROOT)profiles/dependency-commands.mk

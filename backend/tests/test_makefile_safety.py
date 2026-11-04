@@ -28,12 +28,9 @@ def test_precommit_runs_as_a_recipe() -> None:
 
 
 def test_react_profile_dependency_lock_uses_pinned_dockerized_uv() -> None:
-    output = _make("--dry-run", "deps.lock").stdout
+    output = _make("--dry-run", "deps-lock").stdout
 
-    assert "docker run --rm" in output
-    assert "ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim lock" in output
-    assert 'backend:/workspace"' in output
-    assert "--entrypoint /usr/local/bin/uv" in output
+    assert 'scripts/scaffold_dependencies.py "react-vite"' in output
 
 
 def test_react_profile_exposes_django_migration_commands() -> None:

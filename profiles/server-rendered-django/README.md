@@ -121,12 +121,12 @@ Then exercise the profile through its stable contract:
 ```bash
 make verify
 make precommit
-make deps.lock
+make deps-lock
 ```
 
-`make deps.lock` updates only the selected profile's lockfile using a uv 0.8.17
-container with the profile's Python 3.12 and Bookworm runtime. It does not
-require uv on the host.
+`make deps-lock` resolves the selected profile's package lockfile and the declared
+image pins in `deploy/dependencies.json`. It also resolves the frontend lock for
+React/Vite. Dependency tooling runs in Docker; commit the resulting locks and pins together.
 
 Set a unique project name and unused port when the directory defaults are not
 suitable:
