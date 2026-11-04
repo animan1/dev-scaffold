@@ -35,7 +35,7 @@ PROD_COMPOSE_FILES += -f deploy/docker-compose.external-monitoring.yml
 RELEASE_COMPOSE_FILES += -f deploy/docker-compose.external-monitoring.yml
 PROD_COMPOSE_PROFILES += --profile monitoring
 endif
-COMPOSE_PROD = docker compose $(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file deploy/.env.prod
+COMPOSE_PROD = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose $(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file $(PROD_ENV_FILE)
 COMPOSE_MONITOR = docker compose -f deploy/docker-compose.prod.yml \
 	-f deploy/docker-compose.external-monitoring.yml --profile monitoring \
 	--env-file deploy/.env.prod
@@ -141,7 +141,7 @@ be.wait: ## Wait for backend health (dev)
 		sleep 1; \
 	done; \
 	echo "Backend did not become ready in time"; \
-	$(COMPOSE_DEV) logs backend || true; \
+	$(COMPOSE_DEV) logs || true; \
 	exit 1
 
 .PHONY: be.ci
@@ -169,14 +169,9 @@ ci: up be.wait be.ci fe.ci smoke
 LOCAL_TLS ?= 0
 .PHONY: prepare-prod
 prepare-prod: ## Prepare private production inputs; LOCAL_TLS=1 permits localhost certificate creation/renewal
-	# Ensure env file exists (generate if missing)
-	@if [ ! -f deploy/.env.prod ]; then \
-		echo "→ Generating deploy/.env.prod"; \
-		chmod +x deploy/setup-env.sh || true; \
-		./deploy/setup-env.sh; \
-	else \
-		echo "✓ deploy/.env.prod exists"; \
-	fi
+	@PROD_ENV_FILE="$(PROD_ENV_FILE)" bash "$(SCAFFOLD_ROOT)deploy/setup-env.sh"
+	@set -o pipefail; $(COMPOSE_PROD) config --format json 2>/dev/null | \
+		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py"
 	# Self-signed certificate renewal is explicitly local-only.
 	@if [ "$(HOST_INGRESS)" = "1" ]; then \
 		echo "Host ingress owns TLS; skipping application certificate generation"; \

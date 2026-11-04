@@ -56,6 +56,13 @@ be undone.
 
 ### Docker Prod (local)
 
+`make prepare-prod` creates owner-only app/database configuration when missing and
+validates it on every invocation. Existing values are preserved; incomplete or
+inconsistent inputs must be corrected in the private file before continuing.
+Use `PROD_ENV_FILE=<path>` to select another private configuration file.
+TLS preparation still requires valid certificates, `LOCAL_TLS=1` for localhost,
+or `HOST_INGRESS=1` when ingress owns TLS.
+
 ```bash
 make bootstrap-prod  # once
 make up-prod         # build & start prod stack with nginx + Django + Postgres
