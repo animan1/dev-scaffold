@@ -117,6 +117,21 @@ def validate(config, application_service="backend"):
         sys.exit("DATABASE_URL does not match the database credentials")
     if os.environ.get("HOST_INGRESS") == "1":
         validate_ingress(config, application)
+    if "backup" in services:
+        backup = services["backup"]["environment"]
+        for name in (
+            "POSTGRES_USER",
+            "POSTGRES_DB",
+            "POSTGRES_PASSWORD",
+            "RESTIC_REPOSITORY",
+            "RESTIC_PASSWORD",
+        ):
+            if not str(backup.get(name) or "").strip():
+                source = {
+                    "RESTIC_REPOSITORY": "BACKUP_REPOSITORY",
+                    "RESTIC_PASSWORD": "BACKUP_PASSWORD",
+                }.get(name, name)
+                sys.exit(f"Missing required backup input: {source}")
 
 
 if __name__ == "__main__":

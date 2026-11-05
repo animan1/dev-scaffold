@@ -27,6 +27,7 @@ def _production_checkout(tmp_path: Path) -> str:
         "deploy/docker-compose.prod.yml",
         "deploy/docker-compose.host-ingress.yml",
         "profiles/server-rendered-django/release.compose.yml",
+        "profiles/immutable-backup/compose.yml",
     ):
         destination = tmp_path / name
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -199,6 +200,43 @@ def test_prepare_prod_generates_private_inputs_and_revalidates_without_overwriti
     malformed = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
     assert malformed.returncode != 0
     assert "private-value-with-unclosed-quote" not in malformed.stdout + malformed.stderr
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Needs the Docker Compose client")
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+def test_preparation_rejects_missing_backup_key_without_creating_a_repository(
+    tmp_path: Path,
+    profile: str,
+) -> None:
+    revision = _production_checkout(tmp_path)
+    command = [
+        "make",
+        "--no-print-directory",
+        "-f",
+        str(_repo_root() / "Makefile"),
+        f"SCAFFOLD_PROFILE={profile}",
+        "SCAFFOLD_BACKUP_PROFILE=immutable-backup",
+        "PROJECT_NAME=dev-scaffold",
+        f"RELEASE_REVISION={revision}",
+        f"BACKUP_IMAGE=local/dev-scaffold-backup:{revision}",
+        f"BACKUP_LOCAL_PATH={tmp_path}/repository",
+        f"BACKUP_RCLONE_CONFIG_DIR={tmp_path}/rclone",
+        "DOCKER_HOST=unix:///nonexistent",
+        "prepare-prod",
+    ]
+    missing = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
+    assert missing.returncode != 0
+    assert "Missing required backup input: BACKUP_PASSWORD" in missing.stderr
+    private_env = tmp_path / "deploy/.env.prod"
+    original = private_env.read_bytes()
+    private_env.write_bytes(original + b"\nBACKUP_PASSWORD=review-only-encryption-key\n")
+    configured = private_env.read_bytes()
+    ready = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
+    assert ready.returncode == 0, ready.stderr
+    assert "review-only-encryption-key" not in ready.stdout + ready.stderr
+    assert private_env.read_bytes() == configured
+    assert not (tmp_path / "repository").exists()
+    assert not (tmp_path / "rclone").exists()
 
 
 @pytest.mark.parametrize(
