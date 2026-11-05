@@ -40,7 +40,7 @@ Subcommands are listed as **Invokes:** at the end of the result.
 | Command | Result | Type |
 | --- | --- | --- |
 | `setup` | Prepare Docker-based tooling and dependencies for the selected application's components from committed lockfiles; no host-native application tooling, lockfile edits, application startup, or deployment-image build | Setup |
-| `prepare-<env>` | Prepare owner-only configuration files and host directories from scaffold templates and tenant extensions; generate missing local secrets and validate required external credentials and ingress inputs. Preserve existing configuration and credentials; recovery requires the original secrets. No service startup, image build/pull, migration, or application-data changes | Setup |
+| `prepare-<env>` | Prepare private configuration files and host directories from scaffold templates and tenant extensions with ownership and permissions for their consumers; generate missing local secrets and validate required external credentials and ingress inputs. Preserve existing configuration and credentials; recovery requires the original secrets. No service startup, image build/pull, migration, or application-data changes | Setup |
 | `hooks` | Install the repository's configured Git hooks for the current checkout, using `check` for pre-commit validation; no hook execution, lockfile edits, or service startup | Setup |
 | `build` | Immutable images of the committed checkout for the host architecture, with revision and image identities recorded; shared across environments, with no application startup | Build |
 | `publish` | Upload the recorded build's images, committed deployment source, release manifest, and successful validation evidence; preserve their revision and immutable image identities | Artifact transfer |
@@ -98,6 +98,14 @@ SSH transfer and remote coordination belong to infra.
   deployments, use their application data, or build deployment images.
 - Checks must not rewrite tracked source. Formatting and automatic fixes must
   be separate, explicitly invoked commands.
+
+## Filesystem ownership
+
+Services and workers use dedicated service UIDs, never a human user's UID.
+Paths used by one identity are owned by that identity, using `chown` as needed,
+with owner-only access. Paths shared by multiple services or host tools use a
+shared group, with only the required group read, write, and directory-traversal
+permissions. Private paths grant no access to unrelated users.
 
 ## Environments and resource names
 
