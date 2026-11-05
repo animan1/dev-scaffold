@@ -3,6 +3,10 @@ include $(SCAFFOLD_ROOT).scaffold-profile
 UV_IMAGE ?= ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
 SCAFFOLD_BACKUP_PROFILE ?= none
 CI_BACKUP_PROFILES ?= immutable-backup
+PROD_ENV_FILE ?= deploy/.env.prod
+PROD_APPLICATION_SERVICE ?= backend
+PROD_CONFIG = $(COMPOSE_PROD)
+HOST_INGRESS ?= 1
 
 .PHONY: profiles
 profiles:
@@ -18,7 +22,6 @@ FRONTEND_DIR := frontend
 PROJECT_NAME ?= $(notdir $(CURDIR))
 COMPOSE_PROJECT_NAME ?= $(PROJECT_NAME)
 export COMPOSE_PROJECT_NAME
-HOST_INGRESS ?= 0
 MONITORING ?= 0
 HOST_INGRESS_HOST ?= app.example.test
 HOST_INGRESS_PORT ?= 18080
@@ -45,7 +48,6 @@ RELEASE_REVISION ?= $(shell git rev-parse HEAD)
 RELEASE_BACKEND_TAG = $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG = $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
 RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
-PROD_ENV_FILE ?= deploy/.env.prod
 RELEASE_PLATFORM ?=
 RELEASE_PULL ?= $(COMPOSE_RELEASE) pull backend nginx
 RELEASE_HTTP_PORT ?= 18080
@@ -166,31 +168,6 @@ ci: up be.wait be.ci fe.ci smoke
 	@echo "CI checks passed"
 
 # Prod
-LOCAL_TLS ?= 0
-.PHONY: prepare-prod
-prepare-prod: ## Prepare private production inputs; LOCAL_TLS=1 permits localhost certificate creation/renewal
-	@PROD_ENV_FILE="$(PROD_ENV_FILE)" bash "$(SCAFFOLD_ROOT)deploy/setup-env.sh"
-	@set -o pipefail; $(COMPOSE_PROD) config --format json 2>/dev/null | \
-		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py"
-	# Self-signed certificate renewal is explicitly local-only.
-	@if [ "$(HOST_INGRESS)" = "1" ]; then \
-		echo "Host ingress owns TLS; skipping application certificate generation"; \
-	elif [ "$(LOCAL_TLS)" = "1" ]; then \
-		if [ ! -f deploy/nginx/certs/server.key ] || \
-			! openssl x509 -in deploy/nginx/certs/server.crt -noout -checkend 86400 >/dev/null 2>&1; then \
-			umask 077; mkdir -p deploy/nginx/certs; \
-			openssl req -x509 -nodes -newkey rsa:2048 \
-				-keyout deploy/nginx/certs/server.key -out deploy/nginx/certs/server.crt \
-				-days 365 -subj '/CN=localhost' \
-				-addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' || exit 1; \
-		fi; \
-		echo 'Local TLS certificate ready for localhost and 127.0.0.1'; \
-	else \
-		test -f deploy/nginx/certs/server.key && \
-			openssl x509 -in deploy/nginx/certs/server.crt -noout -checkend 0 >/dev/null || \
-			{ echo 'Install valid production TLS inputs, or use LOCAL_TLS=1 for the laptop dummy'; exit 1; }; \
-	fi
-
 .PHONY: bootstrap-prod
 bootstrap-prod: prepare-prod ## Prepare inputs and start the production stack
 	# Bring up stack, run migrations, and smoke test
@@ -560,6 +537,31 @@ fe.verify: ## Frontend lint + typecheck + tests + fmt-check
 else
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
+
+LOCAL_TLS ?= 0
+.PHONY: prepare-prod
+prepare-prod: ## Prepare and validate private production inputs without starting services
+	@PROD_ENV_FILE="$(PROD_ENV_FILE)" bash "$(SCAFFOLD_ROOT)deploy/setup-env.sh"
+	@set -o pipefail; $(PROD_CONFIG) config --format json 2>/dev/null | \
+		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" "$(PROD_APPLICATION_SERVICE)"
+	# Self-signed certificate renewal is explicitly local-only.
+	@if [ "$(HOST_INGRESS)" = "1" ]; then \
+		echo "Host ingress owns TLS; skipping application certificate generation"; \
+	elif [ "$(LOCAL_TLS)" = "1" ]; then \
+		if [ ! -f deploy/nginx/certs/server.key ] || \
+			! openssl x509 -in deploy/nginx/certs/server.crt -noout -checkend 86400 >/dev/null 2>&1; then \
+			umask 077; mkdir -p deploy/nginx/certs; \
+			openssl req -x509 -nodes -newkey rsa:2048 \
+				-keyout deploy/nginx/certs/server.key -out deploy/nginx/certs/server.crt \
+				-days 365 -subj '/CN=localhost' \
+				-addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' || exit 1; \
+		fi; \
+		echo 'Local TLS certificate ready for localhost and 127.0.0.1'; \
+	else \
+		test -f deploy/nginx/certs/server.key && \
+			openssl x509 -in deploy/nginx/certs/server.crt -noout -checkend 0 >/dev/null || \
+			{ echo 'Install valid production TLS inputs, or use LOCAL_TLS=1 for the laptop dummy'; exit 1; }; \
+	fi
 
 .PHONY: migrations migrate superuser shell
 migrations: ## Create migrations for intentional model changes

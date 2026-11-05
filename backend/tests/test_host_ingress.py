@@ -22,6 +22,20 @@ def _repo_root() -> Path:
     raise FileNotFoundError("Could not find the repository root")
 
 
+def _production_checkout(tmp_path: Path) -> str:
+    for name in (
+        "deploy/docker-compose.prod.yml",
+        "deploy/docker-compose.host-ingress.yml",
+        "profiles/server-rendered-django/release.compose.yml",
+    ):
+        destination = tmp_path / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(_repo_root() / name, destination)
+    return subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=_repo_root(), text=True
+    ).strip()
+
+
 def test_host_ingress_origin_is_loopback_http_only() -> None:
     compose = (_repo_root() / "deploy/docker-compose.host-ingress.yml").read_text()
     nginx = (_repo_root() / "deploy/nginx/default.host-ingress.conf").read_text()
@@ -76,15 +90,14 @@ def test_host_ingress_normalizes_forwarding_headers_at_the_proxy_boundary() -> N
 
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Needs the Docker Compose client")
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
 def test_local_tls_preparation_requires_opt_in_and_covers_browser_hosts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    profile: str,
 ) -> None:
     monkeypatch.setenv("SCAFFOLD_PROFILE", "server-rendered-django")
-    (tmp_path / "deploy").mkdir()
-    shutil.copyfile(
-        _repo_root() / "deploy/docker-compose.prod.yml",
-        tmp_path / "deploy/docker-compose.prod.yml",
-    )
+    revision = _production_checkout(tmp_path)
     private_env = tmp_path / "deploy/.env.prod"
     existing = (
         "DJANGO_SECRET_KEY=existing-private-configuration\n"
@@ -98,7 +111,10 @@ def test_local_tls_preparation_requires_opt_in_and_covers_browser_hosts(
         "--no-print-directory",
         "-f",
         str(_repo_root() / "Makefile"),
-        "SCAFFOLD_PROFILE=react-vite",
+        f"SCAFFOLD_PROFILE={profile}",
+        f"RELEASE_REVISION={revision}",
+        "DOCKER_HOST=unix:///nonexistent",
+        "HOST_INGRESS=0",
         "prepare-prod",
     ]
     rejected = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
@@ -124,37 +140,35 @@ def test_local_tls_preparation_requires_opt_in_and_covers_browser_hosts(
     )
     assert "DNS:localhost" in inspected.stdout
     assert "IP Address:127.0.0.1" in inspected.stdout
+    subprocess.run(command, cwd=tmp_path, capture_output=True, check=True)
     assert private_env.read_text() == existing
     assert private_env.stat().st_mode & 0o077 == 0
     assert (tmp_path / "deploy/nginx/certs/server.key").stat().st_mode & 0o077 == 0
 
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Needs the Docker Compose client")
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
 def test_prepare_prod_generates_private_inputs_and_revalidates_without_overwriting(
     tmp_path: Path,
+    profile: str,
 ) -> None:
-    (tmp_path / "deploy").mkdir()
-    shutil.copyfile(
-        _repo_root() / "deploy/docker-compose.prod.yml",
-        tmp_path / "deploy/docker-compose.prod.yml",
-    )
-    shutil.copyfile(
-        _repo_root() / "deploy/docker-compose.host-ingress.yml",
-        tmp_path / "deploy/docker-compose.host-ingress.yml",
-    )
+    revision = _production_checkout(tmp_path)
     command = [
         "make",
         "--no-print-directory",
         "-f",
         str(_repo_root() / "Makefile"),
-        "SCAFFOLD_PROFILE=react-vite",
-        "HOST_INGRESS=1",
+        f"SCAFFOLD_PROFILE={profile}",
+        f"RELEASE_REVISION={revision}",
+        "DOCKER_HOST=unix:///nonexistent",
         "prepare-prod",
     ]
     subprocess.run(command, cwd=tmp_path, capture_output=True, check=True)
     private_env = tmp_path / "deploy/.env.prod"
     original = private_env.read_bytes()
     assert private_env.stat().st_mode & 0o077 == 0
+    assert not (tmp_path / "deploy/nginx/certs").exists()
+    assert not (tmp_path / "deploy/releases").exists()
     private_env.chmod(0o644)
     subprocess.run(command, cwd=tmp_path, capture_output=True, check=True)
     assert private_env.read_bytes() == original
@@ -186,9 +200,11 @@ def test_prepare_prod_generates_private_inputs_and_revalidates_without_overwriti
         ("postgresql://app:private-password@db:invalid/app", False),
     ],
 )
+@pytest.mark.parametrize("application_service", ["backend", "app"])
 def test_production_input_validation_checks_resolved_credentials_without_leaking_values(
     database_url: str,
     accepted: bool,
+    application_service: str,
 ) -> None:
     environment = {
         "DJANGO_SECRET_KEY": "private-key",
@@ -199,9 +215,17 @@ def test_production_input_validation_checks_resolved_credentials_without_leaking
         "DATABASE_URL": database_url,
     }
     result = subprocess.run(
-        [sys.executable, str(_repo_root() / "scripts/validate_prod_config.py")],
+        [
+            sys.executable,
+            str(_repo_root() / "scripts/validate_prod_config.py"),
+            application_service,
+        ],
         input=json.dumps(
-            {"services": {name: {"environment": environment} for name in ("backend", "db")}}
+            {
+                "services": {
+                    name: {"environment": environment} for name in (application_service, "db")
+                }
+            }
         ),
         capture_output=True,
         text=True,
