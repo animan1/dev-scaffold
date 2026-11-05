@@ -151,7 +151,7 @@ backup-database-ready:
 
 .PHONY: backup-storage-ready
 backup-storage-ready:
-	@mkdir -p $(BACKUP_LOCAL_PATH) $(BACKUP_RCLONE_CONFIG_DIR)
+	$(MAKE) prepare-prod
 	$(BACKUP_COMPOSE) run --rm --no-deps backup-init
 
 .PHONY: backup-prod

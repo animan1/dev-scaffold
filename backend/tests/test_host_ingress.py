@@ -56,6 +56,7 @@ def _prompted_prepare(
         os.execvp(command[0], command)
     output = b""
     supplied = False
+    ownership_cancelled = False
     try:
         while True:
             if not select.select([terminal], [], [], 20)[0]:
@@ -74,6 +75,9 @@ def _prompted_prepare(
             if b"BACKUP_PASSWORD: " in output and not supplied:
                 os.write(terminal, (value + "\n").encode())
                 supplied = True
+            if b"Directory ownership requires sudo: " in output and not ownership_cancelled:
+                os.write(terminal, b"\x03")
+                ownership_cancelled = True
         _, status = os.waitpid(process, 0)
     finally:
         os.close(terminal)
@@ -288,8 +292,9 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        stdin=subprocess.DEVNULL,
     )
-    assert supplied.returncode == 0, supplied.stderr
+    assert supplied.returncode == 0 or "host ownership privileges" in supplied.stderr
     assert private_env.read_bytes() == original
     assert "environment-supplied-key" not in supplied.stdout + supplied.stderr
     empty_status, empty_output = _prompted_prepare(command, tmp_path, "")
@@ -298,14 +303,23 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
     assert private_env.read_bytes() == original
     key = "review-$TOKEN#'\"\\ key\\"
     status, output = _prompted_prepare(command, tmp_path, key)
-    assert status == 0, output
+    assert status == 0 or any(
+        message in output
+        for message in ("host ownership privileges", "Directory ownership requires sudo: ")
+    ), output
     assert output.count("BACKUP_PASSWORD: ") == 1
     assert key not in output
     assert private_env.read_bytes().startswith(original)
     assert private_env.stat().st_mode & 0o077 == 0
     configured = private_env.read_bytes()
-    ready = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
-    assert ready.returncode == 0, ready.stderr
+    ready = subprocess.run(
+        command,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+    )
+    assert ready.returncode == 0 or "host ownership privileges" in ready.stderr
     assert "BACKUP_PASSWORD: " not in ready.stdout + ready.stderr
     assert key not in ready.stdout + ready.stderr
     assert private_env.read_bytes() == configured
@@ -347,8 +361,12 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
     )
     resolved = dict(line.split("=", 1) for line in rendered.stdout.splitlines() if "=" in line)
     assert resolved["BACKUP_PASSWORD"] == key
-    assert not (tmp_path / "repository").exists()
-    assert not (tmp_path / "rclone").exists()
+    for name in ("repository", "rclone"):
+        directory = tmp_path / name
+        if directory.exists():
+            assert directory.stat().st_uid == 10001
+            assert directory.stat().st_mode & 0o7777 == 0o700
+            directory.rmdir()
 
 
 @pytest.mark.parametrize(

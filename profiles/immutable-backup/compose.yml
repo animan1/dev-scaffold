@@ -6,7 +6,8 @@ services:
     command:
       - >-
         install -d -o ${BACKUP_RUNTIME_UID:-10001} -g ${BACKUP_RUNTIME_GID:-10001}
-        /backups ${BACKUP_STATUS_DIR:-/backup-status}
+        ${BACKUP_STATUS_DIR:-/backup-status} &&
+        chown ${BACKUP_RUNTIME_UID:-10001}:${BACKUP_RUNTIME_GID:-10001} /backups
     user: "0:0"
     volumes:
       - "${BACKUP_LOCAL_PATH:?Set BACKUP_LOCAL_PATH through the profile Makefile}:/backups"

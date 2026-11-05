@@ -4,8 +4,11 @@ import getpass
 import json
 import os
 import re
+import stat
+import subprocess
 import sys
 from ipaddress import IPv6Address, ip_address
+from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 
@@ -171,10 +174,112 @@ def validate(config, application_service="backend"):
                     raise ConfigurationError(f"Missing required backup input: {source}")
 
 
+def prepare_backup_paths(config):
+    services = config["services"]
+    if "backup" not in services:
+        return
+    try:
+        uid, gid = map(int, services["backup"]["user"].split(":"))
+        if uid <= 0 or gid < 0:
+            raise ConfigurationError("Backup paths require a dedicated service UID:GID")
+        changes = []
+        targets = ("/backups", "/config/rclone")
+        owner = ["-o", str(uid), "-g", str(gid)]
+        for mount in services["backup"].get("volumes", []):
+            if mount.get("type") != "bind" or mount["target"] not in targets:
+                continue
+            path = Path(mount["source"])
+            if path.is_symlink() or Path.cwd().is_relative_to(path):
+                raise ConfigurationError("Backup preparation cannot own this path")
+            shared = False
+            writable = False
+            for name, service in services.items():
+                if name in ("backup", "backup-init"):
+                    continue
+                for other in service.get("volumes", []):
+                    if other.get("type") != "bind" or Path(other["source"]) != path:
+                        continue
+                    other_uid, other_gid = map(int, service["user"].split(":"))
+                    groups = {other_gid, *map(int, service.get("group_add", []))}
+                    if other_uid <= 0 or gid not in groups:
+                        raise ConfigurationError(
+                            "Shared backup paths require a common service group"
+                        )
+                    shared = True
+                    writable |= not other.get("read_only", False)
+            mode = (0o2770 if writable else 0o2750) if shared else 0o700
+            existing = path.stat() if path.exists() else None
+            if existing:
+                if not stat.S_ISDIR(existing.st_mode):
+                    raise ConfigurationError("Backup preparation requires directories")
+                if (
+                    mount["target"] == "/backups"
+                    and (existing.st_uid, existing.st_gid) != (uid, gid)
+                    and any(path.iterdir())
+                ):
+                    raise ConfigurationError(
+                        "Nonempty backup paths need an explicit ownership migration"
+                    )
+                actual = (
+                    existing.st_uid,
+                    existing.st_gid,
+                    stat.S_IMODE(existing.st_mode),
+                )
+                if actual == (uid, gid, mode):
+                    continue
+            if mount["target"] == "/config/rclone" and os.access(path, os.X_OK):
+                configured = (
+                    services["backup"]
+                    .get("environment", {})
+                    .get("RCLONE_CONFIG", "/config/rclone/rclone.conf")
+                )
+                try:
+                    relative = Path(configured).relative_to(mount["target"])
+                except ValueError:
+                    relative = None
+                if relative is not None:
+                    if ".." in relative.parts:
+                        raise ConfigurationError(
+                            "RCLONE_CONFIG escapes its host directory"
+                        )
+                    credential = path / relative
+                    if credential.is_symlink():
+                        raise ConfigurationError("RCLONE_CONFIG cannot be a symlink")
+                    if credential.exists():
+                        if not credential.is_file():
+                            raise ConfigurationError("RCLONE_CONFIG must be a file")
+                        file_mode = (0o660 if writable else 0o640) if shared else 0o600
+                        changes.extend(
+                            [
+                                ["chown", f"{uid}:{gid}", str(credential)],
+                                ["chmod", f"{file_mode:o}", str(credential)],
+                            ]
+                        )
+            changes.append(["install", "-d", *owner, "-m", f"{mode:o}", str(path)])
+        for command in changes:
+            if os.geteuid() != 0:
+                sudo = (
+                    ["sudo", "-p", "Directory ownership requires sudo: "]
+                    if os.environ.get("PREPARE_INTERACTIVE") == "1"
+                    else ["sudo", "-n"]
+                )
+                command = [*sudo, "--", *command]
+            subprocess.run(command, check=True, stdin=subprocess.DEVNULL)
+    except (KeyError, TypeError, ValueError):
+        raise ConfigurationError(
+            "Backup path consumers must declare numeric UID:GID ownership"
+        ) from None
+    except (OSError, subprocess.CalledProcessError, KeyboardInterrupt):
+        raise ConfigurationError(
+            "Backup directory preparation requires host ownership privileges"
+        ) from None
+
+
 if __name__ == "__main__":
     try:
         config = json.load(sys.stdin)
         validate(config, sys.argv[1] if len(sys.argv) > 1 else "backend")
+        prepare_backup_paths(config)
     except ConfigurationError as error:
         sys.exit(str(error))
     except (KeyError, TypeError, json.JSONDecodeError):

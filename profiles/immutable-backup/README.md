@@ -48,3 +48,12 @@ the private env file. Unattended runs require those values upfront and fail clea
 when absent. Existing supplied credentials are preserved without prompting.
 Preparation does not generate a replacement key, initialize a repository, or
 authenticate to remote storage. Without the profile, backup inputs are not required.
+
+Preparation creates the declared host directories with the backup service's fixed
+UID/GID. Single-consumer directories use mode 700; shared consumers must declare a
+common group and receive only the group access their mounts require. Targeted
+ownership changes may prompt for `sudo`; unattended runs need those privileges
+upfront. The configured rclone credential file is assigned to its consumers without
+changing its contents. Nonempty repositories with different owners require an
+explicit migration.
+Preparation does not recursively change existing backup data ownership.
