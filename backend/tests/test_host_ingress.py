@@ -270,6 +270,7 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
     missing = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
     assert missing.returncode != 0
     assert "Missing required backup input: BACKUP_PASSWORD" in missing.stderr
+    assert "Traceback" not in missing.stderr
     private_env = tmp_path / "deploy/.env.prod"
     original = private_env.read_bytes()
     redirected_status, redirected_output = _prompted_prepare(

@@ -9,6 +9,10 @@ from ipaddress import IPv6Address, ip_address
 from urllib.parse import unquote, urlsplit
 
 
+class ConfigurationError(Exception):
+    """Invalid preparation input with a message safe to display."""
+
+
 def valid_host(host):
     if host == "*":
         return True
@@ -33,13 +37,15 @@ def validate_ingress(config, application):
             or not 1 <= int(port.get("published", 0)) <= 65535
             for port in ports
         ):
-            sys.exit("Host-ingress origin requires loopback TCP port bindings")
+            raise ConfigurationError(
+                "Host-ingress origin requires loopback TCP port bindings"
+            )
         hosts = [
             host.strip().lower()
             for host in application["DJANGO_ALLOWED_HOSTS"].split(",")
         ]
         if not all(valid_host(host) for host in hosts):
-            sys.exit("Invalid DJANGO_ALLOWED_HOSTS for host ingress")
+            raise ConfigurationError("Invalid DJANGO_ALLOWED_HOSTS for host ingress")
         public = os.environ.get("HOST_INGRESS_HOST", "")
         if public:
             address = urlsplit("//" + public)
@@ -55,7 +61,7 @@ def validate_ingress(config, application):
                 or address.fragment
                 or address.port is not None
             ):
-                sys.exit("Invalid HOST_INGRESS_HOST")
+                raise ConfigurationError("Invalid HOST_INGRESS_HOST")
             if not any(
                 pattern == "*"
                 or domain == pattern
@@ -65,7 +71,9 @@ def validate_ingress(config, application):
                 )
                 for pattern in hosts
             ):
-                sys.exit("HOST_INGRESS_HOST is not accepted by DJANGO_ALLOWED_HOSTS")
+                raise ConfigurationError(
+                    "HOST_INGRESS_HOST is not accepted by DJANGO_ALLOWED_HOSTS"
+                )
         for value in application.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(","):
             if not value.strip():
                 continue
@@ -82,26 +90,25 @@ def validate_ingress(config, application):
                 or origin.fragment
                 or origin.port == 0
             ):
-                sys.exit(
+                raise ConfigurationError(
                     "DJANGO_CSRF_TRUSTED_ORIGINS requires HTTPS origins without paths or credentials"
                 )
     except (KeyError, TypeError, ValueError):
-        sys.exit("Invalid host-ingress configuration")
+        raise ConfigurationError("Invalid host-ingress configuration") from None
 
 
 def prompt_backup_input(name):
     path = os.environ.get("PROD_ENV_FILE")
     if not path or os.environ.get("PREPARE_INTERACTIVE") != "1":
-        sys.exit(
+        raise ConfigurationError(
             f"Missing required backup input: {name}; supply it for non-interactive use"
         )
     try:
-        with open("/dev/tty", "w") as terminal:
-            value = getpass.getpass(f"{name}: ", stream=terminal)
+        value = getpass.getpass(f"{name}: ")
     except (EOFError, OSError, KeyboardInterrupt):
-        sys.exit(f"Unable to read {name} from the terminal")
+        raise ConfigurationError(f"Unable to read {name} from the terminal") from None
     if not value.strip():
-        sys.exit(f"{name} cannot be empty")
+        raise ConfigurationError(f"{name} cannot be empty")
     # Compose double-quoted dotenv values support JSON escapes and $$ for a
     # literal dollar. Keep existing configuration bytes and credentials intact.
     encoded = json.dumps(value.replace("$", "$$"), ensure_ascii=False)
@@ -110,7 +117,9 @@ def prompt_backup_input(name):
         with os.fdopen(descriptor, "a", encoding="utf-8") as private:
             private.write(f"\n{name}={encoded}\n")
     except OSError:
-        sys.exit(f"Unable to save {name} in the private configuration")
+        raise ConfigurationError(
+            f"Unable to save {name} in the private configuration"
+        ) from None
 
 
 def validate(config, application_service="backend"):
@@ -123,7 +132,7 @@ def validate(config, application_service="backend"):
     ):
         for name in names:
             if not str(environment.get(name) or "").strip():
-                sys.exit(f"Missing required production input: {name}")
+                raise ConfigurationError(f"Missing required production input: {name}")
     url = urlsplit(application["DATABASE_URL"])
     if (
         url.scheme not in ("postgres", "postgresql")
@@ -133,13 +142,13 @@ def validate(config, application_service="backend"):
         or not url.path.strip("/")
         or url.port == 0
     ):
-        sys.exit("Invalid production input: DATABASE_URL")
+        raise ConfigurationError("Invalid production input: DATABASE_URL")
     if url.hostname == "db" and (
         unquote(url.username) != database["POSTGRES_USER"]
         or unquote(url.password) != database["POSTGRES_PASSWORD"]
         or unquote(url.path[1:]) != database["POSTGRES_DB"]
     ):
-        sys.exit("DATABASE_URL does not match the database credentials")
+        raise ConfigurationError("DATABASE_URL does not match the database credentials")
     if os.environ.get("HOST_INGRESS") == "1":
         validate_ingress(config, application)
     if "backup" in services:
@@ -159,13 +168,15 @@ def validate(config, application_service="backend"):
                 if source in ("BACKUP_PASSWORD", "BACKUP_REPOSITORY"):
                     prompt_backup_input(source)
                 else:
-                    sys.exit(f"Missing required backup input: {source}")
+                    raise ConfigurationError(f"Missing required backup input: {source}")
 
 
 if __name__ == "__main__":
     try:
         config = json.load(sys.stdin)
         validate(config, sys.argv[1] if len(sys.argv) > 1 else "backend")
+    except ConfigurationError as error:
+        sys.exit(str(error))
     except (KeyError, TypeError, json.JSONDecodeError):
         sys.exit("Invalid production configuration; check the private input file")
     except ValueError:
