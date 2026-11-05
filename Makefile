@@ -7,6 +7,8 @@ PROD_ENV_FILE ?= deploy/.env.prod
 PROD_APPLICATION_SERVICE ?= backend
 PROD_CONFIG = $(COMPOSE_PROD)
 HOST_INGRESS ?= 1
+# Capture tenant/operator input before the smoke-test placeholder default.
+PREPARE_PUBLIC_HOST := $(HOST_INGRESS_HOST)
 
 .PHONY: profiles
 profiles:
@@ -543,6 +545,7 @@ LOCAL_TLS ?= 0
 prepare-prod: ## Prepare and validate private production inputs without starting services
 	@PROD_ENV_FILE="$(PROD_ENV_FILE)" bash "$(SCAFFOLD_ROOT)deploy/setup-env.sh"
 	@set -o pipefail; $(PROD_CONFIG) config --format json 2>/dev/null | \
+		HOST_INGRESS="$(HOST_INGRESS)" HOST_INGRESS_HOST="$(PREPARE_PUBLIC_HOST)" \
 		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" "$(PROD_APPLICATION_SERVICE)"
 	# Self-signed certificate renewal is explicitly local-only.
 	@if [ "$(HOST_INGRESS)" = "1" ]; then \
