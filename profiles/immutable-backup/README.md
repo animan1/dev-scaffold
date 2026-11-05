@@ -43,5 +43,8 @@ the versioned source and immutable digest declarations together.
 When this profile is enabled, `make prepare-prod` also validates the worker's
 required database and repository inputs. Supply `BACKUP_PASSWORD` in the private
 production env file or existing environment; recovery requires the original key.
+In a terminal, missing backup credentials are prompted without echo and saved to
+the private env file. Unattended runs require those values upfront and fail clearly
+when absent. Existing supplied credentials are preserved without prompting.
 Preparation does not generate a replacement key, initialize a repository, or
 authenticate to remote storage. Without the profile, backup inputs are not required.

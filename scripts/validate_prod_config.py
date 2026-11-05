@@ -1,5 +1,6 @@
 """Validate resolved production inputs without printing their values."""
 
+import getpass
 import json
 import os
 import re
@@ -88,6 +89,30 @@ def validate_ingress(config, application):
         sys.exit("Invalid host-ingress configuration")
 
 
+def prompt_backup_input(name):
+    path = os.environ.get("PROD_ENV_FILE")
+    if not path or os.environ.get("PREPARE_INTERACTIVE") != "1":
+        sys.exit(
+            f"Missing required backup input: {name}; supply it for non-interactive use"
+        )
+    try:
+        with open("/dev/tty", "w") as terminal:
+            value = getpass.getpass(f"{name}: ", stream=terminal)
+    except (EOFError, OSError, KeyboardInterrupt):
+        sys.exit(f"Unable to read {name} from the terminal")
+    if not value.strip():
+        sys.exit(f"{name} cannot be empty")
+    # Compose double-quoted dotenv values support JSON escapes and $$ for a
+    # literal dollar. Keep existing configuration bytes and credentials intact.
+    encoded = json.dumps(value.replace("$", "$$"), ensure_ascii=False)
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW)
+        with os.fdopen(descriptor, "a", encoding="utf-8") as private:
+            private.write(f"\n{name}={encoded}\n")
+    except OSError:
+        sys.exit(f"Unable to save {name} in the private configuration")
+
+
 def validate(config, application_service="backend"):
     services = config["services"]
     database = services["db"]["environment"]
@@ -131,7 +156,10 @@ def validate(config, application_service="backend"):
                     "RESTIC_REPOSITORY": "BACKUP_REPOSITORY",
                     "RESTIC_PASSWORD": "BACKUP_PASSWORD",
                 }.get(name, name)
-                sys.exit(f"Missing required backup input: {source}")
+                if source in ("BACKUP_PASSWORD", "BACKUP_REPOSITORY"):
+                    prompt_backup_input(source)
+                else:
+                    sys.exit(f"Missing required backup input: {source}")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
+import pty
+import select
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +39,45 @@ def _production_checkout(tmp_path: Path) -> str:
     return subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=_repo_root(), text=True
     ).strip()
+
+
+def _prompted_prepare(
+    command: list[str],
+    directory: Path,
+    value: str,
+    redirect_input: bool = False,
+) -> tuple[int, str]:
+    process, terminal = pty.fork()
+    if process == 0:
+        os.chdir(directory)
+        if redirect_input:
+            with open(os.devnull) as empty:
+                os.dup2(empty.fileno(), 0)
+        os.execvp(command[0], command)
+    output = b""
+    supplied = False
+    try:
+        while True:
+            if not select.select([terminal], [], [], 20)[0]:
+                os.kill(process, signal.SIGKILL)
+                os.waitpid(process, 0)
+                pytest.fail("Preparation did not finish its terminal prompt")
+            try:
+                chunk = os.read(terminal, 65536)
+            except OSError as error:
+                if error.errno == errno.EIO:
+                    break
+                raise
+            if not chunk:
+                break
+            output += chunk
+            if b"BACKUP_PASSWORD: " in output and not supplied:
+                os.write(terminal, (value + "\n").encode())
+                supplied = True
+        _, status = os.waitpid(process, 0)
+    finally:
+        os.close(terminal)
+    return os.waitstatus_to_exitcode(status), output.decode(errors="replace")
 
 
 def test_host_ingress_origin_is_loopback_http_only() -> None:
@@ -204,7 +247,7 @@ def test_prepare_prod_generates_private_inputs_and_revalidates_without_overwriti
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Needs the Docker Compose client")
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
-def test_preparation_rejects_missing_backup_key_without_creating_a_repository(
+def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
     tmp_path: Path,
     profile: str,
 ) -> None:
@@ -229,12 +272,80 @@ def test_preparation_rejects_missing_backup_key_without_creating_a_repository(
     assert "Missing required backup input: BACKUP_PASSWORD" in missing.stderr
     private_env = tmp_path / "deploy/.env.prod"
     original = private_env.read_bytes()
-    private_env.write_bytes(original + b"\nBACKUP_PASSWORD=review-only-encryption-key\n")
+    redirected_status, redirected_output = _prompted_prepare(
+        command,
+        tmp_path,
+        "unused",
+        redirect_input=True,
+    )
+    assert redirected_status != 0
+    assert "Missing required backup input: BACKUP_PASSWORD" in redirected_output
+    assert "BACKUP_PASSWORD: " not in redirected_output
+    assert private_env.read_bytes() == original
+    supplied = subprocess.run(
+        [*command, "BACKUP_PASSWORD=environment-supplied-key"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert supplied.returncode == 0, supplied.stderr
+    assert private_env.read_bytes() == original
+    assert "environment-supplied-key" not in supplied.stdout + supplied.stderr
+    empty_status, empty_output = _prompted_prepare(command, tmp_path, "")
+    assert empty_status != 0
+    assert "BACKUP_PASSWORD cannot be empty" in empty_output
+    assert private_env.read_bytes() == original
+    key = "review-$TOKEN#'\"\\ key\\"
+    status, output = _prompted_prepare(command, tmp_path, key)
+    assert status == 0, output
+    assert output.count("BACKUP_PASSWORD: ") == 1
+    assert key not in output
+    assert private_env.read_bytes().startswith(original)
+    assert private_env.stat().st_mode & 0o077 == 0
     configured = private_env.read_bytes()
     ready = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
     assert ready.returncode == 0, ready.stderr
-    assert "review-only-encryption-key" not in ready.stdout + ready.stderr
+    assert "BACKUP_PASSWORD: " not in ready.stdout + ready.stderr
+    assert key not in ready.stdout + ready.stderr
     assert private_env.read_bytes() == configured
+    base = (
+        "deploy/docker-compose.prod.yml"
+        if profile == "react-vite"
+        else ("profiles/server-rendered-django/release.compose.yml")
+    )
+    rendered = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--project-directory",
+            ".",
+            "-f",
+            base,
+            "-f",
+            "profiles/immutable-backup/compose.yml",
+            "--env-file",
+            str(private_env),
+            "config",
+            "--environment",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+        env={
+            **os.environ,
+            "PROD_ENV_FILE": str(private_env),
+            "COMPOSE_PROJECT_NAME": "dev-scaffold",
+            "BACKUP_IMAGE": f"local/dev-scaffold-backup:{revision}",
+            "BACKUP_LOCAL_PATH": str(tmp_path / "repository"),
+            "BACKUP_RCLONE_CONFIG_DIR": str(tmp_path / "rclone"),
+            "RELEASE_BACKEND_IMAGE": f"local/dev-scaffold-backend:{revision}",
+            "RELEASE_WEB_IMAGE": f"local/dev-scaffold-web:{revision}",
+            "DOCKER_HOST": "unix:///nonexistent",
+        },
+    )
+    resolved = dict(line.split("=", 1) for line in rendered.stdout.splitlines() if "=" in line)
+    assert resolved["BACKUP_PASSWORD"] == key
     assert not (tmp_path / "repository").exists()
     assert not (tmp_path / "rclone").exists()
 
