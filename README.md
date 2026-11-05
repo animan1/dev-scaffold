@@ -60,6 +60,11 @@ be undone.
 validates it on every invocation. Existing values are preserved; incomplete or
 inconsistent inputs must be corrected in the private file before continuing.
 Use `PROD_ENV_FILE=<path>` to select another private configuration file.
+With host ingress, preparation checks loopback TCP publication, hostname syntax,
+and HTTPS CSRF origins. An explicitly supplied `HOST_INGRESS_HOST` must be accepted
+by `DJANGO_ALLOWED_HOSTS`; otherwise the allowed-host list is the declaration.
+Cross-origin CSRF clients are supported. Host certificates and live routing are
+owned by ingress and are not probed during preparation.
 Host ingress owns TLS by default (`HOST_INGRESS=1`). Direct-TLS laptop deployments
 opt into `HOST_INGRESS=0` and `LOCAL_TLS=1`. Existing application-owned TLS
 deployments must keep `HOST_INGRESS=0` on production commands until their host

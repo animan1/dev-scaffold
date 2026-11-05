@@ -169,6 +169,15 @@ def test_prepare_prod_generates_private_inputs_and_revalidates_without_overwriti
     assert private_env.stat().st_mode & 0o077 == 0
     assert not (tmp_path / "deploy/nginx/certs").exists()
     assert not (tmp_path / "deploy/releases").exists()
+    mismatch = subprocess.run(
+        [*command, "HOST_INGRESS_HOST=unaccepted.example"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert mismatch.returncode != 0
+    assert "not accepted by DJANGO_ALLOWED_HOSTS" in mismatch.stderr
+    assert private_env.read_bytes() == original
     private_env.chmod(0o644)
     subprocess.run(command, cwd=tmp_path, capture_output=True, check=True)
     assert private_env.read_bytes() == original
