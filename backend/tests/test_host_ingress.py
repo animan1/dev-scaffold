@@ -161,7 +161,6 @@ def test_prepare_prod_generates_private_inputs_and_revalidates_without_overwriti
         f"SCAFFOLD_PROFILE={profile}",
         f"RELEASE_REVISION={revision}",
         "DOCKER_HOST=unix:///nonexistent",
-        "HOST_INGRESS=1",
         "prepare-prod",
     ]
     subprocess.run(command, cwd=tmp_path, capture_output=True, check=True)

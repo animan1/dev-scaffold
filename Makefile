@@ -6,6 +6,7 @@ CI_BACKUP_PROFILES ?= immutable-backup
 PROD_ENV_FILE ?= deploy/.env.prod
 PROD_APPLICATION_SERVICE ?= backend
 PROD_CONFIG = $(COMPOSE_PROD)
+HOST_INGRESS ?= 1
 
 .PHONY: profiles
 profiles:
@@ -21,7 +22,6 @@ FRONTEND_DIR := frontend
 PROJECT_NAME ?= $(notdir $(CURDIR))
 COMPOSE_PROJECT_NAME ?= $(PROJECT_NAME)
 export COMPOSE_PROJECT_NAME
-HOST_INGRESS ?= 0
 MONITORING ?= 0
 HOST_INGRESS_HOST ?= app.example.test
 HOST_INGRESS_PORT ?= 18080

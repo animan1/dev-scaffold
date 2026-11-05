@@ -60,14 +60,16 @@ be undone.
 validates it on every invocation. Existing values are preserved; incomplete or
 inconsistent inputs must be corrected in the private file before continuing.
 Use `PROD_ENV_FILE=<path>` to select another private configuration file.
-TLS preparation requires valid certificates, `LOCAL_TLS=1` for localhost,
-or `HOST_INGRESS=1` when ingress owns TLS.
+Host ingress owns TLS by default (`HOST_INGRESS=1`). Direct-TLS laptop deployments
+opt into `HOST_INGRESS=0` and `LOCAL_TLS=1`. Existing application-owned TLS
+deployments must keep `HOST_INGRESS=0` on production commands until their host
+ingress is configured; otherwise the next startup changes the exposed ports.
 
 ```bash
-make bootstrap-prod  # once
-make up-prod         # build & start prod stack with nginx + Django + Postgres
-make smoke-prod      # run API, static, and FE smokes
-make down-prod       # stop stack
+make bootstrap-prod HOST_INGRESS=0 LOCAL_TLS=1  # once
+make up-prod HOST_INGRESS=0     # build & start prod stack with nginx + Django + Postgres
+make smoke-prod HOST_INGRESS=0  # run API, static, and FE smokes
+make down-prod HOST_INGRESS=0   # stop stack
 ```
 
 ### Optional immutable releases
@@ -129,11 +131,11 @@ Use the machine's destination platform. For this repository's existing laptop
 dummy, use the actual production workflow without a second Compose project:
 
 ```bash
-make prepare-prod LOCAL_TLS=1
+make prepare-prod HOST_INGRESS=0 LOCAL_TLS=1
 make build-release-images RELEASE_PLATFORM=linux/arm64
-make release-bundle-config RELEASE_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_CONFIG_FILE=.tmp/private-release-compose.json
-make deploy-release RELEASE_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_PULL=true
-make smoke-prod CURL_FLAGS='--cacert deploy/nginx/certs/server.crt'
+make release-bundle-config HOST_INGRESS=0 RELEASE_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_CONFIG_FILE=.tmp/private-release-compose.json
+make deploy-release HOST_INGRESS=0 RELEASE_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_PULL=true
+make smoke-prod HOST_INGRESS=0 CURL_FLAGS='--cacert deploy/nginx/certs/server.crt'
 ```
 
 Run from the existing `dev-scaffold` checkout, with its private `deploy/.env.prod`
@@ -145,12 +147,14 @@ disk; switching to production PostgreSQL does not migrate SQLite data.
 Port 18080 avoids the laptop's existing Cuplr listener on 8080 and redirects to
 the same Nginx service's HTTPS listener on loopback port 443. The browser health
 URL is `https://127.0.0.1/api/healthz` (`/api/health` is not a route).
-`prepare-prod LOCAL_TLS=1` creates or renews a self-signed certificate for
+`prepare-prod HOST_INGRESS=0 LOCAL_TLS=1` creates or renews a self-signed certificate for
 localhost and 127.0.0.1 without replacing the private env file. A browser needs
 a one-time local certificate trust decision. The smoke command verifies the
 certificate explicitly; it does not bypass TLS validation or supply a fake
-forwarded-HTTPS header. For production domains, install the real TLS certificate
-and run `prepare-prod` without `LOCAL_TLS=1`; it rejects missing/expired inputs.
+forwarded-HTTPS header. Production defaults to host-owned TLS; install production
+certificates in that ingress. To retain application-owned TLS, set
+`HOST_INGRESS=0`, install valid application certificates, and run `prepare-prod`
+without `LOCAL_TLS=1`; it rejects missing/expired inputs.
 These commands
 leave the dummy running; do not use volume-deleting CI cleanup on it.
 Downstream applications supply their own existing project name, private

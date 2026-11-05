@@ -4,7 +4,6 @@ SERVER_PROFILE_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 PROJECT_NAME ?= $(notdir $(CURDIR))
 APP_PORT ?= 18000
 APP_HOST ?= localhost
-HOST_INGRESS ?= 1
 DIFF_BASE ?= origin/main
 PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
 GIT_COMMON_DIR ?= $(shell git rev-parse --path-format=absolute --git-common-dir)
