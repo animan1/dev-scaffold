@@ -40,6 +40,8 @@ The web origin binds only to `127.0.0.1:${RELEASE_HTTP_PORT}`. A separately
 owned host reverse proxy routes the public hostname to that origin and owns
 TLS. It does not join the application network, receive application credentials,
 mount application volumes, or access the Docker socket.
+`HOST_INGRESS` defaults to `1` for this HTTP-origin topology; `prepare-prod` uses
+the same `HOST_INGRESS`/`LOCAL_TLS` input preparation as the React/Vite profile.
 
 The Compose definition does not hide application initialization in a container
 entrypoint. Release automation must explicitly run Django's production checks,

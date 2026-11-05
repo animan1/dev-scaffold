@@ -7,13 +7,6 @@ PROD_ENV_FILE ?= deploy/.env.prod
 PROD_APPLICATION_SERVICE ?= backend
 PROD_CONFIG = $(COMPOSE_PROD)
 
-.PHONY: prepare-prod
-prepare-prod: ## Prepare and validate private production inputs without starting services
-	@PROD_ENV_FILE="$(PROD_ENV_FILE)" bash "$(SCAFFOLD_ROOT)deploy/setup-env.sh"
-	@set -o pipefail; $(PROD_CONFIG) config --format json 2>/dev/null | \
-		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" "$(PROD_APPLICATION_SERVICE)"
-	$(PREPARE_PROD_TLS)
-
 .PHONY: profiles
 profiles:
 	@python3 scripts/profile_metadata.py --application '$(SCAFFOLD_PROFILE)' \
@@ -175,28 +168,6 @@ ci: up be.wait be.ci fe.ci smoke
 	@echo "CI checks passed"
 
 # Prod
-LOCAL_TLS ?= 0
-# Self-signed certificate renewal is explicitly local-only.
-define PREPARE_PROD_TLS
-@if [ "$(HOST_INGRESS)" = "1" ]; then \
-		echo "Host ingress owns TLS; skipping application certificate generation"; \
-	elif [ "$(LOCAL_TLS)" = "1" ]; then \
-		if [ ! -f deploy/nginx/certs/server.key ] || \
-			! openssl x509 -in deploy/nginx/certs/server.crt -noout -checkend 86400 >/dev/null 2>&1; then \
-			umask 077; mkdir -p deploy/nginx/certs; \
-			openssl req -x509 -nodes -newkey rsa:2048 \
-				-keyout deploy/nginx/certs/server.key -out deploy/nginx/certs/server.crt \
-				-days 365 -subj '/CN=localhost' \
-				-addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' || exit 1; \
-		fi; \
-		echo 'Local TLS certificate ready for localhost and 127.0.0.1'; \
-	else \
-		test -f deploy/nginx/certs/server.key && \
-			openssl x509 -in deploy/nginx/certs/server.crt -noout -checkend 0 >/dev/null || \
-			{ echo 'Install valid production TLS inputs, or use LOCAL_TLS=1 for the laptop dummy'; exit 1; }; \
-	fi
-endef
-
 .PHONY: bootstrap-prod
 bootstrap-prod: prepare-prod ## Prepare inputs and start the production stack
 	# Bring up stack, run migrations, and smoke test
@@ -566,6 +537,31 @@ fe.verify: ## Frontend lint + typecheck + tests + fmt-check
 else
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
+
+LOCAL_TLS ?= 0
+.PHONY: prepare-prod
+prepare-prod: ## Prepare and validate private production inputs without starting services
+	@PROD_ENV_FILE="$(PROD_ENV_FILE)" bash "$(SCAFFOLD_ROOT)deploy/setup-env.sh"
+	@set -o pipefail; $(PROD_CONFIG) config --format json 2>/dev/null | \
+		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" "$(PROD_APPLICATION_SERVICE)"
+	# Self-signed certificate renewal is explicitly local-only.
+	@if [ "$(HOST_INGRESS)" = "1" ]; then \
+		echo "Host ingress owns TLS; skipping application certificate generation"; \
+	elif [ "$(LOCAL_TLS)" = "1" ]; then \
+		if [ ! -f deploy/nginx/certs/server.key ] || \
+			! openssl x509 -in deploy/nginx/certs/server.crt -noout -checkend 86400 >/dev/null 2>&1; then \
+			umask 077; mkdir -p deploy/nginx/certs; \
+			openssl req -x509 -nodes -newkey rsa:2048 \
+				-keyout deploy/nginx/certs/server.key -out deploy/nginx/certs/server.crt \
+				-days 365 -subj '/CN=localhost' \
+				-addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' || exit 1; \
+		fi; \
+		echo 'Local TLS certificate ready for localhost and 127.0.0.1'; \
+	else \
+		test -f deploy/nginx/certs/server.key && \
+			openssl x509 -in deploy/nginx/certs/server.crt -noout -checkend 0 >/dev/null || \
+			{ echo 'Install valid production TLS inputs, or use LOCAL_TLS=1 for the laptop dummy'; exit 1; }; \
+	fi
 
 .PHONY: migrations migrate superuser shell
 migrations: ## Create migrations for intentional model changes

@@ -60,7 +60,7 @@ be undone.
 validates it on every invocation. Existing values are preserved; incomplete or
 inconsistent inputs must be corrected in the private file before continuing.
 Use `PROD_ENV_FILE=<path>` to select another private configuration file.
-React/Vite TLS preparation requires valid certificates, `LOCAL_TLS=1` for localhost,
+TLS preparation requires valid certificates, `LOCAL_TLS=1` for localhost,
 or `HOST_INGRESS=1` when ingress owns TLS.
 
 ```bash
