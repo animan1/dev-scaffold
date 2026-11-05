@@ -544,8 +544,10 @@ LOCAL_TLS ?= 0
 .PHONY: prepare-prod
 prepare-prod: ## Prepare and validate private production inputs without starting services
 	@PROD_ENV_FILE="$(PROD_ENV_FILE)" bash "$(SCAFFOLD_ROOT)deploy/setup-env.sh"
-	@set -o pipefail; $(PROD_CONFIG) config --format json 2>/dev/null | \
-		HOST_INGRESS="$(HOST_INGRESS)" HOST_INGRESS_HOST="$(PREPARE_PUBLIC_HOST)" \
+	@set -o pipefail; prepare_interactive=0; \
+		if [ -t 0 ]; then prepare_interactive=1; fi; \
+		$(PROD_CONFIG) config --format json 2>/dev/null | \
+		PREPARE_INTERACTIVE=$$prepare_interactive PROD_ENV_FILE="$(PROD_ENV_FILE)" HOST_INGRESS="$(HOST_INGRESS)" HOST_INGRESS_HOST="$(PREPARE_PUBLIC_HOST)" \
 		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" "$(PROD_APPLICATION_SERVICE)"
 	# Self-signed certificate renewal is explicitly local-only.
 	@if [ "$(HOST_INGRESS)" = "1" ]; then \
