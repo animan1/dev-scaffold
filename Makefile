@@ -547,6 +547,10 @@ prepare-prod: ## Prepare and validate private production inputs without starting
 	@PROD_ENV_FILE="$(PROD_ENV_FILE)" bash "$(SCAFFOLD_ROOT)deploy/setup-env.sh"
 	@set -o pipefail; prepare_interactive=0; \
 		if [ -t 0 ]; then prepare_interactive=1; fi; \
+		if [ "$(SCAFFOLD_BACKUP_PROFILE)" != "none" ]; then \
+			PREPARE_INTERACTIVE=$$prepare_interactive PROD_ENV_FILE="$(PROD_ENV_FILE)" \
+			python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" --backup-path || exit 1; \
+		fi; \
 		$(PROD_CONFIG) config --format json 2>/dev/null | \
 		PREPARE_INTERACTIVE=$$prepare_interactive PROD_ENV_FILE="$(PROD_ENV_FILE)" HOST_INGRESS="$(HOST_INGRESS)" HOST_INGRESS_HOST="$(PREPARE_PUBLIC_HOST)" \
 		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" "$(PROD_APPLICATION_SERVICE)"

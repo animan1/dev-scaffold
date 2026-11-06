@@ -41,11 +41,19 @@ def _production_checkout(tmp_path: Path) -> str:
     ).strip()
 
 
+def _send_prompt_responses(terminal: int, output: bytes, responses: dict[bytes, str]) -> None:
+    for prompt, response in tuple(responses.items()):
+        if prompt in output:
+            os.write(terminal, (response + "\n").encode())
+            del responses[prompt]
+
+
 def _prompted_prepare(
     command: list[str],
     directory: Path,
     value: str,
     redirect_input: bool = False,
+    backup_path: str | None = None,
 ) -> tuple[int, str]:
     process, terminal = pty.fork()
     if process == 0:
@@ -55,7 +63,9 @@ def _prompted_prepare(
                 os.dup2(empty.fileno(), 0)
         os.execvp(command[0], command)
     output = b""
-    supplied = False
+    responses = {b"BACKUP_PASSWORD: ": value}
+    if backup_path is not None:
+        responses[b"BACKUP_LOCAL_PATH: "] = backup_path
     ownership_cancelled = False
     try:
         while True:
@@ -72,9 +82,7 @@ def _prompted_prepare(
             if not chunk:
                 break
             output += chunk
-            if b"BACKUP_PASSWORD: " in output and not supplied:
-                os.write(terminal, (value + "\n").encode())
-                supplied = True
+            _send_prompt_responses(terminal, output, responses)
             if b"+ sudo " in output and not ownership_cancelled:
                 os.write(terminal, b"\x03")
                 ownership_cancelled = True
@@ -363,10 +371,53 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
     assert resolved["BACKUP_PASSWORD"] == key
     directory = tmp_path / "repository"
     if directory.exists():
-        assert directory.stat().st_uid == 10001
-        assert directory.stat().st_mode & 0o7777 == 0o700
+        assert directory.stat().st_uid == os.getuid()
+        assert directory.stat().st_mode & 0o7777 == 0o2770
         directory.rmdir()
     assert not (tmp_path / "rclone").exists()
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Needs the Docker Compose client")
+def test_preparation_prompts_for_host_directory_and_reuses_private_selection(
+    tmp_path: Path,
+) -> None:
+    revision = _production_checkout(tmp_path)
+    directory = tmp_path / "host backups $literal"
+    directory.mkdir()
+    sentinel = directory / "existing-data"
+    sentinel.write_text("preserve")
+    command = [
+        "make",
+        "--no-print-directory",
+        "-f",
+        str(_repo_root() / "Makefile"),
+        f"RELEASE_REVISION={revision}",
+        "DOCKER_HOST=unix:///nonexistent",
+        "prepare-prod",
+    ]
+    missing = subprocess.run(
+        command, cwd=tmp_path, capture_output=True, text=True, stdin=subprocess.DEVNULL
+    )
+    assert missing.returncode != 0
+    assert "Missing required backup input: BACKUP_LOCAL_PATH" in missing.stderr
+    assert not (tmp_path / "deploy/backups").exists()
+    status, output = _prompted_prepare(command, tmp_path, "test-only", backup_path=str(directory))
+    assert status == 0, output
+    assert output.count("BACKUP_LOCAL_PATH: ") == 1
+    assert "sudo" not in output
+    private_env = tmp_path / "deploy/.env.prod"
+    configured = private_env.read_bytes()
+    repeated = subprocess.run(
+        command, cwd=tmp_path, capture_output=True, text=True, stdin=subprocess.DEVNULL
+    )
+    assert repeated.returncode == 0, repeated.stderr
+    assert "BACKUP_LOCAL_PATH: " not in repeated.stdout + repeated.stderr
+    assert private_env.read_bytes() == configured
+    assert directory.stat().st_uid == os.getuid()
+    assert directory.stat().st_gid == os.getgid()
+    assert directory.stat().st_mode & 0o7777 == 0o2770
+    assert sentinel.read_text() == "preserve"
+    assert not (tmp_path / "deploy/backups").exists()
 
 
 @pytest.mark.parametrize(

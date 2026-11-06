@@ -101,18 +101,31 @@ def validate_ingress(config, application):
         raise ConfigurationError("Invalid host-ingress configuration") from None
 
 
-def prompt_backup_input(name):
+def validate_backup_path(value):
+    if not Path(value).is_absolute() or "\n" in value or "\r" in value:
+        raise ConfigurationError("BACKUP_LOCAL_PATH must be an absolute host directory")
+
+
+def prompt_backup_input(name, secret=True):
     path = os.environ.get("PROD_ENV_FILE")
     if not path or os.environ.get("PREPARE_INTERACTIVE") != "1":
         raise ConfigurationError(
             f"Missing required backup input: {name}; supply it for non-interactive use"
         )
     try:
-        value = getpass.getpass(f"{name}: ")
+        value = getpass.getpass(f"{name}: ") if secret else input(f"{name}: ")
     except (EOFError, OSError, KeyboardInterrupt):
         raise ConfigurationError(f"Unable to read {name} from the terminal") from None
     if not value.strip():
         raise ConfigurationError(f"{name} cannot be empty")
+    if name == "BACKUP_LOCAL_PATH":
+        validate_backup_path(value)
+    save_backup_input(name, value)
+    return value
+
+
+def save_backup_input(name, value):
+    path = os.environ["PROD_ENV_FILE"]
     # Compose double-quoted dotenv values support JSON escapes and $$ for a
     # literal dollar. Keep existing configuration bytes and credentials intact.
     encoded = json.dumps(value.replace("$", "$$"), ensure_ascii=False)
@@ -124,6 +137,42 @@ def prompt_backup_input(name):
         raise ConfigurationError(
             f"Unable to save {name} in the private configuration"
         ) from None
+
+
+def prepare_backup_path():
+    # Use Compose's dotenv parsing and precedence without loading services or
+    # requiring a path before the operator has had an opportunity to supply it.
+    try:
+        resolved = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "--env-file",
+                os.environ["PROD_ENV_FILE"],
+                "-f",
+                "-",
+                "config",
+                "--environment",
+            ],
+            input="services: {}\n",
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        raise ConfigurationError("Unable to read backup storage inputs") from None
+    values = dict(
+        line.split("=", 1) for line in resolved.stdout.splitlines() if "=" in line
+    )
+    value = values.get("BACKUP_LOCAL_PATH", "")
+    if value.strip():
+        validate_backup_path(value)
+    else:
+        value = prompt_backup_input("BACKUP_LOCAL_PATH", secret=False)
+    if not values.get("BACKUP_RUNTIME_GID", "").strip():
+        path = Path(value)
+        gid = path.stat().st_gid if path.exists() else os.getgid()
+        save_backup_input("BACKUP_RUNTIME_GID", str(gid))
 
 
 def validate(config, application_service="backend"):
@@ -184,20 +233,20 @@ def prepare_backup_paths(config):
         if uid <= 0 or gid < 0:
             raise ConfigurationError("Backup paths require a dedicated service UID:GID")
         changes = []
-        owner = ["-o", str(uid), "-g", str(gid)]
         for mount in services["backup"].get("volumes", []):
             if mount.get("type") != "bind" or mount["target"] != "/backups":
                 continue
-            path = Path(mount["source"])
+            path = Path(mount["source"].replace("$$", "$"))
             if path.is_symlink() or Path.cwd().is_relative_to(path):
                 raise ConfigurationError("Backup preparation cannot own this path")
-            shared = False
-            writable = False
             for name, service in services.items():
                 if name in ("backup", "backup-init"):
                     continue
                 for other in service.get("volumes", []):
-                    if other.get("type") != "bind" or Path(other["source"]) != path:
+                    if (
+                        other.get("type") != "bind"
+                        or Path(other["source"].replace("$$", "$")) != path
+                    ):
                         continue
                     other_uid, other_gid = map(int, service["user"].split(":"))
                     groups = {other_gid, *map(int, service.get("group_add", []))}
@@ -205,16 +254,13 @@ def prepare_backup_paths(config):
                         raise ConfigurationError(
                             "Shared backup paths require a common service group"
                         )
-                    shared = True
-                    writable |= not other.get("read_only", False)
-            mode = (0o2770 if writable else 0o2750) if shared else 0o700
+            # The operator and fixed-UID worker always share host storage.
+            mode = 0o2770
             existing = path.stat() if path.exists() else None
             if existing:
                 if not stat.S_ISDIR(existing.st_mode):
                     raise ConfigurationError("Backup preparation requires directories")
-                if (existing.st_uid, existing.st_gid) != (uid, gid) and any(
-                    path.iterdir()
-                ):
+                if existing.st_gid != gid and any(path.iterdir()):
                     raise ConfigurationError(
                         "Nonempty backup paths need an explicit ownership migration"
                     )
@@ -223,11 +269,15 @@ def prepare_backup_paths(config):
                     existing.st_gid,
                     stat.S_IMODE(existing.st_mode),
                 )
-                if actual == (uid, gid, mode):
+                if actual == (existing.st_uid, gid, mode):
                     continue
+            owner = ["-g", str(gid)]
+            privileged = existing is not None and existing.st_uid != os.geteuid()
+            if privileged:
+                owner += ["-o", str(existing.st_uid)]
             changes.append(["install", "-d", *owner, "-m", f"{mode:o}", str(path)])
         for command in changes:
-            if os.geteuid() != 0:
+            if "-o" in command and os.geteuid() != 0:
                 sudo = (
                     ["sudo"]
                     if os.environ.get("PREPARE_INTERACTIVE") == "1"
@@ -248,6 +298,9 @@ def prepare_backup_paths(config):
 
 if __name__ == "__main__":
     try:
+        if sys.argv[1:] == ["--backup-path"]:
+            prepare_backup_path()
+            sys.exit(0)
         config = json.load(sys.stdin)
         validate(config, sys.argv[1] if len(sys.argv) > 1 else "backend")
         prepare_backup_paths(config)

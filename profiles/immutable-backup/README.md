@@ -31,8 +31,11 @@ Bare `make prepare-prod` prepares backup inputs and host storage. `make up-prod`
 also builds the backup image, initializes its status storage, and starts the
 scheduled worker after the database is healthy. Its first cycle takes a backup
 and verifies a restore; subsequent cycles use the configured intervals.
-The default local repository is `$(CURDIR)/deploy/backups`; override it with
-`BACKUP_LOCAL_PATH`. Local backups alone do not survive loss of the host.
+There is no default host directory. Preparation asks for an absolute
+`BACKUP_LOCAL_PATH` when absent and saves it in the private production env file.
+Values already supplied there, in the environment, or as Make arguments are
+honored; unattended preparation requires the path upfront.
+Local backups alone do not survive loss of the host.
 
 The worker mounts `BACKUP_LOCAL_PATH` at `/backups` for the default encrypted
 Restic repository (`BACKUP_REPOSITORY=/backups`). The same capture, validation,
@@ -63,12 +66,14 @@ when absent. Existing supplied credentials are preserved without prompting.
 Preparation does not generate a replacement key, initialize a repository, or
 authenticate to remote storage. Without the profile, backup inputs are not required.
 
-Preparation creates the declared host directories with the backup service's fixed
-UID/GID. Single-consumer directories use mode 700; shared consumers must declare a
-common group and receive only the group access their mounts require. Targeted
-ownership changes may prompt for `sudo`; unattended runs need those privileges
-upfront. Preparation prints each exact, shell-quoted privileged command before
+Preparation preserves the host directory's owner. The worker keeps its dedicated
+UID and shares the directory's existing group (your current group for a new
+directory), saved as `BACKUP_RUNTIME_GID`. Mode 2770 permits operator/worker access
+and excludes other users; additional consuming services must share that group.
+New local Restic repositories enable [group access](https://restic.readthedocs.io/en/stable/030_preparing_a_new_repo.html#group-accessible-repositories)
+for subsequent backup contents as well. Existing repositories are not recursively
+changed. Targeted permission changes on another owner's directory may require
+`sudo`; preparation prints each exact, shell-quoted privileged command before
 invoking sudo with its standard password prompt.
-Nonempty repositories with different owners require an
-explicit migration.
+Nonempty repositories with a different group require an explicit migration.
 Preparation does not recursively change existing backup data ownership.

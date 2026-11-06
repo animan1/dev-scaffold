@@ -50,14 +50,10 @@ def _configuration(directory: Path, sharing: str) -> dict[str, object]:
 
 
 @pytest.mark.skipif(os.geteuid() != 0, reason="Fixed service UID ownership runs in make be.ci")
-@pytest.mark.parametrize(
-    "sharing,mode",
-    [("", 0o700), ("read", 0o2750), ("write", 0o2770), ("supplementary", 0o2750)],
-)
-def test_prepared_paths_use_fixed_uid_and_required_group_access(
+@pytest.mark.parametrize("sharing", ["", "read", "write", "supplementary"])
+def test_prepared_paths_preserve_host_owner_and_share_with_fixed_service_uid(
     tmp_path: Path,
     sharing: str,
-    mode: int,
 ) -> None:
     prepare = _module().prepare_backup_paths
     config = _configuration(tmp_path, sharing)
@@ -66,10 +62,26 @@ def test_prepared_paths_use_fixed_uid_and_required_group_access(
     credential.write_text("existing-provider-credential")
     credential_info = credential.stat()
     directory_info = credential.parent.stat()
-    prepare(config)
     repository = tmp_path / "repository"
+    repository.mkdir()
+    os.chown(repository, 501, 10001)
+    prepare(config)
     info = repository.stat()
-    assert (info.st_uid, info.st_gid, info.st_mode & 0o7777) == (10001, 10001, mode)
+    assert (info.st_uid, info.st_gid, info.st_mode & 0o7777) == (501, 10001, 0o2770)
+    subprocess.run(
+        ["sh", "-c", "printf worker-data > worker-file"],
+        cwd=repository,
+        user=10001,
+        group=10001,
+        check=True,
+    )
+    subprocess.run(
+        ["sh", "-c", "test -r worker-file && touch operator-file"],
+        cwd=repository,
+        user=501,
+        group=10001,
+        check=True,
+    )
     assert (credential.parent.stat().st_uid, credential.parent.stat().st_gid) == (
         directory_info.st_uid,
         directory_info.st_gid,
@@ -81,14 +93,13 @@ def test_prepared_paths_use_fixed_uid_and_required_group_access(
         credential_info.st_gid,
     )
     assert credential.stat().st_mode == credential_info.st_mode
-    subprocess.run(["chown", "10001:10001", str(repository)], check=True)
-    assert repository.stat().st_mode & 0o7777 == mode
     sentinel = repository / "existing-data"
     sentinel.write_text("preserve")
     ownership = (sentinel.stat().st_uid, sentinel.stat().st_gid)
     repository.chmod(0o755)
     prepare(config)
-    assert repository.stat().st_mode & 0o7777 == mode
+    assert repository.stat().st_mode & 0o7777 == 0o2770
+    assert repository.stat().st_uid == 501
     assert sentinel.read_text() == "preserve"
     assert (sentinel.stat().st_uid, sentinel.stat().st_gid) == ownership
 
@@ -126,7 +137,7 @@ def test_privileged_commands_are_displayed_before_execution(
 ) -> None:
     module = _module()
     monkeypatch.setenv("PREPARE_INTERACTIVE", interactive)
-    monkeypatch.setattr(module.os, "geteuid", lambda: 501)
+    monkeypatch.setattr(module.os, "geteuid", lambda: 99999)
     commands: list[list[str]] = []
 
     def run(command: list[str], *, check: bool, stdin: int) -> subprocess.CompletedProcess[bytes]:
@@ -138,7 +149,8 @@ def test_privileged_commands_are_displayed_before_execution(
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(module.subprocess, "run", run)
+    (tmp_path / "with spaces/repository").mkdir(parents=True)
     module.prepare_backup_paths(_configuration(tmp_path / "with spaces", ""))
     assert len(commands) == 1
     assert commands[0][-1] == str(tmp_path / "with spaces/repository")
-    assert not (tmp_path / "with spaces").exists()
+    assert (tmp_path / "with spaces/repository").stat().st_uid == os.getuid()

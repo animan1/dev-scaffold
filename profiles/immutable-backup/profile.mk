@@ -14,12 +14,14 @@ BACKUP_EXERCISE_PROJECT ?= $(PROJECT_NAME)-backup-exercise
 BACKUP_COMPOSE_CONTRACT_PROJECT ?= $(PROJECT_NAME)-backup-contract
 BACKUP_COMPOSE_CONTRACT_ENV_FILE ?= $(CURDIR)/.tmp/immutable-backup-compose.env
 BACKUP_DATABASE_SERVICE ?= db
-BACKUP_LOCAL_PATH ?= $(CURDIR)/deploy/backups
 BACKUP_SERVICE ?= backup
 BACKUP_SNAPSHOT ?= latest
 BACKUP_RESTORE_CONFIRM_VALUE := restore-production-database
 BACKUP_BUILD ?= $(MAKE) build-backup-image
-export BACKUP_IMAGE BACKUP_LOCAL_PATH
+export BACKUP_IMAGE
+ifneq ($(origin BACKUP_LOCAL_PATH),undefined)
+export BACKUP_LOCAL_PATH
+endif
 
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 PROD_COMPOSE_FILES += -f $(BACKUP_COMPOSE_FILE)
@@ -43,6 +45,7 @@ up-prod: build-backup-image
 
 BACKUP_COMPOSE_CONTRACT = COMPOSE_PROJECT_NAME=$(BACKUP_COMPOSE_CONTRACT_PROJECT) \
 	PROD_ENV_FILE=$(BACKUP_COMPOSE_CONTRACT_ENV_FILE) \
+	BACKUP_LOCAL_PATH=$(BACKUP_EXERCISE_ROOT)/repository \
 	RELEASE_BACKEND_IMAGE=local/backup-contract-backend:test \
 	RELEASE_WEB_IMAGE=local/backup-contract-web:test \
 	BACKUP_IMAGE=local/backup-contract:test \
@@ -89,6 +92,15 @@ verify-backup-image: build-backup-image ## Verify the exact backup image tool an
 		&& jq --version \
 		&& test -x /usr/local/bin/scaffold-backup \
 		&& test -s /etc/ssl/certs/ca-certificates.crt'
+	docker run --rm --user 0:0 --entrypoint bash \
+		-e POSTGRES_USER=check -e POSTGRES_DB=check -e POSTGRES_PASSWORD=check \
+		-e RESTIC_PASSWORD=check -e RESTIC_REPOSITORY=/backups $(BACKUP_IMAGE) -ec \
+		'mkdir /backups; chown 10002:10001 /backups; chmod 2770 /backups; \
+		sed "/^case /,\$$d" /usr/local/bin/scaffold-backup > /tmp/backup-functions; \
+		runuser -u scaffold-backup -- bash -ec "source /tmp/backup-functions; \
+		initialize_repository; printf shared | restic backup --stdin --stdin-filename access-check"; \
+		test "$$(stat -c %u /backups)" = 10002; \
+		setpriv --reuid=10002 --regid=10001 --clear-groups restic --no-cache snapshots >/dev/null'
 
 .PHONY: prepare-backup-compose-contract
 prepare-backup-compose-contract:
