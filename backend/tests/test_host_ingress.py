@@ -75,7 +75,7 @@ def _prompted_prepare(
             if b"BACKUP_PASSWORD: " in output and not supplied:
                 os.write(terminal, (value + "\n").encode())
                 supplied = True
-            if b"Directory ownership requires sudo: " in output and not ownership_cancelled:
+            if b"+ sudo " in output and not ownership_cancelled:
                 os.write(terminal, b"\x03")
                 ownership_cancelled = True
         _, status = os.waitpid(process, 0)
@@ -307,8 +307,7 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
     key = "review-$TOKEN#'\"\\ key\\"
     status, output = _prompted_prepare(command, tmp_path, key)
     assert status == 0 or any(
-        message in output
-        for message in ("host ownership privileges", "Directory ownership requires sudo: ")
+        message in output for message in ("host ownership privileges", "+ sudo ")
     ), output
     assert output.count("BACKUP_PASSWORD: ") == 1
     assert key not in output

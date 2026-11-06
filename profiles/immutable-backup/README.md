@@ -60,7 +60,9 @@ Preparation creates the declared host directories with the backup service's fixe
 UID/GID. Single-consumer directories use mode 700; shared consumers must declare a
 common group and receive only the group access their mounts require. Targeted
 ownership changes may prompt for `sudo`; unattended runs need those privileges
-upfront. The configured rclone credential file is assigned to its consumers without
+upfront. Preparation prints each exact, shell-quoted privileged command before
+invoking sudo with its standard password prompt.
+The configured rclone credential file is assigned to its consumers without
 changing its contents. Nonempty repositories with different owners require an
 explicit migration.
 Preparation does not recursively change existing backup data ownership.

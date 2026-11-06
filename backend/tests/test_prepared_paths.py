@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import runpy
+import shlex
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -105,3 +106,30 @@ def test_shared_paths_require_a_declared_common_group_before_creation(tmp_path: 
         module.prepare_backup_paths(_configuration(tmp_path, "mismatch"))
     assert not (tmp_path / "repository").exists()
     assert not (tmp_path / "rclone").exists()
+
+
+@pytest.mark.parametrize("interactive", ["0", "1"])
+def test_privileged_commands_are_displayed_before_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    interactive: str,
+) -> None:
+    module = _module()
+    monkeypatch.setenv("PREPARE_INTERACTIVE", interactive)
+    monkeypatch.setattr(module.os, "geteuid", lambda: 501)
+    commands: list[list[str]] = []
+
+    def run(command: list[str], *, check: bool, stdin: int) -> subprocess.CompletedProcess[bytes]:
+        assert capsys.readouterr().err == "+ " + shlex.join(command) + "\n"
+        assert command[:2] == (["sudo", "--"] if interactive == "1" else ["sudo", "-n"])
+        assert "-p" not in command
+        assert check and stdin == subprocess.DEVNULL
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    module.prepare_backup_paths(_configuration(tmp_path / "with spaces", ""))
+    assert len(commands) == 2
+    assert commands[0][-1] == str(tmp_path / "with spaces/repository")
+    assert not (tmp_path / "with spaces").exists()

@@ -4,6 +4,7 @@ import getpass
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -259,11 +260,12 @@ def prepare_backup_paths(config):
         for command in changes:
             if os.geteuid() != 0:
                 sudo = (
-                    ["sudo", "-p", "Directory ownership requires sudo: "]
+                    ["sudo"]
                     if os.environ.get("PREPARE_INTERACTIVE") == "1"
                     else ["sudo", "-n"]
                 )
                 command = [*sudo, "--", *command]
+                print("+ " + shlex.join(command), file=sys.stderr, flush=True)
             subprocess.run(command, check=True, stdin=subprocess.DEVNULL)
     except (KeyError, TypeError, ValueError):
         raise ConfigurationError(
