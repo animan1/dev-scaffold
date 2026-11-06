@@ -39,6 +39,7 @@ services:
     user: "${BACKUP_RUNTIME_UID:-10001}:${BACKUP_RUNTIME_GID:?Run make prepare-prod to select the tenant backup group}"
     volumes:
       - "${BACKUP_LOCAL_PATH:?Set BACKUP_LOCAL_PATH through the profile Makefile}:/backups"
+      - "${BACKUP_PUBLICATION_PATH:?Run make prepare-prod to select the publication directory}:/publication"
       - "backup_status:${BACKUP_STATUS_DIR:-/backup-status}"
 
   monitor:
