@@ -92,6 +92,26 @@ def _prompted_prepare(
     return os.waitstatus_to_exitcode(status), output.decode(errors="replace")
 
 
+@pytest.mark.parametrize("use_home", [False, True])
+def test_directory_prompt_tab_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, use_home: bool
+) -> None:
+    pytest.importorskip("readline")
+    directory = tmp_path / "host backups"
+    directory.mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    command = [
+        sys.executable,
+        "-c",
+        "import runpy, sys; print(runpy.run_path(sys.argv[1])['read_backup_path']('BACKUP_LOCAL_PATH'))",
+        str(_repo_root() / "scripts/validate_prod_config.py"),
+    ]
+    prefix = "~/host back" if use_home else str(tmp_path / "host back")
+    status, output = _prompted_prepare(command, tmp_path, "", backup_path=prefix + "\t")
+    assert status == 0, output
+    assert output.splitlines()[-1].rstrip("/") == str(directory)
+
+
 def test_host_ingress_origin_is_loopback_http_only() -> None:
     compose = (_repo_root() / "deploy/docker-compose.host-ingress.yml").read_text()
     nginx = (_repo_root() / "deploy/nginx/default.host-ingress.conf").read_text()
@@ -401,7 +421,9 @@ def test_preparation_prompts_for_host_directory_and_reuses_private_selection(
     assert missing.returncode != 0
     assert "Missing required backup input: BACKUP_LOCAL_PATH" in missing.stderr
     assert not (tmp_path / "deploy/backups").exists()
-    status, output = _prompted_prepare(command, tmp_path, "test-only", backup_path=str(directory))
+    status, output = _prompted_prepare(
+        command, tmp_path, "test-only", backup_path=str(directory)[:-4] + "\t"
+    )
     assert status == 0, output
     assert output.count("BACKUP_LOCAL_PATH: ") == 1
     assert "sudo" not in output

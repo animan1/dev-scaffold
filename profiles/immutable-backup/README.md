@@ -33,6 +33,7 @@ scheduled worker after the database is healthy. Its first cycle takes a backup
 and verifies a restore; subsequent cycles use the configured intervals.
 There is no default host directory. Preparation asks for an absolute
 `BACKUP_LOCAL_PATH` when absent and saves it in the private production env file.
+The directory prompt supports Tab completion (including paths with spaces) and `~`.
 Values already supplied there, in the environment, or as Make arguments are
 honored; unattended preparation requires the path upfront.
 Local backups alone do not survive loss of the host.

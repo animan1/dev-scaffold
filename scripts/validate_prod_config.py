@@ -1,6 +1,7 @@
 """Validate resolved production inputs without printing their values."""
 
 import getpass
+import glob
 import json
 import os
 import re
@@ -106,6 +107,34 @@ def validate_backup_path(value):
         raise ConfigurationError("BACKUP_LOCAL_PATH must be an absolute host directory")
 
 
+def read_backup_path(name):
+    try:
+        import readline
+    except ImportError:
+        print(
+            "Directory completion unavailable in this Python; enter the full path.",
+            file=sys.stderr,
+        )
+    else:
+
+        def complete(text, state):
+            matches = [
+                path + os.sep
+                for path in sorted(
+                    glob.glob(glob.escape(os.path.expanduser(text)) + "*")
+                )
+                if os.path.isdir(path)
+            ]
+            return matches[state] if state < len(matches) else None
+
+        readline.set_completer_delims("\t\n")
+        readline.set_completer(complete)
+        readline.parse_and_bind(
+            "bind ^I rl_complete" if "libedit" in readline.__doc__ else "tab: complete"
+        )
+    return os.path.expanduser(input(f"{name}: "))
+
+
 def prompt_backup_input(name, secret=True):
     path = os.environ.get("PROD_ENV_FILE")
     if not path or os.environ.get("PREPARE_INTERACTIVE") != "1":
@@ -113,7 +142,7 @@ def prompt_backup_input(name, secret=True):
             f"Missing required backup input: {name}; supply it for non-interactive use"
         )
     try:
-        value = getpass.getpass(f"{name}: ") if secret else input(f"{name}: ")
+        value = getpass.getpass(f"{name}: ") if secret else read_backup_path(name)
     except (EOFError, OSError, KeyboardInterrupt):
         raise ConfigurationError(f"Unable to read {name} from the terminal") from None
     if not value.strip():
