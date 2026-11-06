@@ -64,14 +64,23 @@ def test_prepared_paths_use_fixed_uid_and_required_group_access(
     credential = tmp_path / "rclone/rclone.conf"
     credential.parent.mkdir()
     credential.write_text("existing-provider-credential")
+    credential_info = credential.stat()
+    directory_info = credential.parent.stat()
     prepare(config)
     repository = tmp_path / "repository"
     info = repository.stat()
     assert (info.st_uid, info.st_gid, info.st_mode & 0o7777) == (10001, 10001, mode)
-    assert (tmp_path / "rclone").stat().st_mode & 0o7777 == 0o700
+    assert (credential.parent.stat().st_uid, credential.parent.stat().st_gid) == (
+        directory_info.st_uid,
+        directory_info.st_gid,
+    )
+    assert credential.parent.stat().st_mode == directory_info.st_mode
     assert credential.read_text() == "existing-provider-credential"
-    assert (credential.stat().st_uid, credential.stat().st_gid) == (10001, 10001)
-    assert credential.stat().st_mode & 0o7777 == 0o600
+    assert (credential.stat().st_uid, credential.stat().st_gid) == (
+        credential_info.st_uid,
+        credential_info.st_gid,
+    )
+    assert credential.stat().st_mode == credential_info.st_mode
     subprocess.run(["chown", "10001:10001", str(repository)], check=True)
     assert repository.stat().st_mode & 0o7777 == mode
     sentinel = repository / "existing-data"
@@ -130,6 +139,6 @@ def test_privileged_commands_are_displayed_before_execution(
 
     monkeypatch.setattr(module.subprocess, "run", run)
     module.prepare_backup_paths(_configuration(tmp_path / "with spaces", ""))
-    assert len(commands) == 2
+    assert len(commands) == 1
     assert commands[0][-1] == str(tmp_path / "with spaces/repository")
     assert not (tmp_path / "with spaces").exists()

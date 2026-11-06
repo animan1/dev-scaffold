@@ -184,10 +184,9 @@ def prepare_backup_paths(config):
         if uid <= 0 or gid < 0:
             raise ConfigurationError("Backup paths require a dedicated service UID:GID")
         changes = []
-        targets = ("/backups", "/config/rclone")
         owner = ["-o", str(uid), "-g", str(gid)]
         for mount in services["backup"].get("volumes", []):
-            if mount.get("type") != "bind" or mount["target"] not in targets:
+            if mount.get("type") != "bind" or mount["target"] != "/backups":
                 continue
             path = Path(mount["source"])
             if path.is_symlink() or Path.cwd().is_relative_to(path):
@@ -213,10 +212,8 @@ def prepare_backup_paths(config):
             if existing:
                 if not stat.S_ISDIR(existing.st_mode):
                     raise ConfigurationError("Backup preparation requires directories")
-                if (
-                    mount["target"] == "/backups"
-                    and (existing.st_uid, existing.st_gid) != (uid, gid)
-                    and any(path.iterdir())
+                if (existing.st_uid, existing.st_gid) != (uid, gid) and any(
+                    path.iterdir()
                 ):
                     raise ConfigurationError(
                         "Nonempty backup paths need an explicit ownership migration"
@@ -228,34 +225,6 @@ def prepare_backup_paths(config):
                 )
                 if actual == (uid, gid, mode):
                     continue
-            if mount["target"] == "/config/rclone" and os.access(path, os.X_OK):
-                configured = (
-                    services["backup"]
-                    .get("environment", {})
-                    .get("RCLONE_CONFIG", "/config/rclone/rclone.conf")
-                )
-                try:
-                    relative = Path(configured).relative_to(mount["target"])
-                except ValueError:
-                    relative = None
-                if relative is not None:
-                    if ".." in relative.parts:
-                        raise ConfigurationError(
-                            "RCLONE_CONFIG escapes its host directory"
-                        )
-                    credential = path / relative
-                    if credential.is_symlink():
-                        raise ConfigurationError("RCLONE_CONFIG cannot be a symlink")
-                    if credential.exists():
-                        if not credential.is_file():
-                            raise ConfigurationError("RCLONE_CONFIG must be a file")
-                        file_mode = (0o660 if writable else 0o640) if shared else 0o600
-                        changes.extend(
-                            [
-                                ["chown", f"{uid}:{gid}", str(credential)],
-                                ["chmod", f"{file_mode:o}", str(credential)],
-                            ]
-                        )
             changes.append(["install", "-d", *owner, "-m", f"{mode:o}", str(path)])
         for command in changes:
             if os.geteuid() != 0:

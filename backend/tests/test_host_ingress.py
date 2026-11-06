@@ -270,7 +270,6 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
         f"RELEASE_REVISION={revision}",
         f"BACKUP_IMAGE=local/dev-scaffold-backup:{revision}",
         f"BACKUP_LOCAL_PATH={tmp_path}/repository",
-        f"BACKUP_RCLONE_CONFIG_DIR={tmp_path}/rclone",
         "DOCKER_HOST=unix:///nonexistent",
         "prepare-prod",
     ]
@@ -355,7 +354,6 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
             "COMPOSE_PROJECT_NAME": "dev-scaffold",
             "BACKUP_IMAGE": f"local/dev-scaffold-backup:{revision}",
             "BACKUP_LOCAL_PATH": str(tmp_path / "repository"),
-            "BACKUP_RCLONE_CONFIG_DIR": str(tmp_path / "rclone"),
             "RELEASE_BACKEND_IMAGE": f"local/dev-scaffold-backend:{revision}",
             "RELEASE_WEB_IMAGE": f"local/dev-scaffold-web:{revision}",
             "DOCKER_HOST": "unix:///nonexistent",
@@ -363,12 +361,12 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
     )
     resolved = dict(line.split("=", 1) for line in rendered.stdout.splitlines() if "=" in line)
     assert resolved["BACKUP_PASSWORD"] == key
-    for name in ("repository", "rclone"):
-        directory = tmp_path / name
-        if directory.exists():
-            assert directory.stat().st_uid == 10001
-            assert directory.stat().st_mode & 0o7777 == 0o700
-            directory.rmdir()
+    directory = tmp_path / "repository"
+    if directory.exists():
+        assert directory.stat().st_uid == 10001
+        assert directory.stat().st_mode & 0o7777 == 0o700
+        directory.rmdir()
+    assert not (tmp_path / "rclone").exists()
 
 
 @pytest.mark.parametrize(

@@ -34,15 +34,12 @@ and verifies a restore; subsequent cycles use the configured intervals.
 The default local repository is `$(CURDIR)/deploy/backups`; override it with
 `BACKUP_LOCAL_PATH`. Local backups alone do not survive loss of the host.
 
-The worker mounts two distinct host directories:
-
-| Host setting (default) | Container path | Purpose |
-| --- | --- | --- |
-| `BACKUP_LOCAL_PATH` (`deploy/backups`) | `/backups` | Stores the encrypted Restic repository when using the default `BACKUP_REPOSITORY=/backups`. It is not a staging directory for a remote repository. |
-| `BACKUP_RCLONE_CONFIG_DIR` (`deploy/rclone`) | `/config/rclone` | Holds provider configuration and credentials in `rclone.conf` for repositories accessed through rclone. It contains no backup snapshots. |
-
-The current Compose contract mounts and prepares both directories even for local
-backups. Local Restic backups do not use rclone; its directory can remain empty.
+The worker mounts `BACKUP_LOCAL_PATH` at `/backups` for the default encrypted
+Restic repository (`BACKUP_REPOSITORY=/backups`). The same capture, validation,
+and restore commands work on a laptop or server. Host tooling owns off-host
+publication and its credentials; the scaffold does not configure a provider,
+mount host transport credentials, or prepare an rclone directory. Off-host
+publication is not automated by this workflow.
 
 When selected, the normal `make verify` contract includes exact backup-image
 verification. The component-maintenance and focused exercise commands are:
@@ -72,7 +69,6 @@ common group and receive only the group access their mounts require. Targeted
 ownership changes may prompt for `sudo`; unattended runs need those privileges
 upfront. Preparation prints each exact, shell-quoted privileged command before
 invoking sudo with its standard password prompt.
-The configured rclone credential file is assigned to its consumers without
-changing its contents. Nonempty repositories with different owners require an
+Nonempty repositories with different owners require an
 explicit migration.
 Preparation does not recursively change existing backup data ownership.

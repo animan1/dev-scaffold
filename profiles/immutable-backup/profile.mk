@@ -15,12 +15,11 @@ BACKUP_COMPOSE_CONTRACT_PROJECT ?= $(PROJECT_NAME)-backup-contract
 BACKUP_COMPOSE_CONTRACT_ENV_FILE ?= $(CURDIR)/.tmp/immutable-backup-compose.env
 BACKUP_DATABASE_SERVICE ?= db
 BACKUP_LOCAL_PATH ?= $(CURDIR)/deploy/backups
-BACKUP_RCLONE_CONFIG_DIR ?= $(CURDIR)/deploy/rclone
 BACKUP_SERVICE ?= backup
 BACKUP_SNAPSHOT ?= latest
 BACKUP_RESTORE_CONFIRM_VALUE := restore-production-database
 BACKUP_BUILD ?= $(MAKE) build-backup-image
-export BACKUP_IMAGE BACKUP_LOCAL_PATH BACKUP_RCLONE_CONFIG_DIR
+export BACKUP_IMAGE BACKUP_LOCAL_PATH
 
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 PROD_COMPOSE_FILES += -f $(BACKUP_COMPOSE_FILE)
@@ -54,7 +53,6 @@ BACKUP_COMPOSE_CONTRACT = COMPOSE_PROJECT_NAME=$(BACKUP_COMPOSE_CONTRACT_PROJECT
 BACKUP_RUN = $(BACKUP_COMPOSE) run --rm --no-deps $(BACKUP_SERVICE)
 BACKUP_EXERCISE_COMPOSE = COMPOSE_PROJECT_NAME=$(BACKUP_EXERCISE_PROJECT) \
 	BACKUP_IMAGE=$(BACKUP_IMAGE) BACKUP_LOCAL_PATH=$(BACKUP_EXERCISE_ROOT)/repository \
-	BACKUP_RCLONE_CONFIG_DIR=$(BACKUP_EXERCISE_ROOT)/rclone \
 	BACKUP_POSTGRES_IMAGE=$(BACKUP_POSTGRES_IMAGE) BACKUP_REPOSITORY=/backups \
 	BACKUP_PASSWORD=exercise-only POSTGRES_DB=backup_exercise \
 	POSTGRES_USER=backup_exercise POSTGRES_PASSWORD=exercise-only \
@@ -112,7 +110,7 @@ verify-backup-compose: build-backup-image prepare-backup-compose-contract ## Val
 
 .PHONY: prepare-backup-exercise
 prepare-backup-exercise: build-backup-image
-	@mkdir -p $(BACKUP_EXERCISE_ROOT)/repository $(BACKUP_EXERCISE_ROOT)/rclone
+	@mkdir -p $(BACKUP_EXERCISE_ROOT)/repository
 	$(BACKUP_EXERCISE_COMPOSE) down -v --remove-orphans
 	$(BACKUP_EXERCISE_COMPOSE) run --rm --no-deps backup-init
 	$(BACKUP_EXERCISE_COMPOSE) run --rm --no-deps --user 0:0 \

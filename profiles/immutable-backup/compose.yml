@@ -36,12 +36,10 @@ services:
       POSTGRES_USER: "${POSTGRES_USER:-app}"
       RESTIC_PASSWORD: "${BACKUP_PASSWORD:-}"
       RESTIC_REPOSITORY: "${BACKUP_REPOSITORY:-/backups}"
-      RCLONE_CONFIG: "${BACKUP_RCLONE_CONFIG:-/config/rclone/rclone.conf}"
     restart: unless-stopped
     user: "${BACKUP_RUNTIME_UID:-10001}:${BACKUP_RUNTIME_GID:-10001}"
     volumes:
       - "${BACKUP_LOCAL_PATH:?Set BACKUP_LOCAL_PATH through the profile Makefile}:/backups"
-      - "${BACKUP_RCLONE_CONFIG_DIR:?Set BACKUP_RCLONE_CONFIG_DIR through the profile Makefile}:/config/rclone"
       - "backup_status:${BACKUP_STATUS_DIR:-/backup-status}"
 
   monitor:

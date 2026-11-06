@@ -112,6 +112,8 @@ def test_default_production_start_prepares_and_builds_backups_for_both_applicati
     assert 'profiles: ["backup-init"]' not in compose
     assert "condition: service_completed_successfully" in compose
     assert "condition: service_healthy" in compose
+    assert "RCLONE_CONFIG" not in compose
+    assert "/config/rclone" not in compose
     for profile in ("react-vite", "server-rendered-django"):
         startup = _make(f"SCAFFOLD_PROFILE={profile}", "up-prod")
         assert "scripts/validate_prod_config.py" in startup
