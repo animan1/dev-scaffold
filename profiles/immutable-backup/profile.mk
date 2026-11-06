@@ -22,6 +22,9 @@ export BACKUP_IMAGE
 ifneq ($(origin BACKUP_LOCAL_PATH),undefined)
 export BACKUP_LOCAL_PATH
 endif
+ifneq ($(origin BACKUP_GROUP),undefined)
+export BACKUP_GROUP
+endif
 
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 PROD_COMPOSE_FILES += -f $(BACKUP_COMPOSE_FILE)
@@ -46,6 +49,7 @@ up-prod: build-backup-image
 BACKUP_COMPOSE_CONTRACT = COMPOSE_PROJECT_NAME=$(BACKUP_COMPOSE_CONTRACT_PROJECT) \
 	PROD_ENV_FILE=$(BACKUP_COMPOSE_CONTRACT_ENV_FILE) \
 	BACKUP_LOCAL_PATH=$(BACKUP_EXERCISE_ROOT)/repository \
+	BACKUP_RUNTIME_GID=$(shell id -g) \
 	RELEASE_BACKEND_IMAGE=local/backup-contract-backend:test \
 	RELEASE_WEB_IMAGE=local/backup-contract-web:test \
 	BACKUP_IMAGE=local/backup-contract:test \
@@ -56,6 +60,7 @@ BACKUP_COMPOSE_CONTRACT = COMPOSE_PROJECT_NAME=$(BACKUP_COMPOSE_CONTRACT_PROJECT
 BACKUP_RUN = $(BACKUP_COMPOSE) run --rm --no-deps $(BACKUP_SERVICE)
 BACKUP_EXERCISE_COMPOSE = COMPOSE_PROJECT_NAME=$(BACKUP_EXERCISE_PROJECT) \
 	BACKUP_IMAGE=$(BACKUP_IMAGE) BACKUP_LOCAL_PATH=$(BACKUP_EXERCISE_ROOT)/repository \
+	BACKUP_RUNTIME_GID=$(shell id -g) \
 	BACKUP_POSTGRES_IMAGE=$(BACKUP_POSTGRES_IMAGE) BACKUP_REPOSITORY=/backups \
 	BACKUP_PASSWORD=exercise-only POSTGRES_DB=backup_exercise \
 	POSTGRES_USER=backup_exercise POSTGRES_PASSWORD=exercise-only \
@@ -122,7 +127,7 @@ verify-backup-compose: build-backup-image prepare-backup-compose-contract ## Val
 
 .PHONY: prepare-backup-exercise
 prepare-backup-exercise: build-backup-image
-	@mkdir -p $(BACKUP_EXERCISE_ROOT)/repository
+	@install -d -g $(shell id -g) -m 2770 $(BACKUP_EXERCISE_ROOT)/repository
 	$(BACKUP_EXERCISE_COMPOSE) down -v --remove-orphans
 	$(BACKUP_EXERCISE_COMPOSE) run --rm --no-deps backup-init
 	$(BACKUP_EXERCISE_COMPOSE) run --rm --no-deps --user 0:0 \

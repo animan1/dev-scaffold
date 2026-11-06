@@ -45,7 +45,10 @@ jobs:
         run: make verify
 
       - name: Exercise the local production ingress simulation
-        run: make up-prod smoke-prod
+        run: >-
+          make up-prod smoke-prod
+          BACKUP_LOCAL_PATH="$PWD/.tmp/server-rendered-backups"
+          BACKUP_PASSWORD=production-simulation-only
 
       - name: Exercise the server-rendered immutable-release contract
         if: needs.profile-selection.outputs.selected-profile != 'server-rendered-django'

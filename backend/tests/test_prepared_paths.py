@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import grp
 import os
 import runpy
 import shlex
@@ -13,6 +14,56 @@ import pytest
 def _module() -> SimpleNamespace:
     root = Path(os.environ.get("REPO_DIR", Path(__file__).resolve().parents[2]))
     return SimpleNamespace(**runpy.run_path(str(root / "scripts/validate_prod_config.py")))
+
+
+@pytest.mark.parametrize("project,gid", [("cuplr", 12001), ("cranescastle-frappe", 12002)])
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_backup_groups_are_namespaced_and_reused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    project: str,
+    gid: int,
+    platform: str,
+) -> None:
+    module = _module()
+    private_env = tmp_path / "private.env"
+    private_env.write_text("preserve=original\n")
+    monkeypatch.setenv("PROD_ENV_FILE", str(private_env))
+    monkeypatch.delenv("BACKUP_RUNTIME_GID", raising=False)
+    monkeypatch.setattr(module.sys, "platform", platform)
+    monkeypatch.setattr(module.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(module.os, "getgid", lambda: 1000)
+    monkeypatch.setattr(module.os, "getgroups", lambda: [1000])
+    monkeypatch.setattr(
+        module.pwd, "getpwuid", lambda uid: SimpleNamespace(pw_name="operator", pw_gid=1000)
+    )
+    name = f"{project}-backup"
+    groups: dict[str, grp.struct_group] = {}
+    commands: list[list[str]] = []
+
+    def lookup(group: str) -> grp.struct_group:
+        return groups[group]
+
+    def run(command: list[str], privileged: bool = False) -> None:
+        assert privileged
+        assert name in command
+        commands.append(command)
+        groups[name] = grp.struct_group((name, "x", gid, ["operator"] if len(commands) > 1 else []))
+
+    monkeypatch.setattr(module.grp, "getgrnam", lookup)
+    monkeypatch.setitem(module.prepare_backup_group.__globals__, "run_host_command", run)
+    module.prepare_backup_group({"COMPOSE_PROJECT_NAME": project})
+    assert len(commands) == 2
+    assert commands[0][0] == ("dseditgroup" if platform == "darwin" else "groupadd")
+    assert "operator" in commands[1]
+    assert f'BACKUP_GROUP="{name}"' in private_env.read_text()
+    assert f'BACKUP_RUNTIME_GID="{gid}"' in private_env.read_text()
+    original = private_env.read_bytes()
+    module.prepare_backup_group(
+        {"COMPOSE_PROJECT_NAME": project, "BACKUP_GROUP": name, "BACKUP_RUNTIME_GID": str(gid)}
+    )
+    assert len(commands) == 2
+    assert private_env.read_bytes() == original
 
 
 def _configuration(directory: Path, sharing: str) -> dict[str, object]:
@@ -80,6 +131,14 @@ def test_prepared_paths_preserve_host_owner_and_share_with_fixed_service_uid(
         cwd=repository,
         user=501,
         group=10001,
+        check=True,
+    )
+    subprocess.run(
+        ["sh", "-c", "test ! -r worker-file"],
+        cwd=repository,
+        user=10001,
+        group=10002,
+        extra_groups=[],
         check=True,
     )
     assert (credential.parent.stat().st_uid, credential.parent.stat().st_gid) == (

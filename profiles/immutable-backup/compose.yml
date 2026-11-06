@@ -4,7 +4,7 @@ services:
     entrypoint: ["sh", "-c"]
     command:
       - >-
-        install -d -o ${BACKUP_RUNTIME_UID:-10001} -g ${BACKUP_RUNTIME_GID:-10001}
+        install -d -o ${BACKUP_RUNTIME_UID:-10001} -g ${BACKUP_RUNTIME_GID:?Run make prepare-prod to select the tenant backup group}
         ${BACKUP_STATUS_DIR:-/backup-status}
     user: "0:0"
     volumes:
@@ -36,7 +36,7 @@ services:
       RESTIC_PASSWORD: "${BACKUP_PASSWORD:-}"
       RESTIC_REPOSITORY: "${BACKUP_REPOSITORY:-/backups}"
     restart: unless-stopped
-    user: "${BACKUP_RUNTIME_UID:-10001}:${BACKUP_RUNTIME_GID:-10001}"
+    user: "${BACKUP_RUNTIME_UID:-10001}:${BACKUP_RUNTIME_GID:?Run make prepare-prod to select the tenant backup group}"
     volumes:
       - "${BACKUP_LOCAL_PATH:?Set BACKUP_LOCAL_PATH through the profile Makefile}:/backups"
       - "backup_status:${BACKUP_STATUS_DIR:-/backup-status}"

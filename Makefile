@@ -79,7 +79,7 @@ FEATURED := 'up down restart logs verify smoke up-prod smoke-prod help help-verb
 .PHONY: help
 help: ## Show this help.
 	@FEATURED=$(FEATURED); \
-	ALL="$$(grep -E '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST))"; \
+	ALL="$$(grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST))"; \
 	printf "Make targets:\n\n"; \
 	printf "  \033[1mFeatured\033[0m\n"; \
 	for t in $$FEATURED; do \
@@ -90,7 +90,7 @@ help: ## Show this help.
 .PHONY: help-verbose
 help-verbose: ## Show full help (featured + everything else)
 	@FEATURED=$(FEATURED); \
-	ALL="$$(grep -E '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST))"; \
+	ALL="$$(grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST))"; \
 	printf "Make targets:\n\n"; \
 	printf "  \033[1mFeatured\033[0m\n"; \
 	for t in $$FEATURED; do \

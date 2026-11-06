@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+import grp
 import json
 import os
 import pty
@@ -65,7 +66,7 @@ def _prompted_prepare(
     output = b""
     responses = {b"BACKUP_PASSWORD: ": value}
     if backup_path is not None:
-        responses[b"BACKUP_LOCAL_PATH: "] = backup_path
+        responses[b"BACKUP_LOCAL_PATH"] = backup_path
     ownership_cancelled = False
     try:
         while True:
@@ -298,6 +299,8 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
         f"RELEASE_REVISION={revision}",
         f"BACKUP_IMAGE=local/dev-scaffold-backup:{revision}",
         f"BACKUP_LOCAL_PATH={tmp_path}/repository",
+        f"BACKUP_GROUP={grp.getgrgid(os.getgid()).gr_name}",
+        f"BACKUP_RUNTIME_GID={os.getgid()}",
         "DOCKER_HOST=unix:///nonexistent",
         "prepare-prod",
     ]
@@ -382,6 +385,7 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
             "COMPOSE_PROJECT_NAME": "dev-scaffold",
             "BACKUP_IMAGE": f"local/dev-scaffold-backup:{revision}",
             "BACKUP_LOCAL_PATH": str(tmp_path / "repository"),
+            "BACKUP_RUNTIME_GID": str(os.getgid()),
             "RELEASE_BACKEND_IMAGE": f"local/dev-scaffold-backend:{revision}",
             "RELEASE_WEB_IMAGE": f"local/dev-scaffold-web:{revision}",
             "DOCKER_HOST": "unix:///nonexistent",
@@ -412,6 +416,7 @@ def test_preparation_prompts_for_host_directory_and_reuses_private_selection(
         "-f",
         str(_repo_root() / "Makefile"),
         f"RELEASE_REVISION={revision}",
+        f"BACKUP_GROUP={grp.getgrgid(os.getgid()).gr_name}",
         "DOCKER_HOST=unix:///nonexistent",
         "prepare-prod",
     ]
@@ -425,7 +430,7 @@ def test_preparation_prompts_for_host_directory_and_reuses_private_selection(
         command, tmp_path, "test-only", backup_path=str(directory)[:-4] + "\t"
     )
     assert status == 0, output
-    assert output.count("BACKUP_LOCAL_PATH: ") == 1
+    assert output.count("BACKUP_LOCAL_PATH [") == 1
     assert "sudo" not in output
     private_env = tmp_path / "deploy/.env.prod"
     configured = private_env.read_bytes()
@@ -439,6 +444,36 @@ def test_preparation_prompts_for_host_directory_and_reuses_private_selection(
     assert directory.stat().st_gid == os.getgid()
     assert directory.stat().st_mode & 0o7777 == 0o2770
     assert sentinel.read_text() == "preserve"
+    assert not (tmp_path / "deploy/backups").exists()
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Needs the Docker Compose client")
+def test_preparation_accepts_suggested_host_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    revision = _production_checkout(tmp_path)
+    monkeypatch.setenv(
+        "DOCKER_CONFIG", os.environ.get("DOCKER_CONFIG", str(Path.home() / ".docker"))
+    )
+    monkeypatch.setenv("HOME", str(tmp_path / "operator-home"))
+    command = [
+        "make",
+        "--no-print-directory",
+        "-f",
+        str(_repo_root() / "Makefile"),
+        f"RELEASE_REVISION={revision}",
+        f"BACKUP_GROUP={grp.getgrgid(os.getgid()).gr_name}",
+        "DOCKER_HOST=unix:///nonexistent",
+        "prepare-prod",
+    ]
+    suggested = tmp_path / "operator-home/.local/share" / tmp_path.name / "backups"
+    assert not suggested.exists()
+    status, output = _prompted_prepare(command, tmp_path, "test-only", backup_path="")
+    assert status == 0, output
+    assert f"BACKUP_LOCAL_PATH [{suggested}]: " in output
+    assert suggested.stat().st_uid == os.getuid()
+    assert suggested.stat().st_mode & 0o7777 == 0o2770
     assert not (tmp_path / "deploy/backups").exists()
 
 

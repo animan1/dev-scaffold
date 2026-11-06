@@ -31,12 +31,25 @@ Bare `make prepare-prod` prepares backup inputs and host storage. `make up-prod`
 also builds the backup image, initializes its status storage, and starts the
 scheduled worker after the database is healthy. Its first cycle takes a backup
 and verifies a restore; subsequent cycles use the configured intervals.
-There is no default host directory. Preparation asks for an absolute
-`BACKUP_LOCAL_PATH` when absent and saves it in the private production env file.
+Preparation asks for an absolute `BACKUP_LOCAL_PATH` when absent and saves it in
+the private production env file. Press Enter to accept the suggested
+`~/.local/share/<checkout-name>/backups` directory outside the checkout.
 The directory prompt supports Tab completion (including paths with spaces) and `~`.
 Values already supplied there, in the environment, or as Make arguments are
 honored; unattended preparation requires the path upfront.
 Local backups alone do not survive loss of the host.
+
+For persistent unattended inputs, add these non-secret settings to
+`deploy/.env.prod` (or the file selected by `PROD_ENV_FILE`):
+
+```dotenv
+BACKUP_LOCAL_PATH="/absolute/host/backups/cuplr"
+BACKUP_GROUP="cuplr-backup"
+```
+
+Alternatively supply Make arguments, for example
+`make prepare-prod BACKUP_LOCAL_PATH=/absolute/host/backups/cuplr BACKUP_GROUP=cuplr-backup`,
+or export those variables in the shell before running Make.
 
 The worker mounts `BACKUP_LOCAL_PATH` at `/backups` for the default encrypted
 Restic repository (`BACKUP_REPOSITORY=/backups`). The same capture, validation,
@@ -68,9 +81,15 @@ Preparation does not generate a replacement key, initialize a repository, or
 authenticate to remote storage. Without the profile, backup inputs are not required.
 
 Preparation preserves the host directory's owner. The worker keeps its dedicated
-UID and shares the directory's existing group (your current group for a new
-directory), saved as `BACKUP_RUNTIME_GID`. Mode 2770 permits operator/worker access
-and excludes other users; additional consuming services must share that group.
+UID and uses a namespaced host group, `<Compose-project>-backup` by default
+(override with `BACKUP_GROUP`). Separate tenants get separate groups and GIDs;
+the worker uses the group's resolved GID, saved as `BACKUP_RUNTIME_GID`.
+Preparation creates a missing group and adds the operator when necessary using
+displayed administrator commands (`dseditgroup` on macOS, `groupadd`/`usermod` on
+Linux). Open a new login session after membership changes. Once membership is
+active, routine preparation of an operator-owned directory needs no sudo.
+Mode 2770 permits operator/worker access and excludes other users; additional
+consuming services must share that tenant group.
 New local Restic repositories enable [group access](https://restic.readthedocs.io/en/stable/030_preparing_a_new_repo.html#group-accessible-repositories)
 for subsequent backup contents as well. Existing repositories are not recursively
 changed. Targeted permission changes on another owner's directory may require

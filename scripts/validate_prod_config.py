@@ -2,8 +2,10 @@
 
 import getpass
 import glob
+import grp
 import json
 import os
+import pwd
 import re
 import shlex
 import stat
@@ -107,7 +109,72 @@ def validate_backup_path(value):
         raise ConfigurationError("BACKUP_LOCAL_PATH must be an absolute host directory")
 
 
-def read_backup_path(name):
+def run_host_command(command, privileged=False):
+    if privileged and os.geteuid() != 0:
+        sudo = (
+            ["sudo"] if os.environ.get("PREPARE_INTERACTIVE") == "1" else ["sudo", "-n"]
+        )
+        command = [*sudo, "--", *command]
+    print("+ " + shlex.join(command), file=sys.stderr, flush=True)
+    subprocess.run(command, check=True, stdin=subprocess.DEVNULL)
+
+
+def prepare_backup_group(values):
+    project = values.get("COMPOSE_PROJECT_NAME") or Path.cwd().name
+    name = values.get("BACKUP_GROUP") or f"{project}-backup"
+    if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", name):
+        raise ConfigurationError(
+            "BACKUP_GROUP must be a valid host group name (up to 32 characters)"
+        )
+    try:
+        group = grp.getgrnam(name)
+    except KeyError:
+        command = (
+            ["dseditgroup", "-o", "create", name]
+            if sys.platform == "darwin"
+            else ["groupadd", name]
+        )
+        run_host_command(command, privileged=True)
+        group = grp.getgrnam(name)
+    if os.geteuid() != 0:
+        operator = pwd.getpwuid(os.getuid())
+        if (
+            operator.pw_gid != group.gr_gid
+            and operator.pw_name not in group.gr_mem
+            and group.gr_gid not in os.getgroups()
+        ):
+            command = (
+                [
+                    "dseditgroup",
+                    "-o",
+                    "edit",
+                    "-a",
+                    operator.pw_name,
+                    "-t",
+                    "user",
+                    name,
+                ]
+                if sys.platform == "darwin"
+                else ["usermod", "-a", "-G", name, operator.pw_name]
+            )
+            run_host_command(command, privileged=True)
+        if group.gr_gid not in {os.getgid(), *os.getgroups()}:
+            print(
+                f"Open a new login session to activate membership in {name}.",
+                file=sys.stderr,
+            )
+    gid = str(group.gr_gid)
+    if os.environ.get("BACKUP_RUNTIME_GID", gid) != gid:
+        raise ConfigurationError(
+            "BACKUP_RUNTIME_GID must match the selected BACKUP_GROUP"
+        )
+    if values.get("BACKUP_GROUP") != name:
+        save_backup_input("BACKUP_GROUP", name)
+    if values.get("BACKUP_RUNTIME_GID") != gid:
+        save_backup_input("BACKUP_RUNTIME_GID", gid)
+
+
+def read_backup_path(name, default=None):
     try:
         import readline
     except ImportError:
@@ -132,17 +199,23 @@ def read_backup_path(name):
         readline.parse_and_bind(
             "bind ^I rl_complete" if "libedit" in readline.__doc__ else "tab: complete"
         )
-    return os.path.expanduser(input(f"{name}: "))
+    prompt = f"{name} [{default}]: " if default else f"{name}: "
+    return os.path.expanduser(input(prompt) or default or "")
 
 
-def prompt_backup_input(name, secret=True):
+def prompt_backup_input(name, secret=True, default=None):
     path = os.environ.get("PROD_ENV_FILE")
     if not path or os.environ.get("PREPARE_INTERACTIVE") != "1":
         raise ConfigurationError(
             f"Missing required backup input: {name}; supply it for non-interactive use"
         )
     try:
-        value = getpass.getpass(f"{name}: ") if secret else read_backup_path(name)
+        if secret:
+            value = getpass.getpass(f"{name}: ")
+        elif name == "BACKUP_LOCAL_PATH":
+            value = read_backup_path(name, default)
+        else:
+            value = input(f"{name} [{default}]: ") or default or ""
     except (EOFError, OSError, KeyboardInterrupt):
         raise ConfigurationError(f"Unable to read {name} from the terminal") from None
     if not value.strip():
@@ -197,11 +270,11 @@ def prepare_backup_path():
     if value.strip():
         validate_backup_path(value)
     else:
-        value = prompt_backup_input("BACKUP_LOCAL_PATH", secret=False)
-    if not values.get("BACKUP_RUNTIME_GID", "").strip():
-        path = Path(value)
-        gid = path.stat().st_gid if path.exists() else os.getgid()
-        save_backup_input("BACKUP_RUNTIME_GID", str(gid))
+        default = Path.home() / ".local/share" / Path.cwd().name / "backups"
+        value = prompt_backup_input(
+            "BACKUP_LOCAL_PATH", secret=False, default=str(default)
+        )
+    prepare_backup_group(values)
 
 
 def validate(config, application_service="backend"):
@@ -301,20 +374,14 @@ def prepare_backup_paths(config):
                 if actual == (existing.st_uid, gid, mode):
                     continue
             owner = ["-g", str(gid)]
-            privileged = existing is not None and existing.st_uid != os.geteuid()
+            privileged = (
+                existing is not None and existing.st_uid != os.geteuid()
+            ) or gid not in {os.getgid(), *os.getgroups()}
             if privileged:
-                owner += ["-o", str(existing.st_uid)]
+                owner += ["-o", str(existing.st_uid if existing else os.getuid())]
             changes.append(["install", "-d", *owner, "-m", f"{mode:o}", str(path)])
         for command in changes:
-            if "-o" in command and os.geteuid() != 0:
-                sudo = (
-                    ["sudo"]
-                    if os.environ.get("PREPARE_INTERACTIVE") == "1"
-                    else ["sudo", "-n"]
-                )
-                command = [*sudo, "--", *command]
-                print("+ " + shlex.join(command), file=sys.stderr, flush=True)
-            subprocess.run(command, check=True, stdin=subprocess.DEVNULL)
+            run_host_command(command, privileged="-o" in command)
     except (KeyError, TypeError, ValueError):
         raise ConfigurationError(
             "Backup path consumers must declare numeric UID:GID ownership"
@@ -335,6 +402,8 @@ if __name__ == "__main__":
         prepare_backup_paths(config)
     except ConfigurationError as error:
         sys.exit(str(error))
+    except (OSError, subprocess.CalledProcessError, KeyboardInterrupt):
+        sys.exit("Host backup group preparation requires administrator privileges")
     except (KeyError, TypeError, json.JSONDecodeError):
         sys.exit("Invalid production configuration; check the private input file")
     except ValueError:
