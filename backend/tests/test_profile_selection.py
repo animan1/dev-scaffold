@@ -43,13 +43,13 @@ def test_committed_profile_selects_its_make_and_ci_contracts() -> None:
     assert selected_profile in ci_profiles
     metadata = json.loads(_make("profiles").stdout)
     assert metadata["selected"]["application"] == selected_profile
-    assert metadata["selected"]["backup"] == "none"
+    assert metadata["selected"]["backup"] == "immutable-backup"
     assert metadata["validation"]["application"] == ci_profiles
     assert expected_compose[selected_profile] in _make("--dry-run", "up").stdout
 
 
 def test_unknown_profile_requires_its_own_implementation() -> None:
-    result = _make("SCAFFOLD_PROFILE=missing", "help", check=False)
+    result = _make("SCAFFOLD_PROFILE=missing", "SCAFFOLD_BACKUP_PROFILE=none", "help", check=False)
 
     assert result.returncode != 0
     assert "profiles/missing/profile.mk" in result.stderr

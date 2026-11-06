@@ -1,6 +1,6 @@
 # Immutable backup profile
 
-This optional profile provides one application-independent, non-root image for
+This default profile provides one application-independent, non-root image for
 backup and recovery tooling. It combines immutable inputs for:
 
 - PostgreSQL 16.10 Bookworm, supplying version-compatible `pg_dump` and
@@ -15,8 +15,8 @@ the image.
 
 ## Select the profile
 
-The backup profile is independent of `SCAFFOLD_PROFILE`. Enable it in the
-committed `.scaffold-profile` file:
+The backup profile is independent of `SCAFFOLD_PROFILE` and enabled by default in
+the committed `.scaffold-profile` file:
 
 ```make
 SCAFFOLD_BACKUP_PROFILE ?= immutable-backup
@@ -26,6 +26,13 @@ CI_BACKUP_PROFILES ?= immutable-backup
 Leave `SCAFFOLD_BACKUP_PROFILE` as `none` when the project does not use the
 profile. Set `CI_BACKUP_PROFILES` to an empty value when a derived repository
 does not need scaffold CI to exercise the catalog entry.
+
+Bare `make prepare-prod` prepares backup inputs and host storage. `make up-prod`
+also builds the backup image, initializes its status storage, and starts the
+scheduled worker after the database is healthy. Its first cycle takes a backup
+and verifies a restore; subsequent cycles use the configured intervals.
+The default local repository is `$(CURDIR)/deploy/backups`; override it with
+`BACKUP_LOCAL_PATH`. Local backups alone do not survive loss of the host.
 
 When selected, the normal `make verify` contract includes exact backup-image
 verification. The component-maintenance and focused exercise commands are:

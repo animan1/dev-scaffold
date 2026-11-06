@@ -99,8 +99,26 @@ def test_backup_profile_is_selected_and_verified_independently() -> None:
     makefile = (repository / "Makefile").read_text()
     workflow = (repository / ".github/workflows/ci.yml").read_text()
 
-    assert "SCAFFOLD_BACKUP_PROFILE ?= none" in makefile
+    assert "SCAFFOLD_BACKUP_PROFILE ?= immutable-backup" in makefile
     assert "CI_BACKUP_PROFILES ?= immutable-backup" in makefile
     assert "profiles/$(SCAFFOLD_BACKUP_PROFILE)/profile.mk" in makefile
     assert "immutable-backup-profile:" in workflow
     assert "SCAFFOLD_BACKUP_PROFILE=immutable-backup verify-backup-image" in workflow
+
+
+def test_default_production_start_prepares_and_builds_backups_for_both_applications() -> None:
+    root = _repository_root()
+    compose = (root / "profiles/immutable-backup/compose.yml").read_text()
+    assert 'profiles: ["backup-init"]' not in compose
+    assert "condition: service_completed_successfully" in compose
+    assert "condition: service_healthy" in compose
+    for profile in ("react-vite", "server-rendered-django"):
+        startup = _make(f"SCAFFOLD_PROFILE={profile}", "up-prod")
+        assert "scripts/validate_prod_config.py" in startup
+        assert "profiles/immutable-backup/Dockerfile" in startup
+        assert "profiles/immutable-backup/compose.yml" in startup
+        if profile == "server-rendered-django":
+            assert "app web prod-sim-ingress backup" in startup
+    disabled = _make("SCAFFOLD_BACKUP_PROFILE=none", "up-prod")
+    assert "profiles/immutable-backup/compose.yml" not in disabled
+    assert "profiles/immutable-backup/Dockerfile" not in disabled

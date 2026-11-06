@@ -1,7 +1,7 @@
 SCAFFOLD_ROOT := $(dir $(abspath $(firstword $(MAKEFILE_LIST))))
 include $(SCAFFOLD_ROOT).scaffold-profile
 UV_IMAGE ?= ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
-SCAFFOLD_BACKUP_PROFILE ?= none
+SCAFFOLD_BACKUP_PROFILE ?= immutable-backup
 CI_BACKUP_PROFILES ?= immutable-backup
 PROD_ENV_FILE ?= deploy/.env.prod
 PROD_APPLICATION_SERVICE ?= backend
@@ -173,8 +173,7 @@ ci: up be.wait be.ci fe.ci smoke
 .PHONY: bootstrap-prod
 bootstrap-prod: prepare-prod ## Prepare inputs and start the production stack
 	# Bring up stack, run migrations, and smoke test
-	$(COMPOSE_PROD) up -d --build
-	$(COMPOSE_PROD) up -d --no-deps --force-recreate nginx
+	$(MAKE) up-prod
 	$(COMPOSE_PROD) run --rm backend bash -lc "cd /app && python -m app.manage migrate"
 	$(MAKE) smoke-prod HOST_INGRESS=$(HOST_INGRESS) \
 		HOST_INGRESS_HOST=$(HOST_INGRESS_HOST) HOST_INGRESS_PORT=$(HOST_INGRESS_PORT)
@@ -541,6 +540,8 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 LOCAL_TLS ?= 0
+up-prod: prepare-prod
+
 .PHONY: prepare-prod
 prepare-prod: ## Prepare and validate private production inputs without starting services
 	@PROD_ENV_FILE="$(PROD_ENV_FILE)" bash "$(SCAFFOLD_ROOT)deploy/setup-env.sh"

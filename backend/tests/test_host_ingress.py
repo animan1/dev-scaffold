@@ -124,7 +124,9 @@ def test_production_workflows_refresh_nginx_after_backend_replacement() -> None:
     makefile = (_repo_root() / "Makefile").read_text()
 
     refresh = "$(COMPOSE_PROD) up -d --no-deps --force-recreate nginx"
-    assert makefile.count(refresh) == 2
+    assert makefile.count(refresh) == 1
+    bootstrap = makefile.split("bootstrap-prod: prepare-prod", 1)[1].split(".PHONY:", 1)[0]
+    assert "$(MAKE) up-prod" in bootstrap
     assert "$(COMPOSE_RELEASE) up -d --no-deps --force-recreate nginx" in makefile
 
 
@@ -161,6 +163,7 @@ def test_local_tls_preparation_requires_opt_in_and_covers_browser_hosts(
         str(_repo_root() / "Makefile"),
         f"SCAFFOLD_PROFILE={profile}",
         f"RELEASE_REVISION={revision}",
+        "SCAFFOLD_BACKUP_PROFILE=none",
         "DOCKER_HOST=unix:///nonexistent",
         "HOST_INGRESS=0",
         "prepare-prod",
@@ -208,6 +211,7 @@ def test_prepare_prod_generates_private_inputs_and_revalidates_without_overwriti
         str(_repo_root() / "Makefile"),
         f"SCAFFOLD_PROFILE={profile}",
         f"RELEASE_REVISION={revision}",
+        "SCAFFOLD_BACKUP_PROFILE=none",
         "DOCKER_HOST=unix:///nonexistent",
         "prepare-prod",
     ]
@@ -262,7 +266,6 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
         "-f",
         str(_repo_root() / "Makefile"),
         f"SCAFFOLD_PROFILE={profile}",
-        "SCAFFOLD_BACKUP_PROFILE=immutable-backup",
         "PROJECT_NAME=dev-scaffold",
         f"RELEASE_REVISION={revision}",
         f"BACKUP_IMAGE=local/dev-scaffold-backup:{revision}",

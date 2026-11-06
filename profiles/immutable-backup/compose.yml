@@ -1,6 +1,5 @@
 services:
   backup-init:
-    profiles: ["backup-init"]
     image: "${BACKUP_IMAGE:?Set BACKUP_IMAGE through the profile Makefile}"
     entrypoint: ["sh", "-c"]
     command:
@@ -16,6 +15,11 @@ services:
   backup:
     image: "${BACKUP_IMAGE:?Set BACKUP_IMAGE through the profile Makefile}"
     command: ["watch"]
+    depends_on:
+      db:
+        condition: service_healthy
+      backup-init:
+        condition: service_completed_successfully
     environment:
       BACKUP_FILENAME: "${BACKUP_FILENAME:-database.dump}"
       BACKUP_HOST: "${BACKUP_HOST:-production}"
