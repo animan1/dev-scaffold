@@ -88,6 +88,10 @@ Map only `BACKUP_PUBLICATION_PATH` into host transport; keep the working
 `BACKUP_LOCAL_PATH` outside that transported tree. Existing repositories are not
 moved or remapped automatically.
 
+The [infra backup transport boundary](https://github.com/animan1/cranescastle-infra/blob/main/docs/backup-transport.md)
+defines publication/retrieval ownership and transfer verification. Its capture
+metadata is optional; this profile hands off the native publication repository.
+
 If the existing repository is already in infra's transported directory, retain
 it as `BACKUP_PUBLICATION_PATH` and select new private working storage before
 restarting the worker with this version. A new working repository adopts the
