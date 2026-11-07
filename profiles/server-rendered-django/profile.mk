@@ -45,7 +45,8 @@ COMPOSE_PROD_SIM = COMPOSE_PROJECT_NAME=$(PROD_SIM_COMPOSE_PROJECT) \
 	PROD_SIM_HTTPS_PORT=$(PROD_SIM_HTTPS_PORT) \
 	PROD_SIM_INGRESS_IMAGE=$(PROD_SIM_INGRESS_IMAGE) \
 	docker compose --project-directory . -f $(RELEASE_COMPOSE_FILE) \
-	-f $(PROD_SIM_COMPOSE_FILE) --env-file $(PROD_SIM_ENV_FILE)
+	-f $(PROD_SIM_COMPOSE_FILE) $(PROD_SIM_BACKUP_FILES) \
+	--env-file $(PROD_ENV_FILE) --env-file $(PROD_SIM_ENV_FILE)
 RUN_RELEASE = $(COMPOSE_RELEASE) run --rm --no-deps app
 RUN_RELEASE_CI = $(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) run --rm --no-deps app
 LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
@@ -303,7 +304,7 @@ up-prod: build-release-images build-prod-sim-ingress ## Build and start an isola
 		RELEASE_COMPOSE_PROJECT=$(PROD_SIM_COMPOSE_PROJECT) \
 		RELEASE_CI_ENV_FILE=$(PROD_SIM_ENV_FILE)
 	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_PROD_SIM) up -d --no-build \
-		app web prod-sim-ingress
+		app web prod-sim-ingress $(PROD_SIM_BACKUP_SERVICES)
 
 .PHONY: build-prod-sim-ingress
 build-prod-sim-ingress: ## Build the local-only TLS ingress image

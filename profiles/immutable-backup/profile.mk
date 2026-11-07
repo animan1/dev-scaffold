@@ -5,7 +5,7 @@ BACKUP_RCLONE_SOURCE ?= rclone/rclone:1.74.4
 BACKUP_POSTGRES_IMAGE ?= $(BACKUP_POSTGRES_SOURCE)@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
 BACKUP_RESTIC_IMAGE ?= $(BACKUP_RESTIC_SOURCE)@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
 BACKUP_RCLONE_IMAGE ?= $(BACKUP_RCLONE_SOURCE)@sha256:c61954aaa32328a5486715dd063a81c7879f5195ad3505cd362deddd509dc4a1
-BACKUP_IMAGE ?= local/$(PROJECT_NAME)-backup:$(shell git rev-parse HEAD)
+BACKUP_IMAGE ?= local/$(PROJECT_NAME)-backup:$(shell git -C $(SCAFFOLD_ROOT) rev-parse HEAD)
 BACKUP_DOCKERFILE := profiles/immutable-backup/Dockerfile
 BACKUP_COMPOSE_FILE := profiles/immutable-backup/compose.yml
 BACKUP_EXERCISE_COMPOSE_FILE := profiles/immutable-backup/exercise.compose.yml
@@ -14,13 +14,17 @@ BACKUP_EXERCISE_PROJECT ?= $(PROJECT_NAME)-backup-exercise
 BACKUP_COMPOSE_CONTRACT_PROJECT ?= $(PROJECT_NAME)-backup-contract
 BACKUP_COMPOSE_CONTRACT_ENV_FILE ?= $(CURDIR)/.tmp/immutable-backup-compose.env
 BACKUP_DATABASE_SERVICE ?= db
-BACKUP_LOCAL_PATH ?= $(CURDIR)/deploy/backups
-BACKUP_RCLONE_CONFIG_DIR ?= $(CURDIR)/deploy/rclone
 BACKUP_SERVICE ?= backup
 BACKUP_SNAPSHOT ?= latest
 BACKUP_RESTORE_CONFIRM_VALUE := restore-production-database
 BACKUP_BUILD ?= $(MAKE) build-backup-image
-export BACKUP_IMAGE BACKUP_LOCAL_PATH BACKUP_RCLONE_CONFIG_DIR
+export BACKUP_IMAGE
+ifneq ($(origin BACKUP_LOCAL_PATH),undefined)
+export BACKUP_LOCAL_PATH
+endif
+ifneq ($(origin BACKUP_GROUP),undefined)
+export BACKUP_GROUP
+endif
 
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 PROD_COMPOSE_FILES += -f $(BACKUP_COMPOSE_FILE)
@@ -30,6 +34,8 @@ BACKUP_COMPOSE_CONTRACT_PROJECT_DIRECTORY =
 BACKUP_WRITER_SERVICES ?= backend monitor backup
 else ifeq ($(SCAFFOLD_PROFILE),server-rendered-django)
 RELEASE_COMPOSE_FILES += -f $(BACKUP_COMPOSE_FILE)
+PROD_SIM_BACKUP_FILES := -f $(BACKUP_COMPOSE_FILE)
+PROD_SIM_BACKUP_SERVICES := backup
 BACKUP_COMPOSE = $(COMPOSE_RELEASE)
 BACKUP_COMPOSE_CONTRACT_FILES = -f $(RELEASE_COMPOSE_FILE) -f $(BACKUP_COMPOSE_FILE)
 BACKUP_COMPOSE_CONTRACT_PROJECT_DIRECTORY = --project-directory .
@@ -38,8 +44,12 @@ else
 $(error The immutable-backup profile needs a production Compose contract for SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE))
 endif
 
+up-prod: build-backup-image
+
 BACKUP_COMPOSE_CONTRACT = COMPOSE_PROJECT_NAME=$(BACKUP_COMPOSE_CONTRACT_PROJECT) \
 	PROD_ENV_FILE=$(BACKUP_COMPOSE_CONTRACT_ENV_FILE) \
+	BACKUP_LOCAL_PATH=$(BACKUP_EXERCISE_ROOT)/repository \
+	BACKUP_RUNTIME_GID=$(shell id -g) \
 	RELEASE_BACKEND_IMAGE=local/backup-contract-backend:test \
 	RELEASE_WEB_IMAGE=local/backup-contract-web:test \
 	BACKUP_IMAGE=local/backup-contract:test \
@@ -50,7 +60,7 @@ BACKUP_COMPOSE_CONTRACT = COMPOSE_PROJECT_NAME=$(BACKUP_COMPOSE_CONTRACT_PROJECT
 BACKUP_RUN = $(BACKUP_COMPOSE) run --rm --no-deps $(BACKUP_SERVICE)
 BACKUP_EXERCISE_COMPOSE = COMPOSE_PROJECT_NAME=$(BACKUP_EXERCISE_PROJECT) \
 	BACKUP_IMAGE=$(BACKUP_IMAGE) BACKUP_LOCAL_PATH=$(BACKUP_EXERCISE_ROOT)/repository \
-	BACKUP_RCLONE_CONFIG_DIR=$(BACKUP_EXERCISE_ROOT)/rclone \
+	BACKUP_RUNTIME_GID=$(shell id -g) \
 	BACKUP_POSTGRES_IMAGE=$(BACKUP_POSTGRES_IMAGE) BACKUP_REPOSITORY=/backups \
 	BACKUP_PASSWORD=exercise-only POSTGRES_DB=backup_exercise \
 	POSTGRES_USER=backup_exercise POSTGRES_PASSWORD=exercise-only \
@@ -87,6 +97,15 @@ verify-backup-image: build-backup-image ## Verify the exact backup image tool an
 		&& jq --version \
 		&& test -x /usr/local/bin/scaffold-backup \
 		&& test -s /etc/ssl/certs/ca-certificates.crt'
+	docker run --rm --user 0:0 --entrypoint bash \
+		-e POSTGRES_USER=check -e POSTGRES_DB=check -e POSTGRES_PASSWORD=check \
+		-e RESTIC_PASSWORD=check -e RESTIC_REPOSITORY=/backups $(BACKUP_IMAGE) -ec \
+		'mkdir /backups; chown 10002:10001 /backups; chmod 2770 /backups; \
+		sed "/^case /,\$$d" /usr/local/bin/scaffold-backup > /tmp/backup-functions; \
+		runuser -u scaffold-backup -- bash -ec "source /tmp/backup-functions; \
+		initialize_repository; printf shared | restic backup --stdin --stdin-filename access-check"; \
+		test "$$(stat -c %u /backups)" = 10002; \
+		setpriv --reuid=10002 --regid=10001 --clear-groups restic --no-cache snapshots >/dev/null'
 
 .PHONY: prepare-backup-compose-contract
 prepare-backup-compose-contract:
@@ -108,7 +127,7 @@ verify-backup-compose: build-backup-image prepare-backup-compose-contract ## Val
 
 .PHONY: prepare-backup-exercise
 prepare-backup-exercise: build-backup-image
-	@mkdir -p $(BACKUP_EXERCISE_ROOT)/repository $(BACKUP_EXERCISE_ROOT)/rclone
+	@install -d -g $(shell id -g) -m 2770 $(BACKUP_EXERCISE_ROOT)/repository
 	$(BACKUP_EXERCISE_COMPOSE) down -v --remove-orphans
 	$(BACKUP_EXERCISE_COMPOSE) run --rm --no-deps backup-init
 	$(BACKUP_EXERCISE_COMPOSE) run --rm --no-deps --user 0:0 \
@@ -151,7 +170,7 @@ backup-database-ready:
 
 .PHONY: backup-storage-ready
 backup-storage-ready:
-	@mkdir -p $(BACKUP_LOCAL_PATH) $(BACKUP_RCLONE_CONFIG_DIR)
+	$(MAKE) prepare-prod
 	$(BACKUP_COMPOSE) run --rm --no-deps backup-init
 
 .PHONY: backup-prod

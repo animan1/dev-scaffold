@@ -1,12 +1,11 @@
 services:
   backup-init:
-    profiles: ["backup-init"]
     image: "${BACKUP_IMAGE:?Set BACKUP_IMAGE through the profile Makefile}"
     entrypoint: ["sh", "-c"]
     command:
       - >-
-        install -d -o ${BACKUP_RUNTIME_UID:-10001} -g ${BACKUP_RUNTIME_GID:-10001}
-        /backups ${BACKUP_STATUS_DIR:-/backup-status}
+        install -d -o ${BACKUP_RUNTIME_UID:-10001} -g ${BACKUP_RUNTIME_GID:?Run make prepare-prod to select the tenant backup group}
+        ${BACKUP_STATUS_DIR:-/backup-status}
     user: "0:0"
     volumes:
       - "${BACKUP_LOCAL_PATH:?Set BACKUP_LOCAL_PATH through the profile Makefile}:/backups"
@@ -15,6 +14,11 @@ services:
   backup:
     image: "${BACKUP_IMAGE:?Set BACKUP_IMAGE through the profile Makefile}"
     command: ["watch"]
+    depends_on:
+      db:
+        condition: service_healthy
+      backup-init:
+        condition: service_completed_successfully
     environment:
       BACKUP_FILENAME: "${BACKUP_FILENAME:-database.dump}"
       BACKUP_HOST: "${BACKUP_HOST:-production}"
@@ -31,12 +35,10 @@ services:
       POSTGRES_USER: "${POSTGRES_USER:-app}"
       RESTIC_PASSWORD: "${BACKUP_PASSWORD:-}"
       RESTIC_REPOSITORY: "${BACKUP_REPOSITORY:-/backups}"
-      RCLONE_CONFIG: "${BACKUP_RCLONE_CONFIG:-/config/rclone/rclone.conf}"
     restart: unless-stopped
-    user: "${BACKUP_RUNTIME_UID:-10001}:${BACKUP_RUNTIME_GID:-10001}"
+    user: "${BACKUP_RUNTIME_UID:-10001}:${BACKUP_RUNTIME_GID:?Run make prepare-prod to select the tenant backup group}"
     volumes:
       - "${BACKUP_LOCAL_PATH:?Set BACKUP_LOCAL_PATH through the profile Makefile}:/backups"
-      - "${BACKUP_RCLONE_CONFIG_DIR:?Set BACKUP_RCLONE_CONFIG_DIR through the profile Makefile}:/config/rclone"
       - "backup_status:${BACKUP_STATUS_DIR:-/backup-status}"
 
   monitor:

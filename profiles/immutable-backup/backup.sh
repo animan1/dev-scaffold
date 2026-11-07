@@ -74,6 +74,12 @@ initialize_repository() {
     echo "RESTIC_REPOSITORY, and the provider credentials." >&2
     exit 1
   fi
+  if [[ "${RESTIC_REPOSITORY}" == "/backups" ]]; then
+    # Restic uses group-read access on config to keep future objects shared.
+    # Only adjust objects from this first initialization, never an existing repo.
+    find /backups -mindepth 1 -type f -exec chmod g+r '{}' +
+    find /backups -mindepth 1 -type d -exec chmod 2770 '{}' +
+  fi
 }
 
 open_repository() {

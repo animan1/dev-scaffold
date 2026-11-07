@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+import grp
 import json
 import os
 import pty
@@ -41,11 +42,19 @@ def _production_checkout(tmp_path: Path) -> str:
     ).strip()
 
 
+def _send_prompt_responses(terminal: int, output: bytes, responses: dict[bytes, str]) -> None:
+    for prompt, response in tuple(responses.items()):
+        if prompt in output:
+            os.write(terminal, (response + "\n").encode())
+            del responses[prompt]
+
+
 def _prompted_prepare(
     command: list[str],
     directory: Path,
     value: str,
     redirect_input: bool = False,
+    backup_path: str | None = None,
 ) -> tuple[int, str]:
     process, terminal = pty.fork()
     if process == 0:
@@ -55,7 +64,10 @@ def _prompted_prepare(
                 os.dup2(empty.fileno(), 0)
         os.execvp(command[0], command)
     output = b""
-    supplied = False
+    responses = {b"BACKUP_PASSWORD: ": value}
+    if backup_path is not None:
+        responses[b"BACKUP_LOCAL_PATH"] = backup_path
+    ownership_cancelled = False
     try:
         while True:
             if not select.select([terminal], [], [], 20)[0]:
@@ -71,13 +83,34 @@ def _prompted_prepare(
             if not chunk:
                 break
             output += chunk
-            if b"BACKUP_PASSWORD: " in output and not supplied:
-                os.write(terminal, (value + "\n").encode())
-                supplied = True
+            _send_prompt_responses(terminal, output, responses)
+            if b"+ sudo " in output and not ownership_cancelled:
+                os.write(terminal, b"\x03")
+                ownership_cancelled = True
         _, status = os.waitpid(process, 0)
     finally:
         os.close(terminal)
     return os.waitstatus_to_exitcode(status), output.decode(errors="replace")
+
+
+@pytest.mark.parametrize("use_home", [False, True])
+def test_directory_prompt_tab_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, use_home: bool
+) -> None:
+    pytest.importorskip("readline")
+    directory = tmp_path / "host backups"
+    directory.mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    command = [
+        sys.executable,
+        "-c",
+        "import runpy, sys; print(runpy.run_path(sys.argv[1])['read_backup_path']('BACKUP_LOCAL_PATH'))",
+        str(_repo_root() / "scripts/validate_prod_config.py"),
+    ]
+    prefix = "~/host back" if use_home else str(tmp_path / "host back")
+    status, output = _prompted_prepare(command, tmp_path, "", backup_path=prefix + "\t")
+    assert status == 0, output
+    assert output.splitlines()[-1].rstrip("/") == str(directory)
 
 
 def test_host_ingress_origin_is_loopback_http_only() -> None:
@@ -120,7 +153,9 @@ def test_production_workflows_refresh_nginx_after_backend_replacement() -> None:
     makefile = (_repo_root() / "Makefile").read_text()
 
     refresh = "$(COMPOSE_PROD) up -d --no-deps --force-recreate nginx"
-    assert makefile.count(refresh) == 2
+    assert makefile.count(refresh) == 1
+    bootstrap = makefile.split("bootstrap-prod: prepare-prod", 1)[1].split(".PHONY:", 1)[0]
+    assert "$(MAKE) up-prod" in bootstrap
     assert "$(COMPOSE_RELEASE) up -d --no-deps --force-recreate nginx" in makefile
 
 
@@ -157,6 +192,7 @@ def test_local_tls_preparation_requires_opt_in_and_covers_browser_hosts(
         str(_repo_root() / "Makefile"),
         f"SCAFFOLD_PROFILE={profile}",
         f"RELEASE_REVISION={revision}",
+        "SCAFFOLD_BACKUP_PROFILE=none",
         "DOCKER_HOST=unix:///nonexistent",
         "HOST_INGRESS=0",
         "prepare-prod",
@@ -204,6 +240,7 @@ def test_prepare_prod_generates_private_inputs_and_revalidates_without_overwriti
         str(_repo_root() / "Makefile"),
         f"SCAFFOLD_PROFILE={profile}",
         f"RELEASE_REVISION={revision}",
+        "SCAFFOLD_BACKUP_PROFILE=none",
         "DOCKER_HOST=unix:///nonexistent",
         "prepare-prod",
     ]
@@ -258,12 +295,12 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
         "-f",
         str(_repo_root() / "Makefile"),
         f"SCAFFOLD_PROFILE={profile}",
-        "SCAFFOLD_BACKUP_PROFILE=immutable-backup",
         "PROJECT_NAME=dev-scaffold",
         f"RELEASE_REVISION={revision}",
         f"BACKUP_IMAGE=local/dev-scaffold-backup:{revision}",
         f"BACKUP_LOCAL_PATH={tmp_path}/repository",
-        f"BACKUP_RCLONE_CONFIG_DIR={tmp_path}/rclone",
+        f"BACKUP_GROUP={grp.getgrgid(os.getgid()).gr_name}",
+        f"BACKUP_RUNTIME_GID={os.getgid()}",
         "DOCKER_HOST=unix:///nonexistent",
         "prepare-prod",
     ]
@@ -288,8 +325,9 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        stdin=subprocess.DEVNULL,
     )
-    assert supplied.returncode == 0, supplied.stderr
+    assert supplied.returncode == 0 or "host ownership privileges" in supplied.stderr
     assert private_env.read_bytes() == original
     assert "environment-supplied-key" not in supplied.stdout + supplied.stderr
     empty_status, empty_output = _prompted_prepare(command, tmp_path, "")
@@ -298,14 +336,22 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
     assert private_env.read_bytes() == original
     key = "review-$TOKEN#'\"\\ key\\"
     status, output = _prompted_prepare(command, tmp_path, key)
-    assert status == 0, output
+    assert status == 0 or any(
+        message in output for message in ("host ownership privileges", "+ sudo ")
+    ), output
     assert output.count("BACKUP_PASSWORD: ") == 1
     assert key not in output
     assert private_env.read_bytes().startswith(original)
     assert private_env.stat().st_mode & 0o077 == 0
     configured = private_env.read_bytes()
-    ready = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
-    assert ready.returncode == 0, ready.stderr
+    ready = subprocess.run(
+        command,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+    )
+    assert ready.returncode == 0 or "host ownership privileges" in ready.stderr
     assert "BACKUP_PASSWORD: " not in ready.stdout + ready.stderr
     assert key not in ready.stdout + ready.stderr
     assert private_env.read_bytes() == configured
@@ -339,7 +385,7 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
             "COMPOSE_PROJECT_NAME": "dev-scaffold",
             "BACKUP_IMAGE": f"local/dev-scaffold-backup:{revision}",
             "BACKUP_LOCAL_PATH": str(tmp_path / "repository"),
-            "BACKUP_RCLONE_CONFIG_DIR": str(tmp_path / "rclone"),
+            "BACKUP_RUNTIME_GID": str(os.getgid()),
             "RELEASE_BACKEND_IMAGE": f"local/dev-scaffold-backend:{revision}",
             "RELEASE_WEB_IMAGE": f"local/dev-scaffold-web:{revision}",
             "DOCKER_HOST": "unix:///nonexistent",
@@ -347,8 +393,88 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
     )
     resolved = dict(line.split("=", 1) for line in rendered.stdout.splitlines() if "=" in line)
     assert resolved["BACKUP_PASSWORD"] == key
-    assert not (tmp_path / "repository").exists()
+    directory = tmp_path / "repository"
+    if directory.exists():
+        assert directory.stat().st_uid == os.getuid()
+        assert directory.stat().st_mode & 0o7777 == 0o2770
+        directory.rmdir()
     assert not (tmp_path / "rclone").exists()
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Needs the Docker Compose client")
+def test_preparation_prompts_for_host_directory_and_reuses_private_selection(
+    tmp_path: Path,
+) -> None:
+    revision = _production_checkout(tmp_path)
+    directory = tmp_path / "host backups $literal"
+    directory.mkdir()
+    sentinel = directory / "existing-data"
+    sentinel.write_text("preserve")
+    command = [
+        "make",
+        "--no-print-directory",
+        "-f",
+        str(_repo_root() / "Makefile"),
+        f"RELEASE_REVISION={revision}",
+        f"BACKUP_GROUP={grp.getgrgid(os.getgid()).gr_name}",
+        "DOCKER_HOST=unix:///nonexistent",
+        "prepare-prod",
+    ]
+    missing = subprocess.run(
+        command, cwd=tmp_path, capture_output=True, text=True, stdin=subprocess.DEVNULL
+    )
+    assert missing.returncode != 0
+    assert "Missing required backup input: BACKUP_LOCAL_PATH" in missing.stderr
+    assert not (tmp_path / "deploy/backups").exists()
+    status, output = _prompted_prepare(
+        command, tmp_path, "test-only", backup_path=str(directory)[:-4] + "\t"
+    )
+    assert status == 0, output
+    assert output.count("BACKUP_LOCAL_PATH [") == 1
+    assert "sudo" not in output
+    private_env = tmp_path / "deploy/.env.prod"
+    configured = private_env.read_bytes()
+    repeated = subprocess.run(
+        command, cwd=tmp_path, capture_output=True, text=True, stdin=subprocess.DEVNULL
+    )
+    assert repeated.returncode == 0, repeated.stderr
+    assert "BACKUP_LOCAL_PATH: " not in repeated.stdout + repeated.stderr
+    assert private_env.read_bytes() == configured
+    assert directory.stat().st_uid == os.getuid()
+    assert directory.stat().st_gid == os.getgid()
+    assert directory.stat().st_mode & 0o7777 == 0o2770
+    assert sentinel.read_text() == "preserve"
+    assert not (tmp_path / "deploy/backups").exists()
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Needs the Docker Compose client")
+def test_preparation_accepts_suggested_host_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    revision = _production_checkout(tmp_path)
+    monkeypatch.setenv(
+        "DOCKER_CONFIG", os.environ.get("DOCKER_CONFIG", str(Path.home() / ".docker"))
+    )
+    monkeypatch.setenv("HOME", str(tmp_path / "operator-home"))
+    command = [
+        "make",
+        "--no-print-directory",
+        "-f",
+        str(_repo_root() / "Makefile"),
+        f"RELEASE_REVISION={revision}",
+        f"BACKUP_GROUP={grp.getgrgid(os.getgid()).gr_name}",
+        "DOCKER_HOST=unix:///nonexistent",
+        "prepare-prod",
+    ]
+    suggested = tmp_path / "operator-home/.local/share" / tmp_path.name / "backups"
+    assert not suggested.exists()
+    status, output = _prompted_prepare(command, tmp_path, "test-only", backup_path="")
+    assert status == 0, output
+    assert f"BACKUP_LOCAL_PATH [{suggested}]: " in output
+    assert suggested.stat().st_uid == os.getuid()
+    assert suggested.stat().st_mode & 0o7777 == 0o2770
+    assert not (tmp_path / "deploy/backups").exists()
 
 
 @pytest.mark.parametrize(

@@ -305,7 +305,6 @@ def test_backup_configuration_boundaries_remain_project_owned() -> None:
         "BACKUP_REPOSITORY",
         "BACKUP_RUNTIME_GID",
         "BACKUP_RUNTIME_UID",
-        "BACKUP_RCLONE_CONFIG",
         "BACKUP_STATUS_DIR",
         "BACKUP_TAG",
         "POSTGRES_DB",

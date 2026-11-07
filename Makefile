@@ -1,7 +1,7 @@
 SCAFFOLD_ROOT := $(dir $(abspath $(firstword $(MAKEFILE_LIST))))
 include $(SCAFFOLD_ROOT).scaffold-profile
 UV_IMAGE ?= ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
-SCAFFOLD_BACKUP_PROFILE ?= none
+SCAFFOLD_BACKUP_PROFILE ?= immutable-backup
 CI_BACKUP_PROFILES ?= immutable-backup
 PROD_ENV_FILE ?= deploy/.env.prod
 PROD_APPLICATION_SERVICE ?= backend
@@ -79,7 +79,7 @@ FEATURED := 'up down restart logs verify smoke up-prod smoke-prod help help-verb
 .PHONY: help
 help: ## Show this help.
 	@FEATURED=$(FEATURED); \
-	ALL="$$(grep -E '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST))"; \
+	ALL="$$(grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST))"; \
 	printf "Make targets:\n\n"; \
 	printf "  \033[1mFeatured\033[0m\n"; \
 	for t in $$FEATURED; do \
@@ -90,7 +90,7 @@ help: ## Show this help.
 .PHONY: help-verbose
 help-verbose: ## Show full help (featured + everything else)
 	@FEATURED=$(FEATURED); \
-	ALL="$$(grep -E '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST))"; \
+	ALL="$$(grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST))"; \
 	printf "Make targets:\n\n"; \
 	printf "  \033[1mFeatured\033[0m\n"; \
 	for t in $$FEATURED; do \
@@ -173,8 +173,7 @@ ci: up be.wait be.ci fe.ci smoke
 .PHONY: bootstrap-prod
 bootstrap-prod: prepare-prod ## Prepare inputs and start the production stack
 	# Bring up stack, run migrations, and smoke test
-	$(COMPOSE_PROD) up -d --build
-	$(COMPOSE_PROD) up -d --no-deps --force-recreate nginx
+	$(MAKE) up-prod
 	$(COMPOSE_PROD) run --rm backend bash -lc "cd /app && python -m app.manage migrate"
 	$(MAKE) smoke-prod HOST_INGRESS=$(HOST_INGRESS) \
 		HOST_INGRESS_HOST=$(HOST_INGRESS_HOST) HOST_INGRESS_PORT=$(HOST_INGRESS_PORT)
@@ -541,11 +540,17 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 LOCAL_TLS ?= 0
+up-prod: prepare-prod
+
 .PHONY: prepare-prod
 prepare-prod: ## Prepare and validate private production inputs without starting services
 	@PROD_ENV_FILE="$(PROD_ENV_FILE)" bash "$(SCAFFOLD_ROOT)deploy/setup-env.sh"
 	@set -o pipefail; prepare_interactive=0; \
 		if [ -t 0 ]; then prepare_interactive=1; fi; \
+		if [ "$(SCAFFOLD_BACKUP_PROFILE)" != "none" ]; then \
+			PREPARE_INTERACTIVE=$$prepare_interactive PROD_ENV_FILE="$(PROD_ENV_FILE)" \
+			python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" --backup-path || exit 1; \
+		fi; \
 		$(PROD_CONFIG) config --format json 2>/dev/null | \
 		PREPARE_INTERACTIVE=$$prepare_interactive PROD_ENV_FILE="$(PROD_ENV_FILE)" HOST_INGRESS="$(HOST_INGRESS)" HOST_INGRESS_HOST="$(PREPARE_PUBLIC_HOST)" \
 		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" "$(PROD_APPLICATION_SERVICE)"
