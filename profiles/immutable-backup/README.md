@@ -39,8 +39,11 @@ Values already supplied there, in the environment, or as Make arguments are
 honored; unattended preparation requires the path upfront.
 Local backups alone do not survive loss of the host.
 
-For persistent unattended inputs, add these non-secret settings to
-`deploy/.env.prod` (or the file selected by `PROD_ENV_FILE`):
+Interactive `make prepare-prod` saves the selected path and default namespaced
+group, resolves its GID, and validates/prepares directory permissions. No manual
+env-file edit is required for that flow.
+For persistent unattended inputs or explicit overrides, add these non-secret
+settings to `deploy/.env.prod` (or the file selected by `PROD_ENV_FILE`):
 
 ```dotenv
 BACKUP_LOCAL_PATH="/absolute/host/backups/cuplr"
