@@ -48,6 +48,7 @@ jobs:
         run: >-
           make up-prod smoke-prod
           BACKUP_LOCAL_PATH="$PWD/.tmp/server-rendered-backups"
+          BACKUP_PUBLICATION_PATH="$PWD/.tmp/server-rendered-publication"
           BACKUP_PASSWORD=production-simulation-only
 
       - name: Exercise the server-rendered immutable-release contract

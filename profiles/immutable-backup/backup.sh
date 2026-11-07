@@ -17,6 +17,11 @@ readonly BACKUP_STATUS_DIR="${BACKUP_STATUS_DIR:-/backup-status}"
 VERIFICATION_DB=""
 RESTORE_FILE=""
 
+share_new_repository() {
+  find "$1" -mindepth 1 -type f -exec chmod g+r '{}' + || return
+  find "$1" -mindepth 1 -type d -exec chmod 2770 '{}' +
+}
+
 record_success() {
   local marker="$1"
   record_timestamp "${marker}" "$(date -u +%s)"
@@ -64,11 +69,19 @@ inspect_repository() {
 }
 
 initialize_repository() {
+  if [[ "${RESTIC_REPOSITORY}" -ef /publication ]]; then
+    echo "Working and publication repositories must be separate." >&2
+    return 1
+  fi
   if open_repository; then
     return
   fi
   echo "No readable backup repository was found; attempting first-time initialization." >&2
-  if ! restic init; then
+  local init_options=()
+  if [[ -f /publication/config ]]; then
+    init_options=(--from-repo /publication --copy-chunker-params)
+  fi
+  if ! RESTIC_FROM_PASSWORD="${RESTIC_PASSWORD}" restic init "${init_options[@]}"; then
     echo "Backup repository initialization failed." >&2
     echo "If the repository already exists, check RESTIC_PASSWORD," >&2
     echo "RESTIC_REPOSITORY, and the provider credentials." >&2
@@ -77,8 +90,7 @@ initialize_repository() {
   if [[ "${RESTIC_REPOSITORY}" == "/backups" ]]; then
     # Restic uses group-read access on config to keep future objects shared.
     # Only adjust objects from this first initialization, never an existing repo.
-    find /backups -mindepth 1 -type f -exec chmod g+r '{}' +
-    find /backups -mindepth 1 -type d -exec chmod 2770 '{}' +
+    share_new_repository /backups
   fi
 }
 
@@ -107,8 +119,28 @@ require_repository() {
   fi
 }
 
+copy_repository() (
+  require_repository
+  if [[ "${RESTIC_REPOSITORY}" -ef /publication ]]; then
+    echo "Source and publication repositories must be separate." >&2
+    exit 1
+  fi
+  if [[ ! -f /publication/config ]]; then
+    if [[ -n "$(find /publication -mindepth 1 -print -quit)" ]]; then
+      echo "Refusing to initialize a nonempty publication directory." >&2
+      exit 1
+    fi
+    RESTIC_FROM_PASSWORD="${RESTIC_PASSWORD}" restic -r /publication init \
+      --from-repo "${RESTIC_REPOSITORY}" --copy-chunker-params || exit
+    share_new_repository /publication || exit
+  fi
+  RESTIC_FROM_PASSWORD="${RESTIC_PASSWORD}" restic -r /publication copy \
+    --from-repo "${RESTIC_REPOSITORY}" --host "${BACKUP_HOST}" --tag "${BACKUP_TAG}" || exit
+  restic -r /publication check
+)
+
 backup_once() {
-  initialize_repository
+  initialize_repository || return
 
   pg_dump \
     --host "${PGHOST}" \
@@ -121,7 +153,7 @@ backup_once() {
         --stdin \
         --stdin-filename "${BACKUP_FILENAME}" \
         --host "${BACKUP_HOST}" \
-        --tag "${BACKUP_TAG}"
+        --tag "${BACKUP_TAG}" || return
 
   restic forget \
     --host "${BACKUP_HOST}" \
@@ -129,8 +161,9 @@ backup_once() {
     --keep-daily "${BACKUP_KEEP_DAILY:-7}" \
     --keep-weekly "${BACKUP_KEEP_WEEKLY:-4}" \
     --keep-monthly "${BACKUP_KEEP_MONTHLY:-6}" \
-    --prune
-  restic check
+    --prune || return
+  restic check || return
+  copy_repository || return
   record_latest_snapshot
 }
 

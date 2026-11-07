@@ -65,6 +65,7 @@ def _prompted_prepare(
         os.execvp(command[0], command)
     output = b""
     responses = {b"BACKUP_PASSWORD: ": value}
+    responses[b"BACKUP_PUBLICATION_PATH"] = str(directory / "publication")
     if backup_path is not None:
         responses[b"BACKUP_LOCAL_PATH"] = backup_path
     ownership_cancelled = False
@@ -299,6 +300,7 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
         f"RELEASE_REVISION={revision}",
         f"BACKUP_IMAGE=local/dev-scaffold-backup:{revision}",
         f"BACKUP_LOCAL_PATH={tmp_path}/repository",
+        f"BACKUP_PUBLICATION_PATH={tmp_path}/publication",
         f"BACKUP_GROUP={grp.getgrgid(os.getgid()).gr_name}",
         f"BACKUP_RUNTIME_GID={os.getgid()}",
         "DOCKER_HOST=unix:///nonexistent",
@@ -385,6 +387,7 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
             "COMPOSE_PROJECT_NAME": "dev-scaffold",
             "BACKUP_IMAGE": f"local/dev-scaffold-backup:{revision}",
             "BACKUP_LOCAL_PATH": str(tmp_path / "repository"),
+            "BACKUP_PUBLICATION_PATH": str(tmp_path / "publication"),
             "BACKUP_RUNTIME_GID": str(os.getgid()),
             "RELEASE_BACKEND_IMAGE": f"local/dev-scaffold-backend:{revision}",
             "RELEASE_WEB_IMAGE": f"local/dev-scaffold-web:{revision}",
@@ -475,6 +478,43 @@ def test_preparation_accepts_suggested_host_directory(
     assert suggested.stat().st_uid == os.getuid()
     assert suggested.stat().st_mode & 0o7777 == 0o2770
     assert not (tmp_path / "deploy/backups").exists()
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Needs the Docker Compose client")
+@pytest.mark.parametrize("destination", ["same", "child", "parent"])
+def test_publication_paths_are_rejected_before_storage_changes(
+    tmp_path: Path, destination: str
+) -> None:
+    revision = _production_checkout(tmp_path)
+    source = tmp_path / "source"
+    source.mkdir()
+    marker = source / "existing-data"
+    marker.write_text("preserve")
+    original = source.stat()
+    publication = {"same": source, "child": source / "publication", "parent": tmp_path}[destination]
+    result = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "-f",
+            str(_repo_root() / "Makefile"),
+            f"RELEASE_REVISION={revision}",
+            f"BACKUP_LOCAL_PATH={source}",
+            f"BACKUP_PUBLICATION_PATH={publication}",
+            "DOCKER_HOST=unix:///nonexistent",
+            "prepare-prod",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+    )
+    assert result.returncode != 0
+    assert "separate, non-nested directories" in result.stderr
+    assert source.stat().st_mode == original.st_mode
+    assert (source.stat().st_uid, source.stat().st_gid) == (original.st_uid, original.st_gid)
+    assert marker.read_text() == "preserve"
+    assert not (source / "publication").exists()
 
 
 @pytest.mark.parametrize(

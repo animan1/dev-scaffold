@@ -107,6 +107,34 @@ def test_backup_is_custom_format_and_validated_before_success() -> None:
     assert "pg_dump" in backup
     assert "--format custom" in backup
     assert backup.index("restic check") < backup.index("record_latest_snapshot")
+    assert (
+        backup.index("--prune")
+        < backup.index("copy_repository")
+        < backup.index("record_latest_snapshot")
+    )
+
+
+def test_copy_failure_is_not_hidden_by_the_scheduled_conditional(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    _fake_backup_commands(fake_bin)
+    dump = fake_bin / "pg_dump"
+    dump.write_text("#!/bin/sh\nexit 0\n")
+    dump.chmod(0o755)
+    script = _script().split('case "${1:-watch}" in', 1)[0]
+    script += """
+initialize_repository() { return 0; }
+copy_repository() { return 23; }
+record_latest_snapshot() { touch "${BACKUP_STATUS_DIR}/unexpected-success"; }
+if backup_once; then exit 99; else test "$?" = 23; fi
+test ! -e "${BACKUP_STATUS_DIR}/unexpected-success"
+"""
+    result = subprocess.run(
+        ["bash", "-c", script],
+        env=_verification_environment(fake_bin, tmp_path),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_verification_uses_and_removes_an_isolated_database() -> None:

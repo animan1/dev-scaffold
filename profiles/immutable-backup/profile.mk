@@ -25,6 +25,9 @@ endif
 ifneq ($(origin BACKUP_GROUP),undefined)
 export BACKUP_GROUP
 endif
+ifneq ($(origin BACKUP_PUBLICATION_PATH),undefined)
+export BACKUP_PUBLICATION_PATH
+endif
 
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 PROD_COMPOSE_FILES += -f $(BACKUP_COMPOSE_FILE)
@@ -49,6 +52,7 @@ up-prod: build-backup-image
 BACKUP_COMPOSE_CONTRACT = COMPOSE_PROJECT_NAME=$(BACKUP_COMPOSE_CONTRACT_PROJECT) \
 	PROD_ENV_FILE=$(BACKUP_COMPOSE_CONTRACT_ENV_FILE) \
 	BACKUP_LOCAL_PATH=$(BACKUP_EXERCISE_ROOT)/repository \
+	BACKUP_PUBLICATION_PATH=$(BACKUP_EXERCISE_ROOT)/publication \
 	BACKUP_RUNTIME_GID=$(shell id -g) \
 	RELEASE_BACKEND_IMAGE=local/backup-contract-backend:test \
 	RELEASE_WEB_IMAGE=local/backup-contract-web:test \
@@ -60,6 +64,7 @@ BACKUP_COMPOSE_CONTRACT = COMPOSE_PROJECT_NAME=$(BACKUP_COMPOSE_CONTRACT_PROJECT
 BACKUP_RUN = $(BACKUP_COMPOSE) run --rm --no-deps $(BACKUP_SERVICE)
 BACKUP_EXERCISE_COMPOSE = COMPOSE_PROJECT_NAME=$(BACKUP_EXERCISE_PROJECT) \
 	BACKUP_IMAGE=$(BACKUP_IMAGE) BACKUP_LOCAL_PATH=$(BACKUP_EXERCISE_ROOT)/repository \
+	BACKUP_PUBLICATION_PATH=$(BACKUP_EXERCISE_ROOT)/publication \
 	BACKUP_RUNTIME_GID=$(shell id -g) \
 	BACKUP_POSTGRES_IMAGE=$(BACKUP_POSTGRES_IMAGE) BACKUP_REPOSITORY=/backups \
 	BACKUP_PASSWORD=exercise-only POSTGRES_DB=backup_exercise \
@@ -98,14 +103,10 @@ verify-backup-image: build-backup-image ## Verify the exact backup image tool an
 		&& test -x /usr/local/bin/scaffold-backup \
 		&& test -s /etc/ssl/certs/ca-certificates.crt'
 	docker run --rm --user 0:0 --entrypoint bash \
+		-v "$(SCAFFOLD_ROOT)profiles/immutable-backup/verify-image.sh:/tmp/verify-image.sh:ro" \
 		-e POSTGRES_USER=check -e POSTGRES_DB=check -e POSTGRES_PASSWORD=check \
 		-e RESTIC_PASSWORD=check -e RESTIC_REPOSITORY=/backups $(BACKUP_IMAGE) -ec \
-		'mkdir /backups; chown 10002:10001 /backups; chmod 2770 /backups; \
-		sed "/^case /,\$$d" /usr/local/bin/scaffold-backup > /tmp/backup-functions; \
-		runuser -u scaffold-backup -- bash -ec "source /tmp/backup-functions; \
-		initialize_repository; printf shared | restic backup --stdin --stdin-filename access-check"; \
-		test "$$(stat -c %u /backups)" = 10002; \
-		setpriv --reuid=10002 --regid=10001 --clear-groups restic --no-cache snapshots >/dev/null'
+		'bash /tmp/verify-image.sh'
 
 .PHONY: prepare-backup-compose-contract
 prepare-backup-compose-contract:
@@ -127,7 +128,7 @@ verify-backup-compose: build-backup-image prepare-backup-compose-contract ## Val
 
 .PHONY: prepare-backup-exercise
 prepare-backup-exercise: build-backup-image
-	@install -d -g $(shell id -g) -m 2770 $(BACKUP_EXERCISE_ROOT)/repository
+	@install -d -g $(shell id -g) -m 2770 $(BACKUP_EXERCISE_ROOT)/repository $(BACKUP_EXERCISE_ROOT)/publication
 	$(BACKUP_EXERCISE_COMPOSE) down -v --remove-orphans
 	$(BACKUP_EXERCISE_COMPOSE) run --rm --no-deps backup-init
 	$(BACKUP_EXERCISE_COMPOSE) run --rm --no-deps --user 0:0 \

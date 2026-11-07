@@ -47,19 +47,57 @@ settings to `deploy/.env.prod` (or the file selected by `PROD_ENV_FILE`):
 
 ```dotenv
 BACKUP_LOCAL_PATH="/absolute/host/backups/cuplr"
+BACKUP_PUBLICATION_PATH="/absolute/host/publication/cuplr"
 BACKUP_GROUP="cuplr-backup"
 ```
 
 Alternatively supply Make arguments, for example
-`make prepare-prod BACKUP_LOCAL_PATH=/absolute/host/backups/cuplr BACKUP_GROUP=cuplr-backup`,
+
+```sh
+make prepare-prod BACKUP_LOCAL_PATH=/absolute/host/backups/cuplr \
+  BACKUP_PUBLICATION_PATH=/absolute/host/publication/cuplr BACKUP_GROUP=cuplr-backup
+```
+
 or export those variables in the shell before running Make.
 
-The worker mounts `BACKUP_LOCAL_PATH` at `/backups` for the default encrypted
-Restic repository (`BACKUP_REPOSITORY=/backups`). The same capture, validation,
+The worker mounts `BACKUP_LOCAL_PATH` at `/backups` for the working encrypted
+Restic repository (`BACKUP_REPOSITORY=/backups`), and `BACKUP_PUBLICATION_PATH` at
+`/publication` for its independent publication repository. Preparation prompts
+for the latter when absent, suggesting a sibling of the working directory; the
+two paths must be separate and non-nested. The same capture, validation,
 and restore commands work on a laptop or server. Host tooling owns off-host
 publication and its credentials; the scaffold does not configure a provider,
 mount host transport credentials, or prepare an rclone directory. Off-host
 publication is not automated by this workflow.
+
+After each source backup is pruned and checked, the container runs native
+`restic copy` into the publication repository and checks that repository before
+reporting success. The first copy initializes it with the source chunker settings
+and the existing `BACKUP_PASSWORD`; no new recovery secret is introduced. Repeated
+copies skip snapshots already copied. Publication snapshots survive source
+pruning; this workflow never forgets or prunes publication history.
+
+Infra consumes only the publication directory's native files, excluding Restic's
+runtime `locks/` directory, and owns transfer timing/coordination. No host-installed
+Restic, transport credentials in the container, or additional completion protocol
+is required. `make backup-prod` waits for the complete containerized backup/copy
+cycle; the scheduled worker performs the same cycle. Copy failure fails that
+cycle. Publication snapshot IDs can differ from source IDs; after retrieval,
+select IDs from the retrieved repository with the normal snapshot/restore tools.
+Map only `BACKUP_PUBLICATION_PATH` into host transport; keep the working
+`BACKUP_LOCAL_PATH` outside that transported tree. Existing repositories are not
+moved or remapped automatically.
+
+The [infra backup transport boundary](https://github.com/animan1/cranescastle-infra/blob/main/docs/backup-transport.md)
+defines publication/retrieval ownership and transfer verification. Its capture
+metadata is optional; this profile hands off the native publication repository.
+
+If the existing repository is already in infra's transported directory, retain
+it as `BACKUP_PUBLICATION_PATH` and select new private working storage before
+restarting the worker with this version. A new working repository adopts the
+existing publication repository's chunker settings; its historical snapshots
+stay in place. Stop the old worker before changing these mappings so it cannot
+continue pruning the publication directory.
 
 When selected, the normal `make verify` contract includes exact backup-image
 verification. The component-maintenance and focused exercise commands are:

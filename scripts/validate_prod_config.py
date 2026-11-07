@@ -104,9 +104,9 @@ def validate_ingress(config, application):
         raise ConfigurationError("Invalid host-ingress configuration") from None
 
 
-def validate_backup_path(value):
+def validate_backup_path(value, name="BACKUP_LOCAL_PATH"):
     if not Path(value).is_absolute() or "\n" in value or "\r" in value:
-        raise ConfigurationError("BACKUP_LOCAL_PATH must be an absolute host directory")
+        raise ConfigurationError(f"{name} must be an absolute host directory")
 
 
 def run_host_command(command, privileged=False):
@@ -212,7 +212,7 @@ def prompt_backup_input(name, secret=True, default=None):
     try:
         if secret:
             value = getpass.getpass(f"{name}: ")
-        elif name == "BACKUP_LOCAL_PATH":
+        elif name in ("BACKUP_LOCAL_PATH", "BACKUP_PUBLICATION_PATH"):
             value = read_backup_path(name, default)
         else:
             value = input(f"{name} [{default}]: ") or default or ""
@@ -220,8 +220,8 @@ def prompt_backup_input(name, secret=True, default=None):
         raise ConfigurationError(f"Unable to read {name} from the terminal") from None
     if not value.strip():
         raise ConfigurationError(f"{name} cannot be empty")
-    if name == "BACKUP_LOCAL_PATH":
-        validate_backup_path(value)
+    if name in ("BACKUP_LOCAL_PATH", "BACKUP_PUBLICATION_PATH"):
+        validate_backup_path(value, name)
     save_backup_input(name, value)
     return value
 
@@ -273,6 +273,20 @@ def prepare_backup_path():
         default = Path.home() / ".local/share" / Path.cwd().name / "backups"
         value = prompt_backup_input(
             "BACKUP_LOCAL_PATH", secret=False, default=str(default)
+        )
+    publication = values.get("BACKUP_PUBLICATION_PATH", "")
+    if not publication.strip():
+        default = str(Path(value).with_name(Path(value).name + "-publication"))
+        publication = prompt_backup_input(
+            "BACKUP_PUBLICATION_PATH", secret=False, default=default
+        )
+    validate_backup_path(publication, "BACKUP_PUBLICATION_PATH")
+    source = Path(value).resolve()
+    destination = Path(publication).resolve()
+    same = source.exists() and destination.exists() and source.samefile(destination)
+    if source.is_relative_to(destination) or destination.is_relative_to(source) or same:
+        raise ConfigurationError(
+            "Source and publication repositories must be separate, non-nested directories"
         )
     prepare_backup_group(values)
 
@@ -336,7 +350,10 @@ def prepare_backup_paths(config):
             raise ConfigurationError("Backup paths require a dedicated service UID:GID")
         changes = []
         for mount in services["backup"].get("volumes", []):
-            if mount.get("type") != "bind" or mount["target"] != "/backups":
+            if mount.get("type") != "bind" or mount["target"] not in (
+                "/backups",
+                "/publication",
+            ):
                 continue
             path = Path(mount["source"].replace("$$", "$"))
             if path.is_symlink() or Path.cwd().is_relative_to(path):
