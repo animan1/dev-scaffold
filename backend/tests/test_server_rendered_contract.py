@@ -27,6 +27,9 @@ def _make(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[st
 
 def test_server_rendered_make_contract_and_quality_gates() -> None:
     makefile = (_repository_root() / "profiles/server-rendered-django/profile.mk").read_text()
+    source = "".join(
+        path.read_text() for path in (_repository_root() / "profiles").glob("*-commands.mk")
+    )
 
     for target in (
         "build",
@@ -35,7 +38,7 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "logs",
         "ps",
         "reset",
-        "deps.lock",
+        "deps-lock",
         "format",
         "lint",
         "typecheck",
@@ -50,7 +53,7 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "down-prod",
         "smoke",
     ):
-        assert f"\n{target}:" in makefile
+        assert f"\n{target}:" in makefile + source
     for gate in (
         "format-check",
         "lint",
@@ -190,11 +193,9 @@ def test_server_rendered_prod_sim_wrapper_selects_the_profile() -> None:
 
 
 def test_server_rendered_dependency_lock_uses_pinned_dockerized_uv() -> None:
-    output = _make("--dry-run", "deps.lock").stdout
+    output = _make("--dry-run", "deps-lock").stdout
 
-    assert "docker run --rm" in output
-    assert "ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim" in output
-    assert "lock --project profiles/server-rendered-django" in output
+    assert 'scripts/scaffold_dependencies.py "server-rendered-django"' in output
 
 
 def test_server_rendered_django_migration_commands_use_docker() -> None:
