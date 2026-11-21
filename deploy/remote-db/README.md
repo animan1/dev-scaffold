@@ -9,8 +9,9 @@ network, without publishing a host port.
 
 In a derived application's committed `.scaffold-profile`, set
 `REMOTE_DB_TUNNEL ?= 1`. The base Makefile selects the shared tunnel and the
-committed dependency overlay for the known application service (`backend` or
-`app`). This is project topology, configured once and committed with the project;
+shared `consumer.compose.yml` settings through a service-name adapter (`backend`
+or `app`). The shared definition does not create another runtime service.
+This is project topology, configured once and committed with the project;
 no `.local` Make settings or copied Compose files are required.
 
 Host-specific SSH endpoints and key paths belong in private env files. The

@@ -180,6 +180,7 @@ def test_project_setting_drives_bare_commands(tmp_path: Path, enabled: bool, pro
     )
     assert result.returncode == 0, result.stderr
     services = json.loads(result.stdout)["services"]
+    assert "consumer" not in services  # extends must not add another runtime service
     assert ("remote-db-tunnel" in services) is enabled
     app = services["backend" if profile == "react-vite" else "app"]
     if enabled:

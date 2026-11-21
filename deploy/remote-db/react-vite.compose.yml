@@ -1,7 +1,5 @@
 services:
   backend:
-    environment:
-      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL for the remote database}
-    depends_on:
-      remote-db-tunnel:
-        condition: service_healthy
+    extends:
+      file: ${REMOTE_DB_BUILD_CONTEXT:?Set REMOTE_DB_BUILD_CONTEXT}/deploy/remote-db/consumer.compose.yml
+      service: consumer
