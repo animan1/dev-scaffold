@@ -260,21 +260,13 @@ admin checks from the root Makefile. Keep the child's hostnames, loopback ports,
 Compose identity, release registry, CSP additions, and application-specific
 promotion or backup checks in the child. Server-rendered children already use
 their profile-owned Nginx release topology and should retain that boundary.
-### Optional remote production database for laptop staging
 
-Projects that deliberately exercise laptop-hosted staging against a remotely
-hosted production PostgreSQL database can adopt the
-[`remote-production-db` profile](profiles/remote-production-db/README.md). It
-publishes PostgreSQL only on the production host's loopback interface and uses
-a Compose-managed SSH tunnel to make that socket available inside the laptop's
-staging network. Production has no dependency on the laptop or tunnel.
+### Optional remote database
 
-The profile does not deploy releases or run migrations. Its documentation
-describes the required SSH restrictions, operator Make targets, production-facing
-verification, and the substantial compatibility and data-safety limitations of
-running newer staging code against live production data. Cuplr-specific import
-steps are recorded separately in
-[`docs/cuplr-remote-staging-database.md`](docs/cuplr-remote-staging-database.md).
+The [remote database configuration](deploy/remote-db/README.md) adds a shared
+SSH tunnel container to an existing Compose stack. It supports any remote
+PostgreSQL database, independent of environment. Use the application's existing
+lifecycle commands; no additional Make profile or tunnel targets are required.
 
 ### Optional operational and dead-man monitoring
 
