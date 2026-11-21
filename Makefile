@@ -560,7 +560,7 @@ prepare-prod: ## Prepare and validate private production inputs without starting
 			PREPARE_INTERACTIVE=$$prepare_interactive PROD_ENV_FILE="$(PROD_ENV_FILE)" \
 			python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" --backup-path || exit 1; \
 		fi; \
-		PREPARE_INTERACTIVE=$$prepare_interactive PROD_ENV_FILE="$(PROD_ENV_FILE)" HOST_INGRESS="$(HOST_INGRESS)" HOST_INGRESS_HOST="$(PREPARE_PUBLIC_HOST)" \
+		PREPARE_INTERACTIVE=$$prepare_interactive REMOTE_DB_TUNNEL="$(REMOTE_DB_TUNNEL)" PROD_ENV_FILE="$(PROD_ENV_FILE)" HOST_INGRESS="$(HOST_INGRESS)" HOST_INGRESS_HOST="$(PREPARE_PUBLIC_HOST)" \
 		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" --compose "$(PROD_APPLICATION_SERVICE)" \
 		$(PROD_CONFIG) config --format json
 	# Self-signed certificate renewal is explicitly local-only.

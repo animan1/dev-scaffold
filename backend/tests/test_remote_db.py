@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from test_host_ingress import _prompted_prepare
 
 ROOT = next(
     path
@@ -203,6 +204,8 @@ def test_prepare_checks_compose_inputs_without_logging_values(
     tmp_path: Path, missing: str | None
 ) -> None:
     environment = _project_checkout(tmp_path, True, "react-vite")
+    (tmp_path / "identity").write_text("existing identity")
+    (tmp_path / "known_hosts").write_text("existing host keys")
     private = tmp_path / "deploy/.env.prod"
     private.write_text(
         private.read_text()
@@ -219,11 +222,68 @@ def test_prepare_checks_compose_inputs_without_logging_values(
     output = result.stdout + result.stderr
     if missing:
         assert result.returncode != 0
-        assert f"Missing required production input: {missing}" in output
+        assert f"Missing or invalid required production input: {missing}" in output
     else:
         assert result.returncode == 0, output
         assert "Production application/database inputs valid" in output
     assert "do-not-log-this" not in output
     assert "Invalid production configuration" not in output
-    assert not (tmp_path / "identity").exists()
-    assert not (tmp_path / "known_hosts").exists()
+    assert (tmp_path / "identity").read_text() == "existing identity"
+    assert (tmp_path / "known_hosts").read_text() == "existing host keys"
+
+
+@pytest.mark.parametrize("mode", ["interactive", "abort", "unattended"])
+def test_fresh_remote_production_setup(tmp_path: Path, mode: str) -> None:
+    environment = _project_checkout(tmp_path, True, "react-vite")
+    private = tmp_path / "deploy/.env.prod"
+    private.unlink()
+    (tmp_path / "identity").write_text("existing identity")
+    (tmp_path / "known_hosts").write_text("existing host keys")
+    command = ["make", "--no-print-directory", "prepare-prod"]
+    secret_url = "postgresql://operator:private-password@remote-db-tunnel:5432/remote"
+    if mode == "unattended":
+        result = subprocess.run(
+            command,
+            cwd=tmp_path,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "REMOTE_DB_SSH_HOST" in result.stderr
+        return
+    # The shared terminal helper execs the real Make target; no services are started.
+    code, output = _prompted_prepare(
+        command,
+        tmp_path,
+        "unused",
+        environment=environment,
+        extra_responses={
+            b"REMOTE_DB_SSH_HOST: ": "\x03" if mode == "abort" else "-invalid\ndb.example.com",
+            b"REMOTE_DB_SSH_USER: ": "operator",
+            b"REMOTE_DB_SSH_IDENTITY_FILE: ": str(tmp_path / "identity"),
+            b"REMOTE_DB_SSH_KNOWN_HOSTS_FILE: ": str(tmp_path / "known_hosts"),
+            b"DATABASE_URL: ": secret_url,
+        },
+    )
+    if mode == "abort":
+        assert code != 0
+        return
+    assert code == 0, output
+    assert "Production application/database inputs valid" in output
+    assert "Invalid REMOTE_DB_SSH_HOST" in output
+    assert "private-password" not in output
+    assert secret_url in private.read_text()
+    assert private.stat().st_mode & 0o777 == 0o600
+    original = private.read_bytes()
+    rerun = subprocess.run(
+        command,
+        cwd=tmp_path,
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+    )
+    assert rerun.returncode == 0, rerun.stdout + rerun.stderr
+    assert private.read_bytes() == original

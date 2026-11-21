@@ -17,14 +17,19 @@ no `.local` Make settings or copied Compose files are required.
 Host-specific SSH endpoints and key paths belong in private env files. The
 inactive defaults in [`backend/.env.example`](../../backend/.env.example) do not
 affect ordinary local databases while `REMOTE_DB_TUNNEL` is `0` (the default).
-When enabled, fill in the blank SSH inputs and set `DATABASE_URL` to the selected
-database's credentials/name at `remote-db-tunnel:5432`. `REMOTE_DB_SSH_PORT`
+When enabled, interactive `make prepare-prod` prompts for missing/invalid SSH
+inputs and a `DATABASE_URL` using `remote-db-tunnel:5432`. It saves the selections
+privately, hides the URL while entering credentials, and retries invalid entries
+until valid or aborted. Key and known-hosts paths must be existing readable files.
+Unattended setup requires these inputs upfront and fails by field name otherwise.
+`REMOTE_DB_SSH_PORT`
 defaults to `22`; `REMOTE_DB_HOST` and `REMOTE_DB_PORT` default to
 `127.0.0.1:15432`, as seen from the SSH server. The Makefile supplies the checkout
-build context. Missing required inputs fail before starting containers.
+build context. Preparation never starts containers or contacts the remote database.
 
-For the default React/Vite production workflow, put those host inputs in
-`deploy/.env.prod` (keep existing application settings), then use bare commands:
+For the default React/Vite production workflow, preparation creates a missing
+`deploy/.env.prod` and collects the required host inputs (preserving existing
+application settings). Use bare commands:
 
 ```sh
 make prepare-prod

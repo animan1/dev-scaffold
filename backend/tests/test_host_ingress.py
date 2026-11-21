@@ -55,6 +55,8 @@ def _prompted_prepare(
     value: str,
     redirect_input: bool = False,
     backup_path: str | None = None,
+    extra_responses: dict[bytes, str] | None = None,
+    environment: dict[str, str] | None = None,
 ) -> tuple[int, str]:
     process, terminal = pty.fork()
     if process == 0:
@@ -62,12 +64,13 @@ def _prompted_prepare(
         if redirect_input:
             with open(os.devnull) as empty:
                 os.dup2(empty.fileno(), 0)
-        os.execvp(command[0], command)
+        os.execvpe(command[0], command, environment if environment is not None else os.environ)
     output = b""
     responses = {b"BACKUP_PASSWORD: ": value}
     responses[b"BACKUP_PUBLICATION_PATH"] = str(directory / "publication")
     if backup_path is not None:
         responses[b"BACKUP_LOCAL_PATH"] = backup_path
+    responses.update(extra_responses or {})
     ownership_cancelled = False
     try:
         while True:
