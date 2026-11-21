@@ -560,9 +560,9 @@ prepare-prod: ## Prepare and validate private production inputs without starting
 			PREPARE_INTERACTIVE=$$prepare_interactive PROD_ENV_FILE="$(PROD_ENV_FILE)" \
 			python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" --backup-path || exit 1; \
 		fi; \
-		$(PROD_CONFIG) config --format json 2>/dev/null | \
 		PREPARE_INTERACTIVE=$$prepare_interactive PROD_ENV_FILE="$(PROD_ENV_FILE)" HOST_INGRESS="$(HOST_INGRESS)" HOST_INGRESS_HOST="$(PREPARE_PUBLIC_HOST)" \
-		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" "$(PROD_APPLICATION_SERVICE)"
+		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" --compose "$(PROD_APPLICATION_SERVICE)" \
+		$(PROD_CONFIG) config --format json
 	# Self-signed certificate renewal is explicitly local-only.
 	@if [ "$(HOST_INGRESS)" = "1" ]; then \
 		echo "Host ingress owns TLS; skipping application certificate generation"; \

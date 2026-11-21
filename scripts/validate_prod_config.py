@@ -409,13 +409,47 @@ def prepare_backup_paths(config):
         ) from None
 
 
+def read_compose_config(command):
+    environment = os.environ.copy()
+    while command and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", command[0]):
+        name, value = command.pop(0).split("=", 1)
+        environment[name] = value
+    try:
+        result = subprocess.run(
+            command, env=environment, capture_output=True, text=True
+        )
+    except OSError:
+        raise ConfigurationError(
+            "Unable to run production Compose configuration check"
+        ) from None
+    if result.returncode:
+        missing = re.search(
+            r"required variable ([A-Za-z_][A-Za-z0-9_]*) is missing", result.stderr
+        )
+        if missing:
+            raise ConfigurationError(
+                f"Missing required production input: {missing[1]}; "
+                "set it in the private production env file"
+            )
+        raise ConfigurationError(
+            "Unable to resolve production Compose configuration; "
+            "check Compose files and required private inputs (values hidden)"
+        )
+    return json.loads(result.stdout)
+
+
 if __name__ == "__main__":
     try:
         if sys.argv[1:] == ["--backup-path"]:
             prepare_backup_path()
             sys.exit(0)
-        config = json.load(sys.stdin)
-        validate(config, sys.argv[1] if len(sys.argv) > 1 else "backend")
+        if sys.argv[1:2] == ["--compose"]:
+            config = read_compose_config(sys.argv[3:])
+            application = sys.argv[2]
+        else:
+            config = json.load(sys.stdin)
+            application = sys.argv[1] if len(sys.argv) > 1 else "backend"
+        validate(config, application)
         prepare_backup_paths(config)
     except ConfigurationError as error:
         sys.exit(str(error))

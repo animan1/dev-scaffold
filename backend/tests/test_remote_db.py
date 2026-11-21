@@ -111,9 +111,7 @@ def test_tunnel_keeps_strict_ssh_checks() -> None:
         assert option in script
 
 
-@pytest.mark.parametrize("enabled", [False, True])
-@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
-def test_project_setting_drives_bare_commands(tmp_path: Path, enabled: bool, profile: str) -> None:
+def _project_checkout(tmp_path: Path, enabled: bool, profile: str) -> dict[str, str]:
     if not shutil.which("docker"):
         pytest.skip("Docker CLI required for Compose configuration validation")
     shutil.copyfile(ROOT / "Makefile", tmp_path / "Makefile")
@@ -122,14 +120,16 @@ def test_project_setting_drives_bare_commands(tmp_path: Path, enabled: bool, pro
         "SCAFFOLD_BACKUP_PROFILE := none\n"
     )
     (tmp_path / "profiles").symlink_to(ROOT / "profiles", target_is_directory=True)
+    (tmp_path / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
     deploy = tmp_path / "deploy"
     deploy.mkdir()
-    for name in ("docker-compose.prod.yml", "docker-compose.host-ingress.yml"):
+    for name in ("docker-compose.prod.yml", "docker-compose.host-ingress.yml", "setup-env.sh"):
         shutil.copyfile(ROOT / "deploy" / name, deploy / name)
     shutil.copytree(TUNNEL, deploy / "remote-db")
     backend_path = tmp_path / "backend"
     backend_path.mkdir()
     settings = (ROOT / "backend/.env.example").read_text()
+    settings += "POSTGRES_USER=postgres\nPOSTGRES_PASSWORD=postgres\nPOSTGRES_DB=app\n"
     if enabled:
         settings += (
             "REMOTE_DB_SSH_HOST=db.example.com\nREMOTE_DB_SSH_USER=operator\n"
@@ -145,6 +145,13 @@ def test_project_setting_drives_bare_commands(tmp_path: Path, enabled: bool, pro
         "GIT_COMMON_DIR": str(ROOT / ".git"),
         "PROJECT_NAME": "dev-scaffold",
     }
+    return environment
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+def test_project_setting_drives_bare_commands(tmp_path: Path, enabled: bool, profile: str) -> None:
+    environment = _project_checkout(tmp_path, enabled, profile)
     command = ["make", "--no-print-directory", "-n"]
     targets = ("logs-prod", "down-prod") if profile == "react-vite" else ("logs", "down")
     for target in targets:
@@ -187,5 +194,36 @@ def test_project_setting_drives_bare_commands(tmp_path: Path, enabled: bool, pro
         assert app["environment"]["DATABASE_URL"].endswith("@remote-db-tunnel:5432/app")
         assert app["depends_on"]["remote-db-tunnel"]["condition"] == "service_healthy"
         assert "migrate" not in " ".join(app.get("command") or [])
+    assert not (tmp_path / "identity").exists()
+    assert not (tmp_path / "known_hosts").exists()
+
+
+@pytest.mark.parametrize("missing", [None, "REMOTE_DB_SSH_HOST", "REMOTE_DB_SSH_IDENTITY_FILE"])
+def test_prepare_checks_compose_inputs_without_logging_values(
+    tmp_path: Path, missing: str | None
+) -> None:
+    environment = _project_checkout(tmp_path, True, "react-vite")
+    private = tmp_path / "deploy/.env.prod"
+    private.write_text(
+        private.read_text()
+        + (f"{missing}=\n" if missing else "")
+        + "DJANGO_SECRET_KEY=do-not-log-this\n"
+    )
+    result = subprocess.run(
+        ["make", "--no-print-directory", "prepare-prod"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    output = result.stdout + result.stderr
+    if missing:
+        assert result.returncode != 0
+        assert f"Missing required production input: {missing}" in output
+    else:
+        assert result.returncode == 0, output
+        assert "Production application/database inputs valid" in output
+    assert "do-not-log-this" not in output
+    assert "Invalid production configuration" not in output
     assert not (tmp_path / "identity").exists()
     assert not (tmp_path / "known_hosts").exists()
