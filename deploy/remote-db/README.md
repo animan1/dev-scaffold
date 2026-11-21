@@ -41,8 +41,8 @@ local `db` backup does not protect the selected remote database.
 
 For development with either application profile, put host inputs in private
 `backend/.env`, then use bare `make up`, `make ps`, `make logs` and `make down`.
-The server-rendered development overlay omits its usual startup migration against
-the remote database. Health checks verify PostgreSQL readiness through SSH, not
+Both profiles inherit their ordinary startup command; migrations remain explicit.
+Health checks verify PostgreSQL readiness through SSH, not
 database credentials or schema compatibility. Application-specific migration
 policy remains with the downstream app.
 
