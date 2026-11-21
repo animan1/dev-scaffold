@@ -1,0 +1,10 @@
+services:
+  app:
+    # The ordinary development command migrates a local database at startup.
+    # A remote database keeps its own migration/deployment workflow.
+    command: ["sh", "-lc", "uv run --project /workspace/profiles/server-rendered-django python -m app.manage runserver 0.0.0.0:8000"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL for the remote database}
+    depends_on:
+      remote-db-tunnel:
+        condition: service_healthy

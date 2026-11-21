@@ -1,4 +1,0 @@
-# Copy to .local/settings.mk, or merge into an existing local settings file.
-# Default React/Vite production workflow; host-specific settings stay untracked.
-export REMOTE_DB_BUILD_CONTEXT := $(CURDIR)
-PROD_COMPOSE_FILES += -f $(SCAFFOLD_ROOT)deploy/remote-db/compose.yml -f .local/remote-db-app.compose.yml

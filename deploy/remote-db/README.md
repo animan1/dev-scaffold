@@ -1,54 +1,29 @@
 # Remote PostgreSQL over SSH
 
-Add `deploy/remote-db/compose.yml` to the consuming application's existing
-Compose file list. The optional `remote-db-tunnel` service builds through the
+The optional `remote-db-tunnel` service builds through the
 normal application build/start workflow; it has no separate Make profile or
 commands. One container serves the application's consumers on its Compose
 network, without publishing a host port.
 
-For this repository's default development workflow, select the overlay through
-the existing Compose-command setting. Reuse that setting for startup, status,
-logs and shutdown:
+## Project configuration and host inputs
 
-```sh
-export REMOTE_DB_BUILD_CONTEXT="$PWD"
-export REMOTE_DB_SSH_HOST=db-host.example.com
-export REMOTE_DB_SSH_USER=operator
-export REMOTE_DB_SSH_IDENTITY_FILE=/absolute/path/to/private/key
-export REMOTE_DB_SSH_KNOWN_HOSTS_FILE=/absolute/path/to/known_hosts
-make up COMPOSE_DEV="docker compose -f deploy/docker-compose.dev.yml -f deploy/remote-db/compose.yml"
-make ps COMPOSE_DEV="docker compose -f deploy/docker-compose.dev.yml -f deploy/remote-db/compose.yml"
-make logs COMPOSE_DEV="docker compose -f deploy/docker-compose.dev.yml -f deploy/remote-db/compose.yml"
-make down COMPOSE_DEV="docker compose -f deploy/docker-compose.dev.yml -f deploy/remote-db/compose.yml"
-```
+In a derived application's committed `.scaffold-profile`, set
+`REMOTE_DB_TUNNEL ?= 1`. The base Makefile selects the shared tunnel and the
+committed dependency overlay for the known application service (`backend` or
+`app`). This is project topology, configured once and committed with the project;
+no `.local` Make settings or copied Compose files are required.
 
-Downstream applications can instead include the overlay in their existing
-Compose configuration permanently. Supply inputs through their selected private
-env file or shell. `REMOTE_DB_SSH_PORT` defaults to `22`; `REMOTE_DB_HOST` and
-`REMOTE_DB_PORT` default to `127.0.0.1:15432`, as seen from the SSH server.
-`REMOTE_DB_BUILD_CONTEXT` is the absolute checkout root so the overlay works
-with either application profile's Compose file location.
+Host-specific SSH endpoints and key paths belong in private env files. The
+inactive defaults in [`backend/.env.example`](../../backend/.env.example) do not
+affect ordinary local databases while `REMOTE_DB_TUNNEL` is `0` (the default).
+When enabled, fill in the blank SSH inputs and set `DATABASE_URL` to the selected
+database's credentials/name at `remote-db-tunnel:5432`. `REMOTE_DB_SSH_PORT`
+defaults to `22`; `REMOTE_DB_HOST` and `REMOTE_DB_PORT` default to
+`127.0.0.1:15432`, as seen from the SSH server. The Makefile supplies the checkout
+build context. Missing required inputs fail before starting containers.
 
-## Persistent host settings and bare commands
-
-Make reads `.local/settings.mk` after the application profile. `.local/` and
-`deploy/.env.prod` are ignored by Git; keep host settings there rather than
-editing scaffold files. The templates are committed; `.local` holds your editable
-copies so upgrades preserve host-specific choices without merge conflicts.
-For the default React/Vite production workflow, copy
-[`settings.mk.example`](settings.mk.example) to `.local/settings.mk` and
-[`app.compose.example.yml`](app.compose.example.yml) to
-`.local/remote-db-app.compose.yml`. Merge into existing files rather than
-overwriting existing host settings.
-
-Copy the optional remote-DB settings from [`backend/.env.example`](../../backend/.env.example)
-into `deploy/.env.prod` and uncomment/fill them in, plus
-the selected remote database's credentials in its existing `DATABASE_URL`, using
-`remote-db-tunnel:5432` as host/port. These are backend/Compose settings, not
-frontend settings; `frontend/.env.example` deliberately contains no database or
-SSH credentials. `REMOTE_DB_BUILD_CONTEXT` is exported by the Make settings example.
-
-Then use bare commands on subsequent logins:
+For the default React/Vite production workflow, put those host inputs in
+`deploy/.env.prod` (keep existing application settings), then use bare commands:
 
 ```sh
 make prepare-prod
@@ -64,20 +39,12 @@ Compose project identity. A monitor or other database consumer needs the same
 healthy-tunnel dependency. Configure backup ownership explicitly: the existing
 local `db` backup does not protect the selected remote database.
 
-For persistent development, `.local/settings.mk` can instead set
-`COMPOSE_DEV := docker compose -f deploy/docker-compose.dev.yml -f deploy/remote-db/compose.yml`
-and export the SSH inputs; then use bare `make up`, `make ps`, `make logs` and
-`make down`. Application connection settings and dependencies still belong in
-an ignored local overlay. Other application profiles use their existing Compose
-command/file-list settings; the example above does not redefine their deployment
-contracts.
-
-Configure the application's database connection hostname/port as
-`remote-db-tunnel:5432`, retaining the selected database name and credentials.
-Declare a `depends_on` condition of `service_healthy` for each database consumer
-in its existing Compose configuration. Health checks verify PostgreSQL readiness
-through SSH, not database credentials or schema compatibility. Application-specific
-connection configuration and migration policy remain with the downstream app.
+For development with either application profile, put host inputs in private
+`backend/.env`, then use bare `make up`, `make ps`, `make logs` and `make down`.
+The server-rendered development overlay omits its usual startup migration against
+the remote database. Health checks verify PostgreSQL readiness through SSH, not
+database credentials or schema compatibility. Application-specific migration
+policy remains with the downstream app.
 
 If the remote database is the scaffold's existing `db` service, add
 `deploy/remote-db/listen.compose.yml` to that host's existing Compose file list.

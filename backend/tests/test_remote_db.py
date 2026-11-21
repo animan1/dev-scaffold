@@ -7,7 +7,15 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = next(
+    path
+    for path in (
+        Path(os.environ.get("REPO_DIR", "")),
+        Path(__file__).resolve().parents[2],
+        Path("/workspace"),
+    )
+    if (path / "Makefile").is_file()
+)
 TUNNEL = ROOT / "deploy/remote-db"
 
 
@@ -103,28 +111,43 @@ def test_tunnel_keeps_strict_ssh_checks() -> None:
         assert option in script
 
 
-def test_persistent_settings_drive_bare_production_commands(tmp_path: Path) -> None:
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+def test_project_setting_drives_bare_commands(tmp_path: Path, enabled: bool, profile: str) -> None:
     if not shutil.which("docker"):
         pytest.skip("Docker CLI required for Compose configuration validation")
-    local = tmp_path / ".local"
-    local.mkdir()
+    shutil.copyfile(ROOT / "Makefile", tmp_path / "Makefile")
+    (tmp_path / ".scaffold-profile").write_text(
+        f"SCAFFOLD_PROFILE := {profile}\nREMOTE_DB_TUNNEL := {int(enabled)}\n"
+        "SCAFFOLD_BACKUP_PROFILE := none\n"
+    )
+    (tmp_path / "profiles").symlink_to(ROOT / "profiles", target_is_directory=True)
     deploy = tmp_path / "deploy"
     deploy.mkdir()
     for name in ("docker-compose.prod.yml", "docker-compose.host-ingress.yml"):
         shutil.copyfile(ROOT / "deploy" / name, deploy / name)
-    (local / "settings.mk").write_text(
-        (TUNNEL / "settings.mk.example").read_text() + "SCAFFOLD_BACKUP_PROFILE := none\n"
-    )
-    shutil.copyfile(TUNNEL / "app.compose.example.yml", local / "remote-db-app.compose.yml")
-    (deploy / ".env.prod").write_text(
-        "REMOTE_DB_SSH_HOST=db.example.com\nREMOTE_DB_SSH_USER=operator\n"
-        f"REMOTE_DB_SSH_IDENTITY_FILE={local}/identity\n"
-        f"REMOTE_DB_SSH_KNOWN_HOSTS_FILE={local}/known_hosts\n"
-        "DATABASE_URL=postgresql://app:example@remote-db-tunnel:5432/app\n"
-    )
-    environment = {**os.environ, "DOCKER_HOST": "unix:///nonexistent"}
-    command = ["make", "--no-print-directory", "-f", str(ROOT / "Makefile"), "-n"]
-    for target in ("logs-prod", "down-prod"):
+    shutil.copytree(TUNNEL, deploy / "remote-db")
+    backend_path = tmp_path / "backend"
+    backend_path.mkdir()
+    settings = (ROOT / "backend/.env.example").read_text()
+    if enabled:
+        settings += (
+            "REMOTE_DB_SSH_HOST=db.example.com\nREMOTE_DB_SSH_USER=operator\n"
+            f"REMOTE_DB_SSH_IDENTITY_FILE={tmp_path}/identity\n"
+            f"REMOTE_DB_SSH_KNOWN_HOSTS_FILE={tmp_path}/known_hosts\n"
+            "DATABASE_URL=postgresql://app:example@remote-db-tunnel:5432/app\n"
+        )
+    (deploy / ".env.prod").write_text(settings)
+    (backend_path / ".env").write_text(settings)
+    environment = {
+        **os.environ,
+        "DOCKER_HOST": "unix:///nonexistent",
+        "GIT_COMMON_DIR": str(ROOT / ".git"),
+        "PROJECT_NAME": "dev-scaffold",
+    }
+    command = ["make", "--no-print-directory", "-n"]
+    targets = ("logs-prod", "down-prod") if profile == "react-vite" else ("logs", "down")
+    for target in targets:
         planned = subprocess.run(
             [*command, target],
             cwd=tmp_path,
@@ -133,29 +156,35 @@ def test_persistent_settings_drive_bare_production_commands(tmp_path: Path) -> N
             text=True,
             check=True,
         )
-        assert str(TUNNEL / "compose.yml") in planned.stdout
-        assert ".local/remote-db-app.compose.yml" in planned.stdout
+        assert ("remote-db/compose.yml" in planned.stdout) is enabled
+        assert ".local" not in planned.stdout
         assert "groupadd" not in planned.stdout
     # Resolve exactly the Compose invocation used by the bare logs command.
     words = shlex.split(
         subprocess.check_output(
-            [*command, "logs-prod"],
+            [*command, targets[0]],
             cwd=tmp_path,
             env=environment,
             text=True,
         )
     )
-    name, value = words.pop(0).split("=", 1)
+    while words[0] != "docker":
+        name, value = words.pop(0).split("=", 1)
+        environment[name] = value
     result = subprocess.run(
         [*words[: words.index("logs")], "config", "--format", "json"],
         cwd=tmp_path,
-        env={**environment, name: value, "REMOTE_DB_BUILD_CONTEXT": str(ROOT)},
+        env={**environment, "REMOTE_DB_BUILD_CONTEXT": str(tmp_path)},
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    backend = json.loads(result.stdout)["services"]["backend"]
-    assert backend["environment"]["DATABASE_URL"].endswith("@remote-db-tunnel:5432/app")
-    assert backend["depends_on"]["remote-db-tunnel"]["condition"] == "service_healthy"
-    assert not (local / "identity").exists()
-    assert not (local / "known_hosts").exists()
+    services = json.loads(result.stdout)["services"]
+    assert ("remote-db-tunnel" in services) is enabled
+    app = services["backend" if profile == "react-vite" else "app"]
+    if enabled:
+        assert app["environment"]["DATABASE_URL"].endswith("@remote-db-tunnel:5432/app")
+        assert app["depends_on"]["remote-db-tunnel"]["condition"] == "service_healthy"
+        assert "migrate" not in " ".join(app.get("command") or [])
+    assert not (tmp_path / "identity").exists()
+    assert not (tmp_path / "known_hosts").exists()

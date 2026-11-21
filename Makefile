@@ -539,8 +539,14 @@ else
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
-# Host-local command settings are intentionally outside scaffold upgrades.
--include $(CURDIR)/.local/settings.mk
+ifeq ($(REMOTE_DB_TUNNEL),1)
+export REMOTE_DB_BUILD_CONTEXT := $(CURDIR)
+REMOTE_DB_COMPOSE_FILES := -f $(SCAFFOLD_ROOT)deploy/remote-db/compose.yml \
+	-f $(SCAFFOLD_ROOT)deploy/remote-db/$(SCAFFOLD_PROFILE).compose.yml
+COMPOSE_DEV += $(REMOTE_DB_COMPOSE_FILES) --env-file backend/.env
+COMPOSE += $(REMOTE_DB_COMPOSE_FILES) --env-file backend/.env
+PROD_COMPOSE_FILES += $(REMOTE_DB_COMPOSE_FILES)
+endif
 
 LOCAL_TLS ?= 0
 up-prod: prepare-prod
