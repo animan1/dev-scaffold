@@ -118,6 +118,10 @@ React/Vite profile files tracked. They are dormant under this selector, and
 retaining them prevents modify/delete conflicts when merging later scaffold
 improvements.
 
+As with React/Vite, `make up` starts development services without applying
+migrations. Run `make migrate` explicitly when initializing a database or
+applying committed schema changes; restarting services does not change schema.
+
 Then exercise the profile through its stable contract:
 
 ```bash
@@ -135,6 +139,7 @@ suitable:
 
 ```bash
 make up PROJECT_NAME=example-site APP_PORT=18123
+make migrate PROJECT_NAME=example-site APP_PORT=18123
 make smoke PROJECT_NAME=example-site APP_PORT=18123
 make down PROJECT_NAME=example-site APP_PORT=18123
 ```
