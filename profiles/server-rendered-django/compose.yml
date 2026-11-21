@@ -24,7 +24,7 @@ services:
       [
         "sh",
         "-lc",
-        "uv run --project /workspace/profiles/server-rendered-django python -m app.manage migrate && uv run --project /workspace/profiles/server-rendered-django python -m app.manage runserver 0.0.0.0:8000",
+        "uv run --project /workspace/profiles/server-rendered-django python -m app.manage runserver 0.0.0.0:8000",
       ]
     depends_on:
       db:

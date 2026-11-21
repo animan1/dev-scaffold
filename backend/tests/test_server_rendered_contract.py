@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -205,6 +206,46 @@ def test_server_rendered_django_migration_commands_use_docker() -> None:
     assert "python -m app.manage makemigrations" in migrations
     assert "docker compose" in migrate
     assert "python -m app.manage migrate" in migrate
+
+
+@pytest.mark.parametrize(
+    "compose_file,service",
+    [
+        ("deploy/docker-compose.dev.yml", "backend"),
+        ("profiles/server-rendered-django/compose.yml", "app"),
+    ],
+)
+def test_development_startup_does_not_apply_migrations(compose_file: str, service: str) -> None:
+    if not shutil.which("docker"):
+        pytest.skip("Needs the Docker Compose client")
+    root = _repository_root()
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--project-directory",
+            str(root),
+            "-f",
+            str(root / compose_file),
+            "config",
+            "--format",
+            "json",
+        ],
+        env={
+            **os.environ,
+            "COMPOSE_PROJECT_NAME": "dev-scaffold",
+            "HOST_UID": str(os.getuid()),
+            "HOST_GID": str(os.getgid()),
+            "GIT_COMMON_DIR": str(root / ".git"),
+            "DOCKER_HOST": "unix:///nonexistent",
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    command = json.loads(result.stdout)["services"][service]["command"]
+    assert "runserver" in " ".join(command)
+    assert "migrate" not in " ".join(command)
 
 
 def test_server_rendered_django_development_helpers_use_docker() -> None:
