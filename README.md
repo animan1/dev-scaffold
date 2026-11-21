@@ -261,6 +261,13 @@ Compose identity, release registry, CSP additions, and application-specific
 promotion or backup checks in the child. Server-rendered children already use
 their profile-owned Nginx release topology and should retain that boundary.
 
+### Optional remote database
+
+The [remote database configuration](deploy/remote-db/README.md) adds a shared
+SSH tunnel container to an existing Compose stack. It supports any remote
+PostgreSQL database, independent of environment. Use the application's existing
+lifecycle commands; no additional Make profile or tunnel targets are required.
+
 ### Optional operational and dead-man monitoring
 
 The scaffold's Django `app.monitoring` architecture provides persisted check

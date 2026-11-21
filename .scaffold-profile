@@ -1,4 +1,6 @@
 SCAFFOLD_PROFILE ?= react-vite
+# Derived applications may commit 1 to use the shared remote database tunnel.
+REMOTE_DB_TUNNEL ?= 0
 CI_PROFILES ?= react-vite server-rendered-django
 SCAFFOLD_BACKUP_PROFILE ?= immutable-backup
 CI_BACKUP_PROFILES ?= immutable-backup

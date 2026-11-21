@@ -241,7 +241,7 @@ def save_backup_input(name, value):
         ) from None
 
 
-def prepare_backup_path():
+def production_input_values():
     # Use Compose's dotenv parsing and precedence without loading services or
     # requiring a path before the operator has had an opportunity to supply it.
     try:
@@ -262,10 +262,14 @@ def prepare_backup_path():
             check=True,
         )
     except (OSError, subprocess.CalledProcessError):
-        raise ConfigurationError("Unable to read backup storage inputs") from None
-    values = dict(
+        raise ConfigurationError("Unable to read private production inputs") from None
+    return dict(
         line.split("=", 1) for line in resolved.stdout.splitlines() if "=" in line
     )
+
+
+def prepare_backup_path():
+    values = production_input_values()
     value = values.get("BACKUP_LOCAL_PATH", "")
     if value.strip():
         validate_backup_path(value)
@@ -409,13 +413,112 @@ def prepare_backup_paths(config):
         ) from None
 
 
+def valid_remote_input(name, value):
+    if not value.strip():
+        return False
+    if name.endswith("_FILE"):
+        path = Path(value)
+        return path.is_absolute() and path.is_file() and os.access(path, os.R_OK)
+    if name == "DATABASE_URL":
+        try:
+            url = urlsplit(value)
+            return (
+                url.scheme in ("postgres", "postgresql")
+                and url.hostname == "remote-db-tunnel"
+                and url.port in (None, 5432)
+                and bool(url.username and url.password and url.path.strip("/"))
+            )
+        except ValueError:
+            return False
+    return bool(re.fullmatch(r"[A-Za-z0-9_.][A-Za-z0-9_.-]*", value))
+
+
+def prepare_remote_inputs():
+    values = production_input_values()
+    for name in (
+        "REMOTE_DB_SSH_HOST",
+        "REMOTE_DB_SSH_USER",
+        "REMOTE_DB_SSH_IDENTITY_FILE",
+        "REMOTE_DB_SSH_KNOWN_HOSTS_FILE",
+        "DATABASE_URL",
+    ):
+        value = values.get(name, "")
+        while not valid_remote_input(name, value):
+            if os.environ.get("PREPARE_INTERACTIVE") != "1":
+                raise ConfigurationError(
+                    f"Missing or invalid required production input: {name}; "
+                    "supply it for non-interactive use"
+                )
+            if name.endswith("_FILE"):
+                print(f"{name} requires an existing readable file (absolute path).")
+            elif name == "DATABASE_URL":
+                print(
+                    "Enter postgresql://user:password@remote-db-tunnel:5432/database (hidden)."
+                )
+            try:
+                value = (
+                    getpass.getpass(f"{name}: ")
+                    if name == "DATABASE_URL"
+                    else input(f"{name}: ")
+                )
+            except (EOFError, OSError, KeyboardInterrupt):
+                raise ConfigurationError(
+                    f"Setup aborted while reading {name}"
+                ) from None
+            if name.endswith("_FILE"):
+                value = os.path.expanduser(value)
+            if not valid_remote_input(name, value):
+                print(f"Invalid {name}; try again or press Ctrl-C to abort.")
+                continue
+            save_backup_input(name, value)
+        # Supplied environment values take precedence; keep prompted replacements
+        # consistent for this invocation as well as subsequent dotenv reads.
+        os.environ[name] = value
+
+
+def read_compose_config(command):
+    if os.environ.get("REMOTE_DB_TUNNEL") == "1":
+        prepare_remote_inputs()
+    environment = os.environ.copy()
+    while command and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", command[0]):
+        name, value = command.pop(0).split("=", 1)
+        environment[name] = value
+    try:
+        result = subprocess.run(
+            command, env=environment, capture_output=True, text=True
+        )
+    except OSError:
+        raise ConfigurationError(
+            "Unable to run production Compose configuration check"
+        ) from None
+    if result.returncode:
+        missing = re.search(
+            r"required variable ([A-Za-z_][A-Za-z0-9_]*) is missing", result.stderr
+        )
+        if missing:
+            raise ConfigurationError(
+                f"Missing required production input: {missing[1]}; "
+                "set it in the private production env file"
+            )
+        raise ConfigurationError(
+            "Unable to resolve production Compose configuration; "
+            "check Compose files and required private inputs (values hidden)"
+        )
+    return json.loads(result.stdout)
+
+
 if __name__ == "__main__":
     try:
         if sys.argv[1:] == ["--backup-path"]:
             prepare_backup_path()
             sys.exit(0)
-        config = json.load(sys.stdin)
-        validate(config, sys.argv[1] if len(sys.argv) > 1 else "backend")
+        if sys.argv[1:2] == ["--compose"]:
+            config = read_compose_config(sys.argv[3:])
+            application = sys.argv[2]
+        else:
+            config = json.load(sys.stdin)
+            application = sys.argv[1] if len(sys.argv) > 1 else "backend"
+        validate(config, application)
         prepare_backup_paths(config)
     except ConfigurationError as error:
         sys.exit(str(error))

@@ -1,0 +1,5 @@
+services:
+  app:
+    extends:
+      file: ${REMOTE_DB_BUILD_CONTEXT:?Set REMOTE_DB_BUILD_CONTEXT}/deploy/remote-db/consumer.compose.yml
+      service: consumer

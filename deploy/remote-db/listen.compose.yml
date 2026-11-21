@@ -1,0 +1,4 @@
+services:
+  db:
+    ports:
+      - "127.0.0.1:${REMOTE_DB_LOOPBACK_PORT:-15432}:5432"
