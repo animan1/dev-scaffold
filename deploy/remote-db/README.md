@@ -29,6 +29,54 @@ env file or shell. `REMOTE_DB_SSH_PORT` defaults to `22`; `REMOTE_DB_HOST` and
 `REMOTE_DB_BUILD_CONTEXT` is the absolute checkout root so the overlay works
 with either application profile's Compose file location.
 
+## Persistent host settings and bare commands
+
+Make reads `.local/settings.mk` after the application profile. `.local/` and
+`deploy/.env.prod` are ignored by Git; keep host settings there rather than
+editing scaffold files. For the default React/Vite production workflow, put this
+in `.local/settings.mk`:
+
+```make
+export REMOTE_DB_BUILD_CONTEXT := $(CURDIR)
+PROD_COMPOSE_FILES += -f deploy/remote-db/compose.yml -f .local/remote-db-app.compose.yml
+```
+
+Add the SSH settings shown above to `deploy/.env.prod` (without `export`), plus
+the selected remote database's credentials in its existing `DATABASE_URL`, using
+`remote-db-tunnel:5432` as host/port. Add `.local/remote-db-app.compose.yml`:
+
+```yaml
+services:
+  backend:
+    depends_on:
+      remote-db-tunnel:
+        condition: service_healthy
+```
+
+Then use bare commands on subsequent logins:
+
+```sh
+make prepare-prod
+make up-prod
+make logs-prod
+make down-prod
+```
+
+Preparation validates the resolved private configuration; startup builds the
+tunnel with the existing stack and waits for it before starting the backend.
+Shutdown preserves volumes and does not stop the remote database. Keep the same
+Compose project identity. A monitor or other database consumer needs the same
+healthy-tunnel dependency. Configure backup ownership explicitly: the existing
+local `db` backup does not protect the selected remote database.
+
+For persistent development, `.local/settings.mk` can instead set
+`COMPOSE_DEV := docker compose -f deploy/docker-compose.dev.yml -f deploy/remote-db/compose.yml`
+and export the SSH inputs; then use bare `make up`, `make ps`, `make logs` and
+`make down`. Application connection settings and dependencies still belong in
+an ignored local overlay. Other application profiles use their existing Compose
+command/file-list settings; the example above does not redefine their deployment
+contracts.
+
 Configure the application's database connection hostname/port as
 `remote-db-tunnel:5432`, retaining the selected database name and credentials.
 Declare a `depends_on` condition of `service_healthy` for each database consumer

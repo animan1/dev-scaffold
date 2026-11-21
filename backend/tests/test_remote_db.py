@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -100,3 +101,67 @@ def test_tunnel_keeps_strict_ssh_checks() -> None:
         "UserKnownHostsFile=",
     ):
         assert option in script
+
+
+def test_persistent_settings_drive_bare_production_commands(tmp_path: Path) -> None:
+    if not shutil.which("docker"):
+        pytest.skip("Docker CLI required for Compose configuration validation")
+    local = tmp_path / ".local"
+    local.mkdir()
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    for name in ("docker-compose.prod.yml", "docker-compose.host-ingress.yml"):
+        shutil.copyfile(ROOT / "deploy" / name, deploy / name)
+    (local / "settings.mk").write_text(
+        f"export REMOTE_DB_BUILD_CONTEXT := {ROOT}\n"
+        "SCAFFOLD_BACKUP_PROFILE := none\n"
+        f"PROD_COMPOSE_FILES += -f {TUNNEL}/compose.yml "
+        "-f .local/remote-db-app.compose.yml\n"
+    )
+    (local / "remote-db-app.compose.yml").write_text(
+        "services:\n  backend:\n    depends_on:\n"
+        "      remote-db-tunnel:\n        condition: service_healthy\n"
+    )
+    (deploy / ".env.prod").write_text(
+        "REMOTE_DB_SSH_HOST=db.example.com\nREMOTE_DB_SSH_USER=operator\n"
+        f"REMOTE_DB_SSH_IDENTITY_FILE={local}/identity\n"
+        f"REMOTE_DB_SSH_KNOWN_HOSTS_FILE={local}/known_hosts\n"
+        "DATABASE_URL=postgresql://app:example@remote-db-tunnel:5432/app\n"
+    )
+    environment = {**os.environ, "DOCKER_HOST": "unix:///nonexistent"}
+    command = ["make", "--no-print-directory", "-f", str(ROOT / "Makefile"), "-n"]
+    for target in ("logs-prod", "down-prod"):
+        planned = subprocess.run(
+            [*command, target],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert str(TUNNEL / "compose.yml") in planned.stdout
+        assert ".local/remote-db-app.compose.yml" in planned.stdout
+        assert "groupadd" not in planned.stdout
+    # Resolve exactly the Compose invocation used by the bare logs command.
+    words = shlex.split(
+        subprocess.check_output(
+            [*command, "logs-prod"],
+            cwd=tmp_path,
+            env=environment,
+            text=True,
+        )
+    )
+    name, value = words.pop(0).split("=", 1)
+    result = subprocess.run(
+        [*words[: words.index("logs")], "config", "--format", "json"],
+        cwd=tmp_path,
+        env={**environment, name: value, "REMOTE_DB_BUILD_CONTEXT": str(ROOT)},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    backend = json.loads(result.stdout)["services"]["backend"]
+    assert backend["environment"]["DATABASE_URL"].endswith("@remote-db-tunnel:5432/app")
+    assert backend["depends_on"]["remote-db-tunnel"]["condition"] == "service_healthy"
+    assert not (local / "identity").exists()
+    assert not (local / "known_hosts").exists()

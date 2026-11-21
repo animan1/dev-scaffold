@@ -539,6 +539,9 @@ else
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
+# Host-local command settings are intentionally outside scaffold upgrades.
+-include $(CURDIR)/.local/settings.mk
+
 LOCAL_TLS ?= 0
 up-prod: prepare-prod
 
