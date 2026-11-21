@@ -33,25 +33,20 @@ with either application profile's Compose file location.
 
 Make reads `.local/settings.mk` after the application profile. `.local/` and
 `deploy/.env.prod` are ignored by Git; keep host settings there rather than
-editing scaffold files. For the default React/Vite production workflow, put this
-in `.local/settings.mk`:
+editing scaffold files. The templates are committed; `.local` holds your editable
+copies so upgrades preserve host-specific choices without merge conflicts.
+For the default React/Vite production workflow, copy
+[`settings.mk.example`](settings.mk.example) to `.local/settings.mk` and
+[`app.compose.example.yml`](app.compose.example.yml) to
+`.local/remote-db-app.compose.yml`. Merge into existing files rather than
+overwriting existing host settings.
 
-```make
-export REMOTE_DB_BUILD_CONTEXT := $(CURDIR)
-PROD_COMPOSE_FILES += -f deploy/remote-db/compose.yml -f .local/remote-db-app.compose.yml
-```
-
-Add the SSH settings shown above to `deploy/.env.prod` (without `export`), plus
+Copy the optional remote-DB settings from [`backend/.env.example`](../../backend/.env.example)
+into `deploy/.env.prod` and uncomment/fill them in, plus
 the selected remote database's credentials in its existing `DATABASE_URL`, using
-`remote-db-tunnel:5432` as host/port. Add `.local/remote-db-app.compose.yml`:
-
-```yaml
-services:
-  backend:
-    depends_on:
-      remote-db-tunnel:
-        condition: service_healthy
-```
+`remote-db-tunnel:5432` as host/port. These are backend/Compose settings, not
+frontend settings; `frontend/.env.example` deliberately contains no database or
+SSH credentials. `REMOTE_DB_BUILD_CONTEXT` is exported by the Make settings example.
 
 Then use bare commands on subsequent logins:
 

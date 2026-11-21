@@ -1,0 +1,6 @@
+# Copy to .local/remote-db-app.compose.yml; adapt the consumer service name.
+services:
+  backend:
+    depends_on:
+      remote-db-tunnel:
+        condition: service_healthy

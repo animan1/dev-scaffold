@@ -113,15 +113,9 @@ def test_persistent_settings_drive_bare_production_commands(tmp_path: Path) -> N
     for name in ("docker-compose.prod.yml", "docker-compose.host-ingress.yml"):
         shutil.copyfile(ROOT / "deploy" / name, deploy / name)
     (local / "settings.mk").write_text(
-        f"export REMOTE_DB_BUILD_CONTEXT := {ROOT}\n"
-        "SCAFFOLD_BACKUP_PROFILE := none\n"
-        f"PROD_COMPOSE_FILES += -f {TUNNEL}/compose.yml "
-        "-f .local/remote-db-app.compose.yml\n"
+        (TUNNEL / "settings.mk.example").read_text() + "SCAFFOLD_BACKUP_PROFILE := none\n"
     )
-    (local / "remote-db-app.compose.yml").write_text(
-        "services:\n  backend:\n    depends_on:\n"
-        "      remote-db-tunnel:\n        condition: service_healthy\n"
-    )
+    shutil.copyfile(TUNNEL / "app.compose.example.yml", local / "remote-db-app.compose.yml")
     (deploy / ".env.prod").write_text(
         "REMOTE_DB_SSH_HOST=db.example.com\nREMOTE_DB_SSH_USER=operator\n"
         f"REMOTE_DB_SSH_IDENTITY_FILE={local}/identity\n"
