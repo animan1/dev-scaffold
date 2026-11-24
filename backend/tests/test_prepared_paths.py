@@ -16,6 +16,70 @@ def _module() -> SimpleNamespace:
     return SimpleNamespace(**runpy.run_path(str(root / "scripts/validate_prod_config.py")))
 
 
+@pytest.mark.parametrize(
+    "storage", ["new", "publication", "legacy", "volume", "unavailable", "custom"]
+)
+def test_generated_backup_password_requires_proven_new_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    storage: str,
+) -> None:
+    module = _module()
+    private = tmp_path / "private.env"
+    private.write_text("preserve=original\n")
+    private.chmod(0o600)
+    original = private.read_bytes()
+    publication = tmp_path / "publication"
+    publication.mkdir()
+    working = {"type": "volume", "source": "backup_working", "target": "/backups"}
+    if storage == "legacy":
+        repository = tmp_path / "repository"
+        repository.mkdir()
+        (repository / "config").write_text("existing repository")
+        working = {"type": "bind", "source": str(repository), "target": "/backups"}
+    if storage == "publication":
+        (publication / "config").write_text("existing publication")
+    config = {
+        "services": {
+            "backup": {
+                "environment": {
+                    "RESTIC_REPOSITORY": "remote:repository" if storage == "custom" else "/backups"
+                },
+                "volumes": [
+                    working,
+                    {"type": "bind", "source": str(publication), "target": "/publication"},
+                ],
+            }
+        },
+        "volumes": {"backup_working": {"name": "dev-scaffold_backup_working"}},
+    }
+
+    def inspect(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert command == ["docker", "volume", "ls", "--format", "{{.Name}}"]
+        if storage == "unavailable":
+            raise subprocess.CalledProcessError(1, command, stderr="private error details")
+        return subprocess.CompletedProcess(
+            command, 0, "dev-scaffold_backup_working\n" if storage == "volume" else ""
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", inspect)
+    monkeypatch.setattr(module.getpass, "getpass", lambda prompt: "")
+    monkeypatch.setenv("PROD_ENV_FILE", str(private))
+    monkeypatch.setenv("PREPARE_INTERACTIVE", "1")
+    if storage == "new":
+        key = module.prompt_backup_input("BACKUP_PASSWORD", config=config)
+        assert len(key) >= 64
+        assert key in private.read_text()
+        assert key not in capsys.readouterr().out
+        assert private.stat().st_mode & 0o777 == 0o600
+    else:
+        with pytest.raises(module.ConfigurationError):
+            module.prompt_backup_input("BACKUP_PASSWORD", config=config)
+        assert private.read_bytes() == original
+        assert "private error details" not in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("project,gid", [("cuplr", 12001), ("cranescastle-frappe", 12002)])
 @pytest.mark.parametrize("platform", ["linux", "darwin"])
 def test_backup_groups_are_namespaced_and_reused(

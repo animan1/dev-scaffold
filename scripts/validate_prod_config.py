@@ -7,6 +7,7 @@ import json
 import os
 import pwd
 import re
+import secrets
 import shlex
 import stat
 import subprocess
@@ -203,7 +204,40 @@ def read_backup_path(name, default=None):
     return os.path.expanduser(input(prompt) or default or "")
 
 
-def prompt_backup_input(name, secret=True, default=None):
+def new_backup_password(config):
+    backup = config["services"]["backup"]
+    if backup["environment"]["RESTIC_REPOSITORY"] != "/backups":
+        raise ConfigurationError("Custom backup repositories require their original BACKUP_PASSWORD")
+    for mount in backup.get("volumes", []):
+        if mount["target"] not in ("/backups", "/publication"):
+            continue
+        if mount["type"] == "bind":
+            path = Path(mount["source"].replace("$$", "$"))
+            if path.exists() and (not path.is_dir() or any(path.iterdir())):
+                raise ConfigurationError(
+                    "Existing backup storage requires its original BACKUP_PASSWORD; "
+                    "no replacement generated"
+                )
+        elif mount["type"] == "volume":
+            name = config["volumes"][mount["source"]]["name"]
+            try:
+                result = subprocess.run(
+                    ["docker", "volume", "ls", "--format", "{{.Name}}"],
+                    capture_output=True, text=True, check=True,
+                )
+            except (OSError, subprocess.CalledProcessError):
+                raise ConfigurationError(
+                    "Cannot establish whether backup storage is new; supply BACKUP_PASSWORD"
+                ) from None
+            if name in result.stdout.splitlines():
+                raise ConfigurationError(
+                    "Existing backup volume requires its original BACKUP_PASSWORD; "
+                    "no replacement generated"
+                )
+    return secrets.token_urlsafe(48)
+
+
+def prompt_backup_input(name, secret=True, default=None, config=None):
     path = os.environ.get("PROD_ENV_FILE")
     if not path or os.environ.get("PREPARE_INTERACTIVE") != "1":
         raise ConfigurationError(
@@ -211,6 +245,8 @@ def prompt_backup_input(name, secret=True, default=None):
         )
     try:
         if secret:
+            if name == "BACKUP_PASSWORD":
+                print("Leave blank to generate a password for new backup storage only.")
             value = getpass.getpass(f"{name}: ")
         elif name in ("BACKUP_LOCAL_PATH", "BACKUP_PUBLICATION_PATH"):
             value = read_backup_path(name, default)
@@ -218,6 +254,9 @@ def prompt_backup_input(name, secret=True, default=None):
             value = input(f"{name} [{default}]: ") or default or ""
     except (EOFError, OSError, KeyboardInterrupt):
         raise ConfigurationError(f"Unable to read {name} from the terminal") from None
+    if not value.strip() and name == "BACKUP_PASSWORD" and config is not None:
+        value = new_backup_password(config)
+        print("Generated backup password saved privately; preserve it for recovery.")
     if not value.strip():
         raise ConfigurationError(f"{name} cannot be empty")
     if name in ("BACKUP_LOCAL_PATH", "BACKUP_PUBLICATION_PATH"):
@@ -269,25 +308,24 @@ def prepare_backup_path():
     value = values.get("BACKUP_LOCAL_PATH", "")
     if value.strip():
         validate_backup_path(value)
-    else:
-        default = Path.home() / ".local/share" / Path.cwd().name / "backups"
-        value = prompt_backup_input(
-            "BACKUP_LOCAL_PATH", secret=False, default=str(default)
-        )
     publication = values.get("BACKUP_PUBLICATION_PATH", "")
     if not publication.strip():
-        default = str(Path(value).with_name(Path(value).name + "-publication"))
+        default = (
+            str(Path(value).with_name(Path(value).name + "-publication")) if value else
+            str(Path.home() / ".local/share" / Path.cwd().name / "backups-publication")
+        )
         publication = prompt_backup_input(
             "BACKUP_PUBLICATION_PATH", secret=False, default=default
         )
     validate_backup_path(publication, "BACKUP_PUBLICATION_PATH")
-    source = Path(value).resolve()
     destination = Path(publication).resolve()
-    same = source.exists() and destination.exists() and source.samefile(destination)
-    if source.is_relative_to(destination) or destination.is_relative_to(source) or same:
-        raise ConfigurationError(
-            "Source and publication repositories must be separate, non-nested directories"
-        )
+    if value:
+        source = Path(value).resolve()
+        same = source.exists() and destination.exists() and source.samefile(destination)
+        if source.is_relative_to(destination) or destination.is_relative_to(source) or same:
+            raise ConfigurationError(
+                "Source and publication repositories must be separate, non-nested directories"
+            )
     prepare_backup_group(values)
 
 
@@ -335,7 +373,7 @@ def validate(config, application_service="backend"):
                     "RESTIC_PASSWORD": "BACKUP_PASSWORD",
                 }.get(name, name)
                 if source in ("BACKUP_PASSWORD", "BACKUP_REPOSITORY"):
-                    prompt_backup_input(source)
+                    prompt_backup_input(source, config=config)
                 else:
                     raise ConfigurationError(f"Missing required backup input: {source}")
 

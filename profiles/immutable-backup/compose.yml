@@ -4,11 +4,14 @@ services:
     entrypoint: ["sh", "-c"]
     command:
       - >-
+        if [ -z "${BACKUP_LOCAL_PATH:-}" ]; then
+        install -d -o ${BACKUP_RUNTIME_UID:-10001} -g ${BACKUP_RUNTIME_GID:?Run make prepare-prod to select the tenant backup group}
+        -m 2770 /backups; fi;
         install -d -o ${BACKUP_RUNTIME_UID:-10001} -g ${BACKUP_RUNTIME_GID:?Run make prepare-prod to select the tenant backup group}
         ${BACKUP_STATUS_DIR:-/backup-status}
     user: "0:0"
     volumes:
-      - "${BACKUP_LOCAL_PATH:?Set BACKUP_LOCAL_PATH through the profile Makefile}:/backups"
+      - "${BACKUP_LOCAL_PATH:-backup_working}:/backups"
       - "backup_status:${BACKUP_STATUS_DIR:-/backup-status}"
 
   backup:
@@ -38,7 +41,7 @@ services:
     restart: unless-stopped
     user: "${BACKUP_RUNTIME_UID:-10001}:${BACKUP_RUNTIME_GID:?Run make prepare-prod to select the tenant backup group}"
     volumes:
-      - "${BACKUP_LOCAL_PATH:?Set BACKUP_LOCAL_PATH through the profile Makefile}:/backups"
+      - "${BACKUP_LOCAL_PATH:-backup_working}:/backups"
       - "${BACKUP_PUBLICATION_PATH:?Run make prepare-prod to select the publication directory}:/publication"
       - "backup_status:${BACKUP_STATUS_DIR:-/backup-status}"
 
@@ -51,3 +54,4 @@ services:
 
 volumes:
   backup_status:
+  backup_working:
