@@ -366,6 +366,7 @@ def test_routine_teardown_preserves_all_persistent_volume_classes() -> None:
     assert "staticfiles:" in react_compose
     assert "media:" in server_compose
     assert "backup_status:" in backup_compose
+    assert "backup_working:" in backup_compose
 
 
 def test_non_root_storage_is_prepared_without_initializing_restic() -> None:

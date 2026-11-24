@@ -31,9 +31,10 @@ Bare `make prepare-prod` prepares backup inputs and host storage. `make up-prod`
 also builds the backup image, initializes its status storage, and starts the
 scheduled worker after the database is healthy. Its first cycle takes a backup
 and verifies a restore; subsequent cycles use the configured intervals.
-Preparation asks for an absolute `BACKUP_LOCAL_PATH` when absent and saves it in
-the private production env file. Press Enter to accept the suggested
-`~/.local/share/<checkout-name>/backups` directory outside the checkout.
+Working storage uses the persistent Compose `backup_working` volume at `/backups`;
+preparation does not ask for a working host path or create Docker volumes.
+Preparation asks only for `BACKUP_PUBLICATION_PATH`, suggesting
+`~/.local/share/<checkout-name>/backups-publication`, and saves the selection privately.
 The directory prompt supports Tab completion (including paths with spaces) and `~`.
 Values already supplied there, in the environment, or as Make arguments are
 honored; unattended preparation requires the path upfront.
@@ -46,7 +47,6 @@ For persistent unattended inputs or explicit overrides, add these non-secret
 settings to `deploy/.env.prod` (or the file selected by `PROD_ENV_FILE`):
 
 ```dotenv
-BACKUP_LOCAL_PATH="/absolute/host/backups/cuplr"
 BACKUP_PUBLICATION_PATH="/absolute/host/publication/cuplr"
 BACKUP_GROUP="cuplr-backup"
 ```
@@ -54,17 +54,21 @@ BACKUP_GROUP="cuplr-backup"
 Alternatively supply Make arguments, for example
 
 ```sh
-make prepare-prod BACKUP_LOCAL_PATH=/absolute/host/backups/cuplr \
-  BACKUP_PUBLICATION_PATH=/absolute/host/publication/cuplr BACKUP_GROUP=cuplr-backup
+make prepare-prod BACKUP_PUBLICATION_PATH=/absolute/host/publication/cuplr BACKUP_GROUP=cuplr-backup
 ```
 
 or export those variables in the shell before running Make.
 
-The worker mounts `BACKUP_LOCAL_PATH` at `/backups` for the working encrypted
+The worker mounts managed working storage at `/backups` for the encrypted
 Restic repository (`BACKUP_REPOSITORY=/backups`), and `BACKUP_PUBLICATION_PATH` at
 `/publication` for its independent publication repository. Preparation prompts
-for the latter when absent, suggesting a sibling of the working directory; the
-two paths must be separate and non-nested. The same capture, validation,
+for the latter when absent. An existing explicit `BACKUP_LOCAL_PATH` remains a
+bind mount, unchanged; do not remove it to switch storage without a planned
+migration. Legacy bind and publication paths must remain separate and non-nested.
+For an interrupted first setup with an empty working directory, remove the saved
+`BACKUP_LOCAL_PATH` entry to select managed storage. Do not remove it for an
+existing repository without first preserving its history and recovery key.
+The same capture, validation,
 and restore commands work on a laptop or server. Host tooling owns off-host
 publication and its credentials; the scaffold does not configure a provider,
 mount host transport credentials, or prepare an rclone directory. Off-host
@@ -84,7 +88,7 @@ is required. `make backup-prod` waits for the complete containerized backup/copy
 cycle; the scheduled worker performs the same cycle. Copy failure fails that
 cycle. Publication snapshot IDs can differ from source IDs; after retrieval,
 select IDs from the retrieved repository with the normal snapshot/restore tools.
-Map only `BACKUP_PUBLICATION_PATH` into host transport; keep the working
+Map only `BACKUP_PUBLICATION_PATH` into host transport; keep any legacy working
 `BACKUP_LOCAL_PATH` outside that transported tree. Existing repositories are not
 moved or remapped automatically.
 
@@ -93,7 +97,7 @@ defines publication/retrieval ownership and transfer verification. Its capture
 metadata is optional; this profile hands off the native publication repository.
 
 If the existing repository is already in infra's transported directory, retain
-it as `BACKUP_PUBLICATION_PATH` and select new private working storage before
+it as `BACKUP_PUBLICATION_PATH` and use managed working storage before
 restarting the worker with this version. A new working repository adopts the
 existing publication repository's chunker settings; its historical snapshots
 stay in place. Stop the old worker before changing these mappings so it cannot
@@ -115,10 +119,14 @@ the versioned source and immutable digest declarations together.
 When this profile is enabled, `make prepare-prod` also validates the worker's
 required database and repository inputs. Supply `BACKUP_PASSWORD` in the private
 production env file or existing environment; recovery requires the original key.
-In a terminal, missing backup credentials are prompted without echo and saved to
-the private env file. Unattended runs require those values upfront and fail clearly
+In a terminal, Enter at `BACKUP_PASSWORD` generates a strong random key for new
+storage and saves it privately without logging it. Preserve that key separately
+for disaster recovery. Generation refuses nonempty bind/publication storage,
+an existing working volume, custom repositories, or an unavailable Docker metadata
+check; those cases require the original key. It never creates a volume to check it.
+Unattended runs require the password upfront and fail clearly
 when absent. Existing supplied credentials are preserved without prompting.
-Preparation does not generate a replacement key, initialize a repository, or
+Preparation never replaces an existing key, initializes a repository, or
 authenticate to remote storage. Without the profile, backup inputs are not required.
 
 Preparation preserves the host directory's owner. The worker keeps its dedicated

@@ -55,6 +55,7 @@ def _prompted_prepare(
     value: str,
     redirect_input: bool = False,
     backup_path: str | None = None,
+    publication_path: str | None = None,
 ) -> tuple[int, str]:
     process, terminal = pty.fork()
     if process == 0:
@@ -65,7 +66,9 @@ def _prompted_prepare(
         os.execvp(command[0], command)
     output = b""
     responses = {b"BACKUP_PASSWORD: ": value}
-    responses[b"BACKUP_PUBLICATION_PATH"] = str(directory / "publication")
+    responses[b"BACKUP_PUBLICATION_PATH"] = (
+        publication_path if publication_path is not None else str(directory / "publication")
+    )
     if backup_path is not None:
         responses[b"BACKUP_LOCAL_PATH"] = backup_path
     ownership_cancelled = False
@@ -333,9 +336,16 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
     assert private_env.read_bytes() == original
     assert "environment-supplied-key" not in supplied.stdout + supplied.stderr
     empty_status, empty_output = _prompted_prepare(command, tmp_path, "")
-    assert empty_status != 0
-    assert "BACKUP_PASSWORD cannot be empty" in empty_output
-    assert private_env.read_bytes() == original
+    assert empty_status == 0, empty_output
+    generated = private_env.read_text().split("BACKUP_PASSWORD=", 1)[1].strip().strip('"')
+    assert len(generated) >= 64
+    assert generated not in empty_output
+    generated_file = private_env.read_bytes()
+    repeat_generated = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
+    assert repeat_generated.returncode == 0
+    assert private_env.read_bytes() == generated_file
+    # No worker has run; reset this isolated input file to exercise supplied keys.
+    private_env.write_bytes(original)
     key = "review-$TOKEN#'\"\\ key\\"
     status, output = _prompted_prepare(command, tmp_path, key)
     assert status == 0 or any(
@@ -405,7 +415,7 @@ def test_preparation_prompts_for_missing_backup_key_and_preserves_it_on_repeat(
 
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Needs the Docker Compose client")
-def test_preparation_prompts_for_host_directory_and_reuses_private_selection(
+def test_preparation_prompts_only_for_publication_directory_and_reuses_selection(
     tmp_path: Path,
 ) -> None:
     revision = _production_checkout(tmp_path)
@@ -427,13 +437,15 @@ def test_preparation_prompts_for_host_directory_and_reuses_private_selection(
         command, cwd=tmp_path, capture_output=True, text=True, stdin=subprocess.DEVNULL
     )
     assert missing.returncode != 0
-    assert "Missing required backup input: BACKUP_LOCAL_PATH" in missing.stderr
+    assert "Missing required backup input: BACKUP_PUBLICATION_PATH" in missing.stderr
     assert not (tmp_path / "deploy/backups").exists()
+
     status, output = _prompted_prepare(
-        command, tmp_path, "test-only", backup_path=str(directory)[:-4] + "\t"
+        command, tmp_path, "test-only", publication_path=str(directory)[:-4] + "\t"
     )
     assert status == 0, output
-    assert output.count("BACKUP_LOCAL_PATH [") == 1
+    assert output.count("BACKUP_PUBLICATION_PATH [") == 1
+    assert "BACKUP_LOCAL_PATH" not in output
     assert "sudo" not in output
     private_env = tmp_path / "deploy/.env.prod"
     configured = private_env.read_bytes()
@@ -441,13 +453,49 @@ def test_preparation_prompts_for_host_directory_and_reuses_private_selection(
         command, cwd=tmp_path, capture_output=True, text=True, stdin=subprocess.DEVNULL
     )
     assert repeated.returncode == 0, repeated.stderr
-    assert "BACKUP_LOCAL_PATH: " not in repeated.stdout + repeated.stderr
+    assert "BACKUP_PUBLICATION_PATH [" not in repeated.stdout + repeated.stderr
+    assert "BACKUP_LOCAL_PATH" not in private_env.read_text()
     assert private_env.read_bytes() == configured
     assert directory.stat().st_uid == os.getuid()
     assert directory.stat().st_gid == os.getgid()
     assert directory.stat().st_mode & 0o7777 == 0o2770
     assert sentinel.read_text() == "preserve"
     assert not (tmp_path / "deploy/backups").exists()
+
+    resolved = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            "deploy/docker-compose.prod.yml",
+            "-f",
+            "profiles/immutable-backup/compose.yml",
+            "--env-file",
+            str(private_env),
+            "config",
+            "--format",
+            "json",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+        env={
+            **os.environ,
+            "PROD_ENV_FILE": str(private_env),
+            "COMPOSE_PROJECT_NAME": "dev-scaffold",
+            "BACKUP_IMAGE": f"local/dev-scaffold-backup:{revision}",
+            "DOCKER_HOST": "unix:///nonexistent",
+        },
+    )
+    model = json.loads(resolved.stdout)
+    for service in ("backup", "backup-init"):
+        working = next(
+            m for m in model["services"][service]["volumes"] if m["target"] == "/backups"
+        )
+        assert working["type"] == "volume"
+        assert working["source"] == "backup_working"
+    assert model["volumes"]["backup_working"]["name"] == "dev-scaffold_backup_working"
 
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Needs the Docker Compose client")
@@ -470,11 +518,12 @@ def test_preparation_accepts_suggested_host_directory(
         "DOCKER_HOST=unix:///nonexistent",
         "prepare-prod",
     ]
-    suggested = tmp_path / "operator-home/.local/share" / tmp_path.name / "backups"
+    suggested = tmp_path / "operator-home/.local/share" / tmp_path.name / "backups-publication"
     assert not suggested.exists()
-    status, output = _prompted_prepare(command, tmp_path, "test-only", backup_path="")
+    status, output = _prompted_prepare(command, tmp_path, "test-only", publication_path="")
     assert status == 0, output
-    assert f"BACKUP_LOCAL_PATH [{suggested}]: " in output
+    assert f"BACKUP_PUBLICATION_PATH [{suggested}]: " in output
+    assert "BACKUP_LOCAL_PATH" not in output
     assert suggested.stat().st_uid == os.getuid()
     assert suggested.stat().st_mode & 0o7777 == 0o2770
     assert not (tmp_path / "deploy/backups").exists()
