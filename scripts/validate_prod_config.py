@@ -207,7 +207,9 @@ def read_backup_path(name, default=None):
 def new_backup_password(config):
     backup = config["services"]["backup"]
     if backup["environment"]["RESTIC_REPOSITORY"] != "/backups":
-        raise ConfigurationError("Custom backup repositories require their original BACKUP_PASSWORD")
+        raise ConfigurationError(
+            "Custom backup repositories require their original BACKUP_PASSWORD"
+        )
     for mount in backup.get("volumes", []):
         if mount["target"] not in ("/backups", "/publication"):
             continue
@@ -223,7 +225,9 @@ def new_backup_password(config):
             try:
                 result = subprocess.run(
                     ["docker", "volume", "ls", "--format", "{{.Name}}"],
-                    capture_output=True, text=True, check=True,
+                    capture_output=True,
+                    text=True,
+                    check=True,
                 )
             except (OSError, subprocess.CalledProcessError):
                 raise ConfigurationError(
@@ -311,8 +315,11 @@ def prepare_backup_path():
     publication = values.get("BACKUP_PUBLICATION_PATH", "")
     if not publication.strip():
         default = (
-            str(Path(value).with_name(Path(value).name + "-publication")) if value else
-            str(Path.home() / ".local/share" / Path.cwd().name / "backups-publication")
+            str(Path(value).with_name(Path(value).name + "-publication"))
+            if value
+            else str(
+                Path.home() / ".local/share" / Path.cwd().name / "backups-publication"
+            )
         )
         publication = prompt_backup_input(
             "BACKUP_PUBLICATION_PATH", secret=False, default=default
@@ -322,7 +329,11 @@ def prepare_backup_path():
     if value:
         source = Path(value).resolve()
         same = source.exists() and destination.exists() and source.samefile(destination)
-        if source.is_relative_to(destination) or destination.is_relative_to(source) or same:
+        if (
+            source.is_relative_to(destination)
+            or destination.is_relative_to(source)
+            or same
+        ):
             raise ConfigurationError(
                 "Source and publication repositories must be separate, non-nested directories"
             )
