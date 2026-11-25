@@ -1,5 +1,13 @@
 SCAFFOLD_ROOT := $(dir $(abspath $(firstword $(MAKEFILE_LIST))))
 include $(SCAFFOLD_ROOT).scaffold-profile
+SHELL := /bin/bash
+PROJECT_NAME ?= $(notdir $(CURDIR))
+RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
+RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)
+RELEASE_REVISION ?= $(shell git rev-parse HEAD)
+RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
+RELEASE_PLATFORM ?=
+RELEASE_HTTP_PORT ?= 18080
 UV_IMAGE ?= ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
 SCAFFOLD_BACKUP_PROFILE ?= immutable-backup
 CI_BACKUP_PROFILES ?= immutable-backup
@@ -20,10 +28,8 @@ HELP_FILES = $(MAKEFILE_LIST)
 
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 
-SHELL := /bin/bash
 COMPOSE_DEV := docker compose -f deploy/docker-compose.dev.yml
 FRONTEND_DIR := frontend
-PROJECT_NAME ?= $(notdir $(CURDIR))
 COMPOSE_PROJECT_NAME ?= $(PROJECT_NAME)
 export COMPOSE_PROJECT_NAME
 MONITORING ?= 0
@@ -46,15 +52,9 @@ COMPOSE_PROD = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose $(PROD_C
 COMPOSE_MONITOR = docker compose -f deploy/docker-compose.prod.yml \
 	-f deploy/docker-compose.external-monitoring.yml --profile monitoring \
 	--env-file deploy/.env.prod
-RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
-RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)
-RELEASE_REVISION ?= $(shell git rev-parse HEAD)
 RELEASE_BACKEND_TAG = $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG = $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
-RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
-RELEASE_PLATFORM ?=
 RELEASE_PULL ?= $(COMPOSE_RELEASE) pull backend nginx
-RELEASE_HTTP_PORT ?= 18080
 RELEASE_HTTPS_PORT ?= 18443
 COMPOSE_RELEASE = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) docker compose \
 	$(RELEASE_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) \
