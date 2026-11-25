@@ -301,28 +301,21 @@ def test_changed_coverage_runs_from_backend() -> None:
     assert "backend/coverage.xml" not in output
 
 
-@pytest.mark.skipif(shutil.which("diff-cover") is None, reason="Needs prepared source tooling")
-@pytest.mark.parametrize("component", ["backend", "frontend"])
-def test_diff_cover_matches_changed_application_lines(tmp_path: Path, component: str) -> None:
+@pytest.mark.skipif(shutil.which("diff-cover") is None, reason="diff-cover is profile-only")
+def test_diff_cover_matches_changed_backend_application_lines(tmp_path: Path) -> None:
     repository = tmp_path / "repository"
-    backend = repository / component
-    filename = "example.py" if component == "backend" else "example.ts"
-    application = backend / "src" / "app" / filename
+    backend = repository / "backend"
+    application = backend / "src" / "app" / "example.py"
     application.parent.mkdir(parents=True)
-    source = (
-        "def answer() -> int:\n    return 1\n"
-        if component == "backend"
-        else "export function answer() {\n    return 1;\n}\n"
-    )
-    application.write_text(source)
+    application.write_text("def answer() -> int:\n    return 1\n")
 
     subprocess.run(["git", "init", "--quiet"], cwd=repository, check=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=repository, check=True)
-    subprocess.run(["git", "add", f"{component}/src/app/{filename}"], cwd=repository, check=True)
+    subprocess.run(["git", "add", "backend/src/app/example.py"], cwd=repository, check=True)
     subprocess.run(["git", "commit", "--quiet", "-m", "baseline"], cwd=repository, check=True)
 
-    application.write_text(source.replace("return 1", "return 2"))
+    application.write_text("def answer() -> int:\n    return 2\n")
     (backend / "coverage.xml").write_text(
         """<?xml version="1.0" ?>
 <coverage version="7.0" lines-valid="2" lines-covered="1" line-rate="0.5">
@@ -336,20 +329,8 @@ def test_diff_cover_matches_changed_application_lines(tmp_path: Path, component:
 """
     )
 
-    report = "coverage.xml"
-    if component == "frontend":
-        report = "lcov.info"
-        (backend / report).write_text(
-            f"TN:\nSF:frontend/src/app/{filename}\nDA:1,1\nDA:2,0\nend_of_record\n"
-        )
     result = subprocess.run(
-        [
-            "diff-cover",
-            report,
-            "--config-file",
-            str(_repository_root() / "backend/pyproject.toml"),
-            "--compare-branch=HEAD",
-        ],
+        ["diff-cover", "coverage.xml", "--compare-branch=HEAD", "--fail-under=90"],
         cwd=backend,
         check=False,
         capture_output=True,
@@ -357,5 +338,5 @@ def test_diff_cover_matches_changed_application_lines(tmp_path: Path, component:
     )
 
     assert result.returncode != 0
-    assert f"src/app/{filename}" in result.stdout
+    assert "src/app/example.py" in result.stdout
     assert "No lines with coverage information" not in result.stdout

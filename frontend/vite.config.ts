@@ -47,7 +47,7 @@ export default defineConfig(({ mode }) => {
           "src/setupTests.ts",
           "src/**/*.d.ts",
         ],
-        reporter: [["lcov", { projectRoot: ".." }], "json-summary"],
+        reporter: ["lcov", "json-summary"],
       },
       environment: "jsdom",
       globals: true,

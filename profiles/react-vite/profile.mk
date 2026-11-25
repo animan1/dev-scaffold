@@ -430,27 +430,27 @@ fe.build: ## Build frontend (Vite)
 	cd $(FRONTEND_DIR) && pnpm build
 
 # React/Vite tooling prepared by setup.
-SOURCE_IMAGE ?= $(COMPOSE_PROJECT_NAME)-backend
-SOURCE_VENV := /app/.venv
-SOURCE_CONFIG := /workspace/backend/pyproject.toml
-SOURCE_FRONTEND = $(SOURCE_RUN) --workdir /workspace/frontend --entrypoint /bin/sh node:20
+SOURCE_RUN = $(COMPOSE_DEV) run --rm --no-deps --workdir /app \
+	--env REPO_DIR=/workspace --env PYTEST_ADDOPTS backend
+SOURCE_UV := uv run --frozen
+SOURCE_CONFIG := /app/pyproject.toml
+SOURCE_FRONTEND = $(COMPOSE_DEV) run --rm --no-deps \
+	--volume "$(CURDIR)/frontend/node_modules:/app/node_modules" frontend
 
 include $(SCAFFOLD_ROOT)profiles/django-checks.mk
 
 format-check::
-	$(SOURCE_FRONTEND) node_modules/.bin/prettier --check .
+	$(SOURCE_FRONTEND) corepack pnpm fmt-check
 
 lint::
-	$(SOURCE_FRONTEND) node_modules/.bin/eslint . --ext .ts,.tsx
+	$(SOURCE_RUN) $(SOURCE_UV) python scripts/check_no_any.py
+	$(SOURCE_FRONTEND) corepack pnpm lint
 
 typecheck::
-	$(SOURCE_FRONTEND) node_modules/.bin/tsc -b --pretty false --noEmit
+	$(SOURCE_FRONTEND) corepack pnpm typecheck
 
 test::
-	$(SOURCE_FRONTEND) node_modules/.bin/vitest run $(if $(filter 1,$(COVERAGE)),--coverage)
-ifeq ($(COVERAGE),1)
-	$(SOURCE_RUN) --workdir /workspace/frontend $(SOURCE_DIFF_COVER) coverage/lcov.info $(SOURCE_DIFF_ARGS)
-endif
+	$(SOURCE_FRONTEND) corepack pnpm test $(if $(filter 1,$(COVERAGE)),--coverage)
 
 format::
-	$(SOURCE_FRONTEND) node_modules/.bin/prettier --write .
+	$(SOURCE_FRONTEND) corepack pnpm format

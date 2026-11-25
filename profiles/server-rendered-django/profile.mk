@@ -4,10 +4,16 @@ SERVER_PROFILE_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 PROJECT_NAME ?= $(notdir $(CURDIR))
 APP_PORT ?= 18000
 APP_HOST ?= localhost
-SOURCE_IMAGE ?= $(PROJECT_NAME)-app
-SOURCE_VENV := /opt/venv
+DIFF_BASE ?= origin/main
+SOURCE_RUN = $(COMPOSE) run --rm --no-deps --workdir /workspace/backend --env PYTEST_ADDOPTS app
+SOURCE_UV = $(UV_RUN)
 SOURCE_CONFIG := /workspace/profiles/server-rendered-django/pyproject.toml
 include $(SCAFFOLD_ROOT)profiles/django-checks.mk
+
+test::
+ifeq ($(COVERAGE),1)
+	$(SOURCE_RUN) $(SOURCE_UV) diff-cover coverage.xml --compare-branch=$(DIFF_BASE) --fail-under=90
+endif
 PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
 GIT_COMMON_DIR ?= $(shell git rev-parse --path-format=absolute --git-common-dir)
 HOST_UID ?= $(shell id -u)
