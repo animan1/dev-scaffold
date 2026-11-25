@@ -50,8 +50,18 @@ services:
       - "127.0.0.1:${RELEASE_HTTP_PORT:-18080}:8080"
     restart: unless-stopped
     volumes:
-      - media:/media:ro
-      - staticfiles:/static:ro
+      - type: volume
+        source: media
+        target: /media
+        read_only: true
+        volume:
+          nocopy: true
+      - type: volume
+        source: staticfiles
+        target: /static
+        read_only: true
+        volume:
+          nocopy: true
 
   monitor:
     profiles: ["monitoring"]

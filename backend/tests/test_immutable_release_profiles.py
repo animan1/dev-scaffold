@@ -39,8 +39,8 @@ def test_react_release_path_remains_selected_by_the_react_profile() -> None:
     assert "profiles/server-rendered-django" not in build
     assert "deploy/docker-compose.release.yml" in verify
     assert "--env-file deploy/releases/" in verify
-    assert "docker-compose.release-ci.yml" in logs
-    assert "logs --tail=200" in logs
+    assert "docker-compose.ephemeral.yml" in logs
+    assert "logs -f --tail=200" in logs
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
@@ -96,6 +96,54 @@ def test_release_configuration_resolves_production_project_and_volumes(
         assert all(
             volume["name"].startswith(f"{project}_") for volume in config["volumes"].values()
         )
+        if profile == "server-rendered-django":
+            for mount in config["services"]["web"]["volumes"]:
+                assert mount["read_only"] is True
+                assert mount["volume"]["nocopy"] is True
+            assert not any(
+                mount.get("volume", {}).get("nocopy", False)
+                for mount in config["services"]["app"]["volumes"]
+            )
+
+
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+def test_shared_lifecycle_commands_select_each_requested_environment(profile: str) -> None:
+    for command in ("down", "logs", "ps"):
+        output = _make(
+            profile,
+            "--dry-run",
+            "PROJECT_NAME=tenant",
+            *(f"{command}-{env}" for env in ("dev", "prod", "ephemeral")),
+        )
+        assert re.findall(r"COMPOSE_PROJECT_NAME=([^\s]+)", output) == [
+            "tenant-dev",
+            "tenant-prod",
+            "tenant-ephemeral",
+        ]
+    waiting = _make(profile, "--dry-run", "PROJECT_NAME=tenant", "wait-prod")
+    assert "COMPOSE_PROJECT_NAME=tenant-prod" in waiting
+    assert "tenant-dev" not in waiting
+    assert "X-Forwarded-Proto: https" in waiting
+    assert "http://127.0.0.1:18080/api/healthz" in waiting
+
+
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+def test_restart_aborts_before_startup_when_teardown_fails(profile: str) -> None:
+    result = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            f"SCAFFOLD_PROFILE={profile}",
+            "COMPOSE_DEV=false",
+            "restart-dev",
+        ],
+        cwd=_repository_root(),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "false down --remove-orphans" in result.stdout
+    assert "up-dev" not in result.stdout
 
 
 def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> None:
@@ -123,7 +171,7 @@ def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> Non
     assert "/media/release-smoketest.txt" in verify
     assert "stop app" in verify
     assert "profiles/server-rendered-django/release.compose.yml" in logs
-    assert "logs --tail=200" in logs
+    assert "logs -f --tail=200" in logs
 
 
 def test_server_rendered_release_preserves_manifest_deploy_and_rollback_contract() -> None:

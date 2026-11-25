@@ -3,6 +3,10 @@ HELP_FILES = $(filter-out $(firstword $(MAKEFILE_LIST)),$(MAKEFILE_LIST))
 PYTHON_PROJECT_DIR := profiles/server-rendered-django
 APP_PORT ?= 18000
 APP_HOST ?= localhost
+URL_ROOT ?= http://127.0.0.1:$(APP_PORT)
+CURL_FLAGS ?= -H 'Host: $(APP_HOST)'
+wait-prod: URL_ROOT = http://127.0.0.1:$(RELEASE_HTTP_PORT)
+wait-prod: CURL_FLAGS = -H 'Host: $(APP_HOST)' -H 'X-Forwarded-Proto: https'
 DIFF_BASE ?= origin/main
 PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
 GIT_COMMON_DIR ?= $(shell git rev-parse --path-format=absolute --git-common-dir)
@@ -23,10 +27,10 @@ EPHEMERAL_HTTPS_PORT ?= 18444
 EPHEMERAL_INGRESS_IMAGE ?= local/$(PROJECT_NAME)-ephemeral-ingress:test
 EPHEMERAL_COMPOSE_FILE := profiles/server-rendered-django/ephemeral.compose.yml
 RELEASE_COMPOSE_FILE := profiles/server-rendered-django/release.compose.yml
-RELEASE_COMPOSE_FILES := -f $(RELEASE_COMPOSE_FILE)
+PROD_COMPOSE_FILES := -f $(RELEASE_COMPOSE_FILE)
 COMPOSE_PROD = COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(PROD_ENV_FILE) docker compose --project-directory . \
-	$(RELEASE_COMPOSE_FILES) --env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
+	$(PROD_COMPOSE_FILES) --env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
 COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) EPHEMERAL_HTTP_PORT=$(EPHEMERAL_HTTP_PORT) \
 	EPHEMERAL_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) \
@@ -43,7 +47,7 @@ PROD_APPLICATION_SERVICE := app
 # Resolve configuration before a release manifest or its images exist.
 PROD_CONFIG = $(LOCAL_RELEASE_IMAGES) COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory . \
-	$(RELEASE_COMPOSE_FILES) --env-file $(PROD_ENV_FILE)
+	$(PROD_COMPOSE_FILES) --env-file $(PROD_ENV_FILE)
 
 .PHONY: build
 build: ## Build the deterministic development application image
@@ -51,19 +55,6 @@ build: ## Build the deterministic development application image
 
 .PHONY: setup
 setup: build ## Prepare Docker development dependencies from the committed lockfile
-
-.PHONY: wait-dev
-wait-dev: ## Wait for the routed Django health endpoint
-	@for attempt in $$(seq 1 60); do \
-		if curl -fsS -H 'Host: $(APP_HOST)' \
-			'http://127.0.0.1:$(APP_PORT)/api/healthz' >/dev/null; then \
-			echo "Django is ready"; exit 0; \
-		fi; \
-		sleep 1; \
-	done; \
-	echo "Django did not become ready"; \
-	$(COMPOSE_DEV) logs app; \
-	exit 1
 
 .PHONY: format
 format: ## Apply the single deterministic Python formatter and safe lint fixes

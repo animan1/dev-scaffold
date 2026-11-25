@@ -29,18 +29,15 @@ ifneq ($(origin BACKUP_PUBLICATION_PATH),undefined)
 export BACKUP_PUBLICATION_PATH
 endif
 
-ifeq ($(SCAFFOLD_PROFILE),react-vite)
+PROD_CONFIG_FILES += -f $(BACKUP_COMPOSE_FILE)
 PROD_COMPOSE_FILES += -f $(BACKUP_COMPOSE_FILE)
-RELEASE_COMPOSE_FILES += -f $(BACKUP_COMPOSE_FILE)
+ifeq ($(SCAFFOLD_PROFILE),react-vite)
 EPHEMERAL_COMPOSE_FILES := -f $(BACKUP_COMPOSE_FILE)
-BACKUP_COMPOSE = $(COMPOSE_PROD)
 BACKUP_COMPOSE_CONTRACT_FILES = -f deploy/docker-compose.prod.yml -f $(BACKUP_COMPOSE_FILE)
 BACKUP_COMPOSE_CONTRACT_PROJECT_DIRECTORY =
 BACKUP_WRITER_SERVICES ?= backend monitor backup
 else ifeq ($(SCAFFOLD_PROFILE),server-rendered-django)
-RELEASE_COMPOSE_FILES += -f $(BACKUP_COMPOSE_FILE)
 EPHEMERAL_BACKUP_FILES := -f $(BACKUP_COMPOSE_FILE)
-BACKUP_COMPOSE = $(COMPOSE_PROD)
 BACKUP_COMPOSE_CONTRACT_FILES = -f $(RELEASE_COMPOSE_FILE) -f $(BACKUP_COMPOSE_FILE)
 BACKUP_COMPOSE_CONTRACT_PROJECT_DIRECTORY = --project-directory .
 BACKUP_WRITER_SERVICES ?= app monitor backup
@@ -62,7 +59,7 @@ BACKUP_COMPOSE_CONTRACT = COMPOSE_PROJECT_NAME=$(BACKUP_COMPOSE_CONTRACT_PROJECT
 	$(BACKUP_COMPOSE_CONTRACT_FILES) --env-file $(BACKUP_COMPOSE_CONTRACT_ENV_FILE) \
 	--profile monitoring
 
-BACKUP_RUN = $(BACKUP_COMPOSE) run --rm --no-deps $(BACKUP_SERVICE)
+BACKUP_RUN = $(COMPOSE_PROD) run --rm --no-deps $(BACKUP_SERVICE)
 BACKUP_EXERCISE_COMPOSE = COMPOSE_PROJECT_NAME=$(BACKUP_EXERCISE_PROJECT) \
 	BACKUP_IMAGE=$(BACKUP_IMAGE) BACKUP_LOCAL_PATH=$(BACKUP_EXERCISE_ROOT)/repository \
 	BACKUP_PUBLICATION_PATH=$(BACKUP_EXERCISE_ROOT)/publication \
@@ -168,12 +165,12 @@ backup-image-versions: build-backup-image ## Print the exact tools installed in 
 
 .PHONY: backup-database-ready
 backup-database-ready:
-	$(BACKUP_COMPOSE) up -d --wait $(BACKUP_DATABASE_SERVICE)
+	$(COMPOSE_PROD) up -d --wait $(BACKUP_DATABASE_SERVICE)
 
 .PHONY: backup-storage-ready
 backup-storage-ready:
 	$(MAKE) prepare-prod
-	$(BACKUP_COMPOSE) run --rm --no-deps backup-init
+	$(COMPOSE_PROD) run --rm --no-deps backup-init
 
 .PHONY: backup-prod
 backup-prod: ## Create, retain, prune, and integrity-check an encrypted database backup
@@ -206,11 +203,11 @@ up-backup-prod: ## Start the scheduled backup and restore-verification worker
 	$(BACKUP_BUILD)
 	$(MAKE) backup-storage-ready
 	$(MAKE) backup-database-ready
-	$(BACKUP_COMPOSE) up -d --no-build $(BACKUP_SERVICE)
+	$(COMPOSE_PROD) up -d --no-build $(BACKUP_SERVICE)
 
 .PHONY: logs-backup-prod
 logs-backup-prod: ## Show recent scheduled backup worker logs
-	$(BACKUP_COMPOSE) logs --tail=200 $(BACKUP_SERVICE)
+	$(COMPOSE_PROD) logs --tail=200 $(BACKUP_SERVICE)
 
 .PHONY: restore-prod
 restore-prod: ## Replace the configured database from BACKUP_SNAPSHOT; requires CONFIRM=restore-prod
@@ -221,9 +218,9 @@ restore-prod: ## Replace the configured database from BACKUP_SNAPSHOT; requires 
 	fi
 	$(BACKUP_BUILD)
 	$(MAKE) backup-storage-ready
-	$(BACKUP_COMPOSE) stop $(BACKUP_WRITER_SERVICES)
+	$(COMPOSE_PROD) stop $(BACKUP_WRITER_SERVICES)
 	$(MAKE) backup-database-ready
-	$(BACKUP_COMPOSE) run --rm --no-deps \
+	$(COMPOSE_PROD) run --rm --no-deps \
 		-e BACKUP_RESTORE_CONFIRMATION=$(BACKUP_RESTORE_CONFIRM_VALUE) \
 		-e BACKUP_RESTORE_SNAPSHOT=$(BACKUP_SNAPSHOT) $(BACKUP_SERVICE) restore
 	@echo "Database restore complete; run the consuming project's migration, startup, and smoke procedures."

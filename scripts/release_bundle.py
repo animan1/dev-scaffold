@@ -117,7 +117,7 @@ def build_hotfix(root, source, rev, target, selected, values, env, spec):
         "DEV_COMPOSE_PROJECT": check_project + "-dev",
         "PROD_COMPOSE_PROJECT": check_project + "-prod",
         "EPHEMERAL_COMPOSE_PROJECT": check_project + "-ephemeral",
-        # Older committed deployment sources still read these selectors.
+        # main before #103 (e.g. 4e98a11) reads these legacy project selectors.
         "RELEASE_COMPOSE_PROJECT": check_project + "-ephemeral",
     }
     for check in spec["check_targets"]:
