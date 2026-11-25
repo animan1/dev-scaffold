@@ -1,7 +1,5 @@
-SHELL := /bin/bash
 COMPOSE_DEV := docker compose -f deploy/docker-compose.dev.yml
 FRONTEND_DIR := frontend
-PROJECT_NAME ?= $(notdir $(CURDIR))
 COMPOSE_PROJECT_NAME ?= $(PROJECT_NAME)
 export COMPOSE_PROJECT_NAME
 MONITORING ?= 0
@@ -24,15 +22,9 @@ COMPOSE_PROD = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose $(PROD_C
 COMPOSE_MONITOR = docker compose -f deploy/docker-compose.prod.yml \
 	-f deploy/docker-compose.external-monitoring.yml --profile monitoring \
 	--env-file deploy/.env.prod
-RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
-RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)
-RELEASE_REVISION ?= $(shell git rev-parse HEAD)
 RELEASE_BACKEND_TAG = $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG = $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
-RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
-RELEASE_PLATFORM ?=
 RELEASE_PULL ?= $(COMPOSE_RELEASE) pull backend nginx
-RELEASE_HTTP_PORT ?= 18080
 RELEASE_HTTPS_PORT ?= 18443
 COMPOSE_RELEASE = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) docker compose \
 	$(RELEASE_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) \
@@ -54,7 +46,6 @@ CURL_FLAGS ?=
 VERBOSE ?= 0
 FEATURED := 'up down restart logs check smoke up-prod smoke-prod help help-verbose'
 
-.DEFAULT_GOAL := help
 
 .PHONY: help
 help: ## Show this help.
@@ -349,24 +340,11 @@ push-release-images: ## Push verified images and record their immutable digests
 		'$(RELEASE_REVISION)' '$(RELEASE_IMAGE_PREFIX)' "$$backend" "$$web" > $(RELEASE_FILE); \
 	echo "Recorded $(RELEASE_FILE)"
 
-.PHONY: initialize-release
-initialize-release: ## Initialize the database/static volume with the recorded backend image
-	@test -f $(RELEASE_FILE) || { echo 'Set RELEASE_FILE to a recorded release manifest'; exit 1; }
-	$(COMPOSE_RELEASE) config --quiet
-	$(RELEASE_PULL)
-	$(COMPOSE_RELEASE) up -d --no-build db
-	$(RUN_RELEASE) python -m app.manage check --deploy
-	$(RUN_RELEASE) python -m app.manage migrate
-	$(RUN_RELEASE) python -m app.manage collectstatic --noinput
-
 .PHONY: deploy-release
 deploy-release: initialize-release ## Deploy the recorded images through normal production initialization
 	$(COMPOSE_RELEASE) up -d --no-build
 	$(COMPOSE_RELEASE) up -d --no-deps --force-recreate nginx
 
-.PHONY: rollback-release
-rollback-release: ## Deploy a previously recorded RELEASE_FILE
-rollback-release: deploy-release
 
 .PHONY: be.wait-prod
 be.wait-prod: ## Wait for backend health (prod)
@@ -450,7 +428,7 @@ typecheck::
 	$(SOURCE_FRONTEND) corepack pnpm typecheck
 
 test::
-	$(SOURCE_FRONTEND) corepack pnpm test $(if $(filter 1,$(COVERAGE)),--coverage)
+	$(SOURCE_FRONTEND) corepack pnpm run test $(if $(filter 1,$(COVERAGE)),--coverage)
 
 format::
 	$(SOURCE_FRONTEND) corepack pnpm format

@@ -1,7 +1,5 @@
-SHELL := /bin/bash
 SERVER_PROFILE_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
-PROJECT_NAME ?= $(notdir $(CURDIR))
 APP_PORT ?= 18000
 APP_HOST ?= localhost
 DIFF_BASE ?= origin/main
@@ -10,6 +8,7 @@ SOURCE_UV = $(UV_RUN)
 SOURCE_CONFIG := /workspace/profiles/server-rendered-django/pyproject.toml
 include $(SCAFFOLD_ROOT)profiles/django-checks.mk
 
+test:: SOURCE_RUN = $(COMPOSE) run --rm --workdir /workspace/backend --env PYTEST_ADDOPTS app
 test::
 ifeq ($(COVERAGE),1)
 	$(SOURCE_RUN) $(SOURCE_UV) diff-cover coverage.xml --compare-branch=$(DIFF_BASE) --fail-under=90
@@ -25,15 +24,10 @@ RUN := $(COMPOSE) run --rm app
 UV_RUN := uv run --project /workspace/profiles/server-rendered-django
 DJANGO_DEV_MANAGE := $(RUN) $(UV_RUN) python -m app.manage
 PROFILE_PROJECT := /workspace/profiles/server-rendered-django/pyproject.toml
-RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
-RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)
-RELEASE_REVISION ?= $(shell git rev-parse HEAD)
 RELEASE_BACKEND_TAG ?= $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG ?= $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
-RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
-RELEASE_PLATFORM ?=
+RELEASE_STATIC_ARGS := --clear
 RELEASE_PULL ?= $(COMPOSE_RELEASE) pull app web
-RELEASE_HTTP_PORT ?= 18080
 RELEASE_CI_ENV_FILE ?= .tmp/server-rendered-release-ci.env
 PROD_SIM_COMPOSE_PROJECT ?= $(PROJECT_NAME)-prod-sim
 PROD_SIM_ENV_FILE ?= .tmp/server-rendered-prod-sim.env
@@ -67,18 +61,18 @@ PROD_CONFIG = $(LOCAL_RELEASE_IMAGES) COMPOSE_PROJECT_NAME=$(PROJECT_NAME) \
 	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory . \
 	$(RELEASE_COMPOSE_FILES) --env-file $(PROD_ENV_FILE)
 
-.DEFAULT_GOAL := help
 
 .PHONY: help
 help: ## Show available commands
 	@{ \
-		grep -E '^[a-zA-Z0-9_.-]+:.*?## ' $(SERVER_PROFILE_MAKEFILE); \
+		grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' $(SERVER_PROFILE_MAKEFILE) \
+			$(SCAFFOLD_ROOT)profiles/common.mk $(SCAFFOLD_ROOT)profiles/django-checks.mk; \
 		if [[ -n "$(strip $(SELECTED_OPTIONAL_PROFILE_MAKEFILES))" ]]; then \
 			grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' \
 				$(SELECTED_OPTIONAL_PROFILE_MAKEFILES); \
 		fi; \
 		grep -hE '^(prepare-prod|migrations|migrate|superuser|shell|check|format-check|lint|typecheck|migrations-check|framework-check|test|format):.*?## ' \
-			$(firstword $(MAKEFILE_LIST)) $(SCAFFOLD_ROOT)profiles/django-checks.mk; \
+			$(firstword $(MAKEFILE_LIST)); \
 	} | sort | awk 'BEGIN {FS=":.*?## "} \
 		{printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
 
@@ -240,16 +234,6 @@ push-release-images: ## Publish verified images and record immutable digests
 		"$$backend" "$$web" > $(RELEASE_FILE); \
 	echo "Recorded $(RELEASE_FILE)"
 
-.PHONY: initialize-release
-initialize-release: ## Initialize the database and static volume with recorded images
-	@test -f $(RELEASE_FILE) || { echo 'Set RELEASE_FILE to a recorded release manifest'; exit 1; }
-	$(COMPOSE_RELEASE) config --quiet
-	$(RELEASE_PULL)
-	$(COMPOSE_RELEASE) up -d --no-build db
-	$(RUN_RELEASE) python -m app.manage check --deploy
-	$(RUN_RELEASE) python -m app.manage migrate
-	$(RUN_RELEASE) python -m app.manage collectstatic --noinput --clear
-
 .PHONY: deploy-release
 deploy-release: initialize-release ## Deploy the digest-pinned server-rendered image set
 	$(COMPOSE_RELEASE) up -d --no-build app web
@@ -297,9 +281,6 @@ down-prod: ## Stop the local production simulation while preserving volumes
 		$(LOCAL_RELEASE_IMAGES) $(COMPOSE_PROD_SIM) down --remove-orphans; \
 	fi
 
-.PHONY: rollback-release
-rollback-release: ## Deploy a previously recorded release manifest
-rollback-release: deploy-release
 
 .PHONY: smoke
 smoke: ## Smoke-test Django through its configurable loopback route

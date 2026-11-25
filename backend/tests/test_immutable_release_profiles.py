@@ -70,6 +70,7 @@ def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> Non
 
 def test_server_rendered_release_preserves_manifest_deploy_and_rollback_contract() -> None:
     makefile = (_repository_root() / "profiles/server-rendered-django/profile.mk").read_text()
+    makefile += (_repository_root() / "profiles/common.mk").read_text()
 
     for target in (
         "build-release-images",

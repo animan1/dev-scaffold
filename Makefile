@@ -1,14 +1,6 @@
 SCAFFOLD_ROOT := $(dir $(abspath $(firstword $(MAKEFILE_LIST))))
 include $(SCAFFOLD_ROOT).scaffold-profile
-UV_IMAGE ?= ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
-SCAFFOLD_BACKUP_PROFILE ?= immutable-backup
-CI_BACKUP_PROFILES ?= immutable-backup
-PROD_ENV_FILE ?= deploy/.env.prod
-PROD_APPLICATION_SERVICE ?= backend
-PROD_CONFIG = $(COMPOSE_PROD)
-HOST_INGRESS ?= 1
-# Capture tenant/operator input before the smoke-test placeholder default.
-PREPARE_PUBLIC_HOST := $(HOST_INGRESS_HOST)
+include $(SCAFFOLD_ROOT)profiles/common.mk
 
 .PHONY: profiles
 profiles:
