@@ -57,14 +57,15 @@ def test_unknown_profile_requires_its_own_implementation() -> None:
 
 def test_help_lists_commands_when_optional_makefiles_are_loaded() -> None:
     for profile in ("react-vite", "server-rendered-django"):
-        help_output = _make(f"SCAFFOLD_PROFILE={profile}", "help").stdout
-        assert "up-prod" in help_output
-        assert (
-            "prepare-prod"
-            in _make(
-                f"SCAFFOLD_PROFILE={profile}", "help-verbose" if profile == "react-vite" else "help"
-            ).stdout
-        )
+        for backup in ("immutable-backup", "none"):
+            selectors = [f"SCAFFOLD_PROFILE={profile}", f"SCAFFOLD_BACKUP_PROFILE={backup}"]
+            help_output = _make(*selectors, "help").stdout
+            assert "up-prod" in help_output
+            assert "prepare-prod" in help_output
+            assert ("verify-backup-image" in help_output) == (backup != "none")
+            assert help_output == _make(*selectors, "help-verbose").stdout
+            assert help_output == _make(*selectors).stdout
+            assert ("fe.setup" in help_output) == (profile == "react-vite")
 
 
 def test_ci_routes_profiles_without_duplicate_pr_push_runs() -> None:

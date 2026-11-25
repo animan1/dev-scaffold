@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-SERVER_PROFILE_MAKEFILE := $(lastword $(MAKEFILE_LIST))
+HELP_FILES = $(filter-out $(firstword $(MAKEFILE_LIST)),$(MAKEFILE_LIST))
 
 PROJECT_NAME ?= $(notdir $(CURDIR))
 APP_PORT ?= 18000
@@ -57,21 +57,6 @@ PROD_APPLICATION_SERVICE := app
 PROD_CONFIG = $(LOCAL_RELEASE_IMAGES) COMPOSE_PROJECT_NAME=$(PROJECT_NAME) \
 	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory . \
 	$(RELEASE_COMPOSE_FILES) --env-file $(PROD_ENV_FILE)
-
-.DEFAULT_GOAL := help
-
-.PHONY: help
-help: ## Show available commands
-	@{ \
-		grep -E '^[a-zA-Z0-9_.-]+:.*?## ' $(SERVER_PROFILE_MAKEFILE); \
-		if [[ -n "$(strip $(SELECTED_OPTIONAL_PROFILE_MAKEFILES))" ]]; then \
-			grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' \
-				$(SELECTED_OPTIONAL_PROFILE_MAKEFILES); \
-		fi; \
-		grep -E '^(prepare-prod|migrations|migrate|superuser|shell):.*?## ' \
-			$(firstword $(MAKEFILE_LIST)); \
-	} | sort | awk 'BEGIN {FS=":.*?## "} \
-		{printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: build
 build: ## Build the deterministic development application image
