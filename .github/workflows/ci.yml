@@ -67,13 +67,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Compose up (detached) via Make
-        run: make up
+        run: make setup up
 
       - name: Wait for backend
         run: make be.wait
 
       - name: Verify (inside container) via Make
-        run: make be.ci fe.ci
+        # Preserve the fixed-UID filesystem tests previously run by be.ci as root.
+        run: make check HOST_UID=0 HOST_GID=0
 
       - name: Smoke test via Nginx
         run: make smoke

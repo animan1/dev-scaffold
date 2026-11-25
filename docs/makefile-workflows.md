@@ -113,6 +113,7 @@ available, run in order and stop at the first failure:
 
 ```sh
 make setup
+make prepare-prod
 make check
 make build
 make image-check
@@ -151,6 +152,7 @@ checkout for the same production startup and verification as the local workflow:
 ```sh
 make download-latest
 make setup
+make prepare-prod
 make up-prod
 make verify-prod
 ```
@@ -160,6 +162,9 @@ path. The downloaded release records the same tested image identities and
 revision. Its architecture must match the destination. The destination does not
 rebuild, substitute tags, or repeat writable tests against production data.
 Stopping and starting prod uses the same commands as workflow 2.
+
+After an upgrade, `prepare-prod` collects newly required inputs while preserving
+existing configuration and credentials; it is not limited to first installation.
 
 For either production workflow, a failed ephemeral test stops promotion; use
 `make rm-ephemeral` for cleanup. A production migration failure stops startup and

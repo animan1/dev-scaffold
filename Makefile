@@ -72,7 +72,7 @@ PY_DIR := backend
 URL_ROOT ?= http://localhost:8080
 CURL_FLAGS ?=
 VERBOSE ?= 0
-FEATURED := 'up down restart logs verify smoke up-prod smoke-prod help help-verbose'
+FEATURED := 'up down restart logs check smoke up-prod smoke-prod help help-verbose'
 
 .DEFAULT_GOAL := help
 
@@ -148,14 +148,6 @@ be.wait: ## Wait for backend health (dev)
 	$(COMPOSE_DEV) logs || true; \
 	exit 1
 
-.PHONY: be.ci
-be.ci: ## (Docker) Run backend verify inside dev container
-	$(COMPOSE_DEV) run --rm backend bash -lc 'REPO_DIR=/workspace make -f /workspace/Makefile PY_DIR=/app be.verify'
-
-.PHONY: fe.ci
-fe.ci: ## (Docker) Run frontend verify inside dev container
-	$(COMPOSE_DEV) run --rm frontend sh -lc 'apk add --no-cache make >/dev/null 2>&1 || true; corepack enable; make -f /workspace/Makefile FRONTEND_DIR=/app fe.setup fe.verify'
-
 .PHONY: smoke
 smoke: ## Dev smoketest (API + static + FE root)
 smoke: CURL_CMD = curl $(CURL_FLAGS) -fsS
@@ -166,7 +158,7 @@ smoke:
 
 .PHONY: ci
 ci: ## (Docker) One-shot CI recipe (dev stack + FE/BE verify + smoke)
-ci: up be.wait be.ci fe.ci smoke
+ci: up be.wait check smoke
 	@echo "CI checks passed"
 
 # Prod
@@ -431,54 +423,9 @@ deps.lock: ## Update the selected profile's Python lockfile with pinned Dockeriz
 hooks: ## Install pre-commit hooks
 	cd $(PY_DIR) && uv run pre-commit install
 
-# ---- Quality gates ----
-.PHONY: verify
-verify: ## Run both backend and frontend verification
-verify: be.verify fe.verify
-
-.PHONY: be.verify
-be.verify: ## Backend format check + lint + typecheck + tests + coverage
-be.verify: fmt-check lint typecheck coverage
-
-.PHONY: preflight
-preflight: ## Format + lint + typecheck + coverage + precommit
-preflight: format lint typecheck coverage precommit
-	@echo "✅ Preflight complete."
-
-.PHONY: no-any
-no-any: ## Reject explicit typing.Any in backend Python
-	cd $(PY_DIR) && uv run python scripts/check_no_any.py
-
-.PHONY: lint
-lint: ## Ruff lint (backend)
-lint: no-any
-	cd $(PY_DIR) && uv run ruff check .
-
-.PHONY: format
-format: ## Apply Ruff fixes and formatting (backend)
-	cd $(PY_DIR) && uv run ruff check --fix .
-	cd $(PY_DIR) && uv run ruff format .
-
-.PHONY: fmt-check
-fmt-check: ## Check formatting (backend)
-	cd $(PY_DIR) && uv run ruff format --check .
-
-.PHONY: typecheck
-typecheck: ## MyPy type checking (backend)
-	cd $(PY_DIR) && uv run mypy .
-
-.PHONY: test
-test: ## Pytest (backend)
-	cd $(PY_DIR) && uv run pytest -q
-
-.PHONY: coverage
-coverage: ## Pytest coverage gate (backend)
-	cd $(PY_DIR) && uv run pytest --cov=src --cov-report=term-missing
-
-# ---- Pre-commit runner ----
-.PHONY: precommit
-precommit: ## Run pre-commit on all files
-precommit: fe.setup
+.PHONY: verify precommit
+verify: check ## Run source checks (legacy aggregate)
+precommit: fe.setup ## Run configured pre-commit hooks
 	cd $(PY_DIR) && uv run --extra dev pre-commit run --all-files
 
 # ---- Clean ----
@@ -502,41 +449,91 @@ fe.run: ## Run Vite dev server
 fe.build: ## Build frontend (Vite)
 	cd $(FRONTEND_DIR) && pnpm build
 
-.PHONY: fe.lint
-fe.lint: ## ESLint (frontend)
-	cd $(FRONTEND_DIR) && pnpm lint
-
-.PHONY: fe.format
-fe.format: ## Prettier write (frontend)
-	cd $(FRONTEND_DIR) && pnpm format
-
-.PHONY: fe.fmt-check
-fe.fmt-check: ## Prettier check (frontend)
-	cd $(FRONTEND_DIR) && pnpm fmt-check
-
-.PHONY: fe.test
-FE_COVERAGE_ARGS :=
-ifeq ($(COVERAGE),1)
-FE_COVERAGE_ARGS := --coverage --coverage.all=true \
-	'--coverage.include=src/**/*.{ts,tsx}' \
-	'--coverage.exclude=src/**/__tests__/**' \
-	'--coverage.exclude=src/**/*.{test,spec}.{ts,tsx}' \
-	--coverage.exclude=src/setupTests.ts '--coverage.exclude=src/**/*.d.ts' \
-	--coverage.reporter=lcov --coverage.reporter=json-summary
-endif
-fe.test: ## Vitest (frontend)
-	cd $(FRONTEND_DIR) && pnpm run test $(FE_COVERAGE_ARGS)
-
-.PHONY: fe.typecheck
-fe.typecheck: ## TypeScript typecheck (frontend)
-	cd $(FRONTEND_DIR) && pnpm typecheck
-
-.PHONY: fe.verify
-fe.verify: ## Frontend lint + typecheck + tests + fmt-check
-	cd $(FRONTEND_DIR) && pnpm verify
-
 else
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
+endif
+
+# Source gates reuse the tooling built by setup; never start a Compose stack.
+SOURCE_IMAGE ?= $(if $(filter react-vite,$(SCAFFOLD_PROFILE)),$(COMPOSE_PROJECT_NAME)-backend,$(PROJECT_NAME)-app)
+SOURCE_VENV := $(if $(filter react-vite,$(SCAFFOLD_PROFILE)),/app/.venv,/opt/venv)
+SOURCE_CONFIG := /workspace/$(if $(filter react-vite,$(SCAFFOLD_PROFILE)),backend,profiles/server-rendered-django)/pyproject.toml
+SOURCE_GIT_DIR = $(shell git rev-parse --path-format=absolute --git-common-dir)
+DIFF_BASE ?= origin/main
+CHANGED_COVERAGE_MIN ?= 90
+HOST_UID ?= $(shell id -u)
+HOST_GID ?= $(shell id -g)
+SOURCE_RUN = docker run --rm --pull=never --network none --read-only --tmpfs /tmp:rw,exec,mode=1777 \
+	--user "$(HOST_UID):$(HOST_GID)" --volume "$(CURDIR):/workspace" \
+	--volume "$(SOURCE_GIT_DIR):$(SOURCE_GIT_DIR):ro" --workdir /workspace/backend \
+	--env HOME=/tmp --env PYTHONPATH=/workspace/backend/src \
+	--env DJANGO_SETTINGS_MODULE=app.project.settings.dev --env DATABASE_URL=sqlite://:memory: \
+	--env DJANGO_SECRET_KEY=source-check-only-abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ \
+	--env DJANGO_ALLOWED_HOSTS=localhost --env DJANGO_EMAIL_BACKEND=django.core.mail.backends.locmem.EmailBackend \
+	--env RUFF_CACHE_DIR=/tmp/ruff --env MYPY_CACHE_DIR=/tmp/mypy --env COVERAGE_FILE=/tmp/.coverage \
+	--env GIT_CONFIG_COUNT=1 --env GIT_CONFIG_KEY_0=safe.directory --env GIT_CONFIG_VALUE_0=/workspace \
+	--env PYTEST_ADDOPTS
+SOURCE_PYTHON = $(SOURCE_RUN) $(SOURCE_IMAGE) $(SOURCE_VENV)/bin/python
+SOURCE_FRONTEND = $(SOURCE_RUN) --workdir /workspace/frontend --entrypoint /bin/sh node:20
+SOURCE_FE_COVERAGE_ARGS :=
+ifeq ($(COVERAGE),1)
+SOURCE_FE_COVERAGE_ARGS := --coverage --coverage.all=true \
+	'--coverage.include=src/**/*.{ts,tsx}' '--coverage.exclude=src/**/__tests__/**' \
+	'--coverage.exclude=src/**/*.{test,spec}.{ts,tsx}' --coverage.exclude=src/setupTests.ts \
+	'--coverage.exclude=src/**/*.d.ts'
+endif
+
+.PHONY: check format-check lint typecheck migrations-check framework-check test format
+check: ## Run all source gates without deployment or application startup
+	$(MAKE) format-check
+	$(MAKE) lint
+	$(MAKE) typecheck
+	$(MAKE) migrations-check
+	$(MAKE) framework-check
+	$(MAKE) test COVERAGE=1
+
+format-check: ## Check formatting across the selected application's components
+	$(SOURCE_PYTHON) -m ruff format --config $(SOURCE_CONFIG) --check .
+ifeq ($(SCAFFOLD_PROFILE),react-vite)
+	$(SOURCE_FRONTEND) node_modules/.bin/prettier --check .
+endif
+
+lint: ## Lint the selected application's components without fixes
+	$(SOURCE_PYTHON) scripts/check_no_any.py
+	$(SOURCE_PYTHON) -m ruff check --config $(SOURCE_CONFIG) .
+ifeq ($(SCAFFOLD_PROFILE),react-vite)
+	$(SOURCE_FRONTEND) node_modules/.bin/eslint . --ext .ts,.tsx
+endif
+
+typecheck: ## Type-check the selected application's components
+	$(SOURCE_PYTHON) -m mypy --config-file $(SOURCE_CONFIG) .
+ifeq ($(SCAFFOLD_PROFILE),react-vite)
+	$(SOURCE_FRONTEND) node_modules/.bin/tsc -b --pretty false --noEmit
+endif
+
+migrations-check: ## Check migration source consistency without changing schema
+	$(SOURCE_PYTHON) -m app.manage makemigrations --check --dry-run
+
+framework-check: ## Check framework configuration without a running database
+	$(SOURCE_RUN) --env DJANGO_SETTINGS_MODULE=app.project.settings.prod $(SOURCE_IMAGE) $(SOURCE_VENV)/bin/python -m app.manage check --deploy
+
+test: ## Run source tests once; COVERAGE=1 also gates total and changed-line coverage
+	$(SOURCE_PYTHON) -m pytest -c $(SOURCE_CONFIG) -q -p no:cacheprovider \
+		$(if $(filter 1,$(COVERAGE)),--cov=src --cov-config=$(SOURCE_CONFIG) --cov-report=term-missing --cov-report=xml:coverage.xml)
+ifeq ($(SCAFFOLD_PROFILE),react-vite)
+	$(SOURCE_FRONTEND) node_modules/.bin/vitest run $(SOURCE_FE_COVERAGE_ARGS)
+endif
+ifeq ($(COVERAGE),1)
+	$(SOURCE_RUN) $(SOURCE_IMAGE) $(SOURCE_VENV)/bin/diff-cover coverage.xml --compare-branch=$(DIFF_BASE) --fail-under=$(CHANGED_COVERAGE_MIN)
+ifeq ($(SCAFFOLD_PROFILE),react-vite)
+	$(SOURCE_RUN) --workdir /workspace/frontend $(SOURCE_IMAGE) $(SOURCE_VENV)/bin/diff-cover coverage/lcov.info --compare-branch=$(DIFF_BASE) --fail-under=$(CHANGED_COVERAGE_MIN)
+endif
+endif
+
+format: ## Apply formatting and safe fixes across the selected application's components
+	$(SOURCE_PYTHON) -m ruff check --config $(SOURCE_CONFIG) --fix .
+	$(SOURCE_PYTHON) -m ruff format --config $(SOURCE_CONFIG) .
+ifeq ($(SCAFFOLD_PROFILE),react-vite)
+	$(SOURCE_FRONTEND) node_modules/.bin/prettier --write .
 endif
 
 LOCAL_TLS ?= 0

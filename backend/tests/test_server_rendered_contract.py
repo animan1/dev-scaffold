@@ -28,6 +28,7 @@ def _make(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[st
 
 def test_server_rendered_make_contract_and_quality_gates() -> None:
     makefile = (_repository_root() / "profiles/server-rendered-django/profile.mk").read_text()
+    makefile += (_repository_root() / "Makefile").read_text()
 
     for target in (
         "build",
@@ -41,7 +42,6 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "lint",
         "typecheck",
         "test",
-        "coverage",
         "check",
         "verify",
         "precommit",
@@ -56,12 +56,11 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "format-check",
         "lint",
         "typecheck",
-        "coverage",
-        "changed-coverage",
         "migrations-check",
-        "django-check",
+        "framework-check",
     ):
         assert f"$(MAKE) {gate}" in makefile
+    assert "$(MAKE) test COVERAGE=1" in makefile
 
 
 def test_server_rendered_teardown_is_safe_and_reset_is_guarded() -> None:
@@ -287,35 +286,42 @@ def test_server_rendered_tools_explicitly_load_profile_configuration() -> None:
     assert f"mypy --config-file {profile_config}" in _make("--dry-run", "typecheck").stdout
     test_output = _make("--dry-run", "test").stdout
     assert f"pytest -c {profile_config}" in test_output
-    coverage_output = _make("--dry-run", "coverage").stdout
+    coverage_output = _make("--dry-run", "test", "COVERAGE=1").stdout
     assert f"pytest -c {profile_config}" in coverage_output
     assert f"--cov-config={profile_config}" in coverage_output
 
 
 def test_changed_coverage_runs_from_backend() -> None:
-    output = _make("--dry-run", "changed-coverage").stdout
+    output = _make("--dry-run", "test", "COVERAGE=1").stdout
 
-    assert "cd /workspace/backend" in output
+    assert "--workdir /workspace/backend" in output
     assert "diff-cover" in output
     assert "coverage.xml" in output
     assert "backend/coverage.xml" not in output
 
 
-@pytest.mark.skipif(shutil.which("diff-cover") is None, reason="diff-cover is profile-only")
-def test_diff_cover_matches_changed_backend_application_lines(tmp_path: Path) -> None:
+@pytest.mark.skipif(shutil.which("diff-cover") is None, reason="Needs prepared source tooling")
+@pytest.mark.parametrize("component", ["backend", "frontend"])
+def test_diff_cover_matches_changed_application_lines(tmp_path: Path, component: str) -> None:
     repository = tmp_path / "repository"
-    backend = repository / "backend"
-    application = backend / "src" / "app" / "example.py"
+    backend = repository / component
+    filename = "example.py" if component == "backend" else "example.ts"
+    application = backend / "src" / "app" / filename
     application.parent.mkdir(parents=True)
-    application.write_text("def answer() -> int:\n    return 1\n")
+    source = (
+        "def answer() -> int:\n    return 1\n"
+        if component == "backend"
+        else "export function answer() {\n    return 1;\n}\n"
+    )
+    application.write_text(source)
 
     subprocess.run(["git", "init", "--quiet"], cwd=repository, check=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repository, check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=repository, check=True)
-    subprocess.run(["git", "add", "backend/src/app/example.py"], cwd=repository, check=True)
+    subprocess.run(["git", "add", f"{component}/src/app/{filename}"], cwd=repository, check=True)
     subprocess.run(["git", "commit", "--quiet", "-m", "baseline"], cwd=repository, check=True)
 
-    application.write_text("def answer() -> int:\n    return 2\n")
+    application.write_text(source.replace("return 1", "return 2"))
     (backend / "coverage.xml").write_text(
         """<?xml version="1.0" ?>
 <coverage version="7.0" lines-valid="2" lines-covered="1" line-rate="0.5">
@@ -329,8 +335,14 @@ def test_diff_cover_matches_changed_backend_application_lines(tmp_path: Path) ->
 """
     )
 
+    report = "coverage.xml"
+    if component == "frontend":
+        report = "lcov.info"
+        (backend / report).write_text(
+            f"TN:\nSF:frontend/src/app/{filename}\nDA:1,1\nDA:2,0\nend_of_record\n"
+        )
     result = subprocess.run(
-        ["diff-cover", "coverage.xml", "--compare-branch=HEAD", "--fail-under=90"],
+        ["diff-cover", report, "--compare-branch=HEAD", "--fail-under=90"],
         cwd=backend,
         check=False,
         capture_output=True,
@@ -338,5 +350,5 @@ def test_diff_cover_matches_changed_backend_application_lines(tmp_path: Path) ->
     )
 
     assert result.returncode != 0
-    assert "src/app/example.py" in result.stdout
+    assert f"src/app/{filename}" in result.stdout
     assert "No lines with coverage information" not in result.stdout
