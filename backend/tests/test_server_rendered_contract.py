@@ -29,6 +29,7 @@ def _make(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[st
 def test_server_rendered_make_contract_and_quality_gates() -> None:
     makefile = (_repository_root() / "profiles/server-rendered-django/profile.mk").read_text()
     makefile += (_repository_root() / "Makefile").read_text()
+    makefile += (_repository_root() / "profiles/django-checks.mk").read_text()
 
     for target in (
         "build",
@@ -342,7 +343,13 @@ def test_diff_cover_matches_changed_application_lines(tmp_path: Path, component:
             f"TN:\nSF:frontend/src/app/{filename}\nDA:1,1\nDA:2,0\nend_of_record\n"
         )
     result = subprocess.run(
-        ["diff-cover", report, "--compare-branch=HEAD", "--fail-under=90"],
+        [
+            "diff-cover",
+            report,
+            "--config-file",
+            str(_repository_root() / "backend/pyproject.toml"),
+            "--compare-branch=HEAD",
+        ],
         cwd=backend,
         check=False,
         capture_output=True,

@@ -428,3 +428,29 @@ fe.run: ## Run Vite dev server
 .PHONY: fe.build
 fe.build: ## Build frontend (Vite)
 	cd $(FRONTEND_DIR) && pnpm build
+
+# React/Vite tooling prepared by setup.
+SOURCE_IMAGE ?= $(COMPOSE_PROJECT_NAME)-backend
+SOURCE_VENV := /app/.venv
+SOURCE_CONFIG := /workspace/backend/pyproject.toml
+SOURCE_FRONTEND = $(SOURCE_RUN) --workdir /workspace/frontend --entrypoint /bin/sh node:20
+
+include $(SCAFFOLD_ROOT)profiles/django-checks.mk
+
+format-check::
+	$(SOURCE_FRONTEND) node_modules/.bin/prettier --check .
+
+lint::
+	$(SOURCE_FRONTEND) node_modules/.bin/eslint . --ext .ts,.tsx
+
+typecheck::
+	$(SOURCE_FRONTEND) node_modules/.bin/tsc -b --pretty false --noEmit
+
+test::
+	$(SOURCE_FRONTEND) node_modules/.bin/vitest run $(if $(filter 1,$(COVERAGE)),--coverage)
+ifeq ($(COVERAGE),1)
+	$(SOURCE_RUN) --workdir /workspace/frontend $(SOURCE_DIFF_COVER) coverage/lcov.info $(SOURCE_DIFF_ARGS)
+endif
+
+format::
+	$(SOURCE_FRONTEND) node_modules/.bin/prettier --write .

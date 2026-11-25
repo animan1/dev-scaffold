@@ -43,6 +43,10 @@ DJANGO_SETTINGS_MODULE = "app.project.settings.dev"
 pythonpath = ["src"]
 addopts = "-ra --strict-markers"
 
+[tool.diff_cover]
+compare_branch = "origin/main"
+fail_under = 90
+
 [tool.coverage.run]
 branch = true
 source = ["src/app"]

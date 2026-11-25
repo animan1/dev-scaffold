@@ -4,7 +4,10 @@ SERVER_PROFILE_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 PROJECT_NAME ?= $(notdir $(CURDIR))
 APP_PORT ?= 18000
 APP_HOST ?= localhost
-DIFF_BASE ?= origin/main
+SOURCE_IMAGE ?= $(PROJECT_NAME)-app
+SOURCE_VENV := /opt/venv
+SOURCE_CONFIG := /workspace/profiles/server-rendered-django/pyproject.toml
+include $(SCAFFOLD_ROOT)profiles/django-checks.mk
 PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
 GIT_COMMON_DIR ?= $(shell git rev-parse --path-format=absolute --git-common-dir)
 HOST_UID ?= $(shell id -u)
@@ -68,8 +71,8 @@ help: ## Show available commands
 			grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' \
 				$(SELECTED_OPTIONAL_PROFILE_MAKEFILES); \
 		fi; \
-		grep -E '^(prepare-prod|migrations|migrate|superuser|shell|check|format-check|lint|typecheck|migrations-check|framework-check|test|format):.*?## ' \
-			$(firstword $(MAKEFILE_LIST)); \
+		grep -hE '^(prepare-prod|migrations|migrate|superuser|shell|check|format-check|lint|typecheck|migrations-check|framework-check|test|format):.*?## ' \
+			$(firstword $(MAKEFILE_LIST)) $(SCAFFOLD_ROOT)profiles/django-checks.mk; \
 	} | sort | awk 'BEGIN {FS=":.*?## "} \
 		{printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
 
