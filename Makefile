@@ -16,6 +16,8 @@ profiles:
 		--backup '$(SCAFFOLD_BACKUP_PROFILE)' --applications $(CI_PROFILES) \
 		--backups $(CI_BACKUP_PROFILES)
 
+HELP_FILES = $(MAKEFILE_LIST)
+
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 
 SHELL := /bin/bash
@@ -71,36 +73,6 @@ COMPOSE_RELEASE_INGRESS_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 PY_DIR := backend
 URL_ROOT ?= http://localhost:8080
 CURL_FLAGS ?=
-VERBOSE ?= 0
-FEATURED := 'up down restart logs verify smoke up-prod smoke-prod help help-verbose'
-
-.DEFAULT_GOAL := help
-
-.PHONY: help
-help: ## Show this help.
-	@FEATURED=$(FEATURED); \
-	ALL="$$(grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST))"; \
-	printf "Make targets:\n\n"; \
-	printf "  \033[1mFeatured\033[0m\n"; \
-	for t in $$FEATURED; do \
-	  echo "$$ALL" | grep -E "^$${t}:.*?## " | \
-	    awk 'BEGIN {FS=":.*?## "} {printf "    \033[36m%-24s\033[0m %s\n", $$1, $$2}'; \
-	done
-
-.PHONY: help-verbose
-help-verbose: ## Show full help (featured + everything else)
-	@FEATURED=$(FEATURED); \
-	ALL="$$(grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST))"; \
-	printf "Make targets:\n\n"; \
-	printf "  \033[1mFeatured\033[0m\n"; \
-	for t in $$FEATURED; do \
-	  echo "$$ALL" | grep -E "^$${t}:.*?## " | \
-	    awk 'BEGIN {FS=":.*?## "} {printf "    \033[36m%-24s\033[0m %s\n", $$1, $$2}'; \
-	done; \
-	printf "\n  \033[1mEverything else\033[0m\n"; \
-	REGEX="$$(printf '%s\n' $$FEATURED | paste -sd'|' -)"; \
-	echo "$$ALL" | grep -v -E "^($$REGEX):" | sort -t: -k1,1 | \
-	  awk 'BEGIN {FS=":.*?## "} {printf "    \033[36m%-24s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: up
 up: ## (Docker) Start dev stack (backend + nginx + frontend proxy)
@@ -543,6 +515,19 @@ else
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
+.DEFAULT_GOAL := help
+HELP_SHARED_COMMANDS := help|help-verbose|prepare-prod|migrations|migrate|superuser|shell
+
+.PHONY: help help-verbose
+help: ## List available commands
+	@{ \
+		grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' $(HELP_FILES); \
+		grep -E '^($(HELP_SHARED_COMMANDS)):.*?## ' $(firstword $(MAKEFILE_LIST)); \
+	} | sort -u | awk 'BEGIN {FS=":.*?## "} \
+		{printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+
+help-verbose: help ## Alias for help
+
 LOCAL_TLS ?= 0
 up-prod: prepare-prod
 
@@ -592,7 +577,6 @@ shell: ## Open the Django shell (development only)
 
 ifneq ($(SCAFFOLD_BACKUP_PROFILE),none)
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_BACKUP_PROFILE)/profile.mk
-SELECTED_OPTIONAL_PROFILE_MAKEFILES := $(SELECTED_OPTIONAL_PROFILE_MAKEFILES) $(lastword $(MAKEFILE_LIST))
 endif
 
 include $(SCAFFOLD_ROOT)profiles/release-transport.mk
