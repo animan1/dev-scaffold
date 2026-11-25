@@ -37,6 +37,18 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
     },
     test: {
+      coverage: {
+        provider: "v8",
+        all: true,
+        include: ["src/**/*.{ts,tsx}"],
+        exclude: [
+          "src/**/__tests__/**",
+          "src/**/*.{test,spec}.{ts,tsx}",
+          "src/setupTests.ts",
+          "src/**/*.d.ts",
+        ],
+        reporter: [["lcov", { projectRoot: ".." }], "json-summary"],
+      },
       environment: "jsdom",
       globals: true,
       setupFiles: ["./src/setupTests.ts"],

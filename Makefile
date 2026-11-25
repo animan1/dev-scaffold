@@ -150,11 +150,15 @@ be.wait: ## Wait for backend health (dev)
 
 .PHONY: be.ci
 be.ci: ## (Docker) Run backend verify inside dev container
-	$(COMPOSE_DEV) run --rm backend bash -lc 'REPO_DIR=/workspace make -f /workspace/Makefile PY_DIR=/app be.verify'
+	$(COMPOSE_DEV) run --rm --env DIFF_BASE backend bash -lc 'REPO_DIR=/workspace make -f /workspace/Makefile PY_DIR=/app be.verify'
 
 .PHONY: fe.ci
 fe.ci: ## (Docker) Run frontend verify inside dev container
-	$(COMPOSE_DEV) run --rm frontend sh -lc 'apk add --no-cache make >/dev/null 2>&1 || true; corepack enable; make -f /workspace/Makefile FRONTEND_DIR=/app fe.setup fe.verify'
+	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
+		--volume "$(CURDIR):/workspace" \
+		--volume "$(CURDIR)/frontend/node_modules:/app/node_modules" \
+		frontend sh -lc 'apk add --no-cache make >/dev/null 2>&1 || true; corepack enable; make -f /workspace/Makefile FRONTEND_DIR=/workspace/frontend fe.setup fe.verify'
+	$(COMPOSE_DEV) run --rm --no-deps backend bash -lc 'cd /app && uv run diff-cover /workspace/frontend/coverage/lcov.info --config-file pyproject.toml $(if $(DIFF_BASE),--compare-branch=$(DIFF_BASE))'
 
 .PHONY: smoke
 smoke: ## Dev smoketest (API + static + FE root)
@@ -473,7 +477,8 @@ test: ## Pytest (backend)
 
 .PHONY: coverage
 coverage: ## Pytest coverage gate (backend)
-	cd $(PY_DIR) && uv run pytest --cov=src --cov-report=term-missing
+	cd $(PY_DIR) && uv run pytest --cov=src --cov-report=term-missing --cov-report=xml
+	cd $(PY_DIR) && uv run diff-cover coverage.xml --config-file pyproject.toml $(if $(DIFF_BASE),--compare-branch=$(DIFF_BASE))
 
 # ---- Pre-commit runner ----
 .PHONY: precommit
@@ -517,12 +522,7 @@ fe.fmt-check: ## Prettier check (frontend)
 .PHONY: fe.test
 FE_COVERAGE_ARGS :=
 ifeq ($(COVERAGE),1)
-FE_COVERAGE_ARGS := --coverage --coverage.all=true \
-	'--coverage.include=src/**/*.{ts,tsx}' \
-	'--coverage.exclude=src/**/__tests__/**' \
-	'--coverage.exclude=src/**/*.{test,spec}.{ts,tsx}' \
-	--coverage.exclude=src/setupTests.ts '--coverage.exclude=src/**/*.d.ts' \
-	--coverage.reporter=lcov --coverage.reporter=json-summary
+FE_COVERAGE_ARGS := --coverage
 endif
 fe.test: ## Vitest (frontend)
 	cd $(FRONTEND_DIR) && pnpm run test $(FE_COVERAGE_ARGS)
