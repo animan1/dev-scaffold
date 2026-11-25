@@ -29,7 +29,6 @@ ifneq ($(origin BACKUP_PUBLICATION_PATH),undefined)
 export BACKUP_PUBLICATION_PATH
 endif
 
-PROD_CONFIG_FILES += -f $(BACKUP_COMPOSE_FILE)
 PROD_COMPOSE_FILES += -f $(BACKUP_COMPOSE_FILE)
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 EPHEMERAL_COMPOSE_FILES := -f $(BACKUP_COMPOSE_FILE)
@@ -59,7 +58,7 @@ BACKUP_COMPOSE_CONTRACT = COMPOSE_PROJECT_NAME=$(BACKUP_COMPOSE_CONTRACT_PROJECT
 	$(BACKUP_COMPOSE_CONTRACT_FILES) --env-file $(BACKUP_COMPOSE_CONTRACT_ENV_FILE) \
 	--profile monitoring
 
-BACKUP_RUN = $(COMPOSE_PROD) run --rm --no-deps $(BACKUP_SERVICE)
+BACKUP_RUN_PROD = $(COMPOSE_PROD) run --rm --no-deps $(BACKUP_SERVICE)
 BACKUP_EXERCISE_COMPOSE = COMPOSE_PROJECT_NAME=$(BACKUP_EXERCISE_PROJECT) \
 	BACKUP_IMAGE=$(BACKUP_IMAGE) BACKUP_LOCAL_PATH=$(BACKUP_EXERCISE_ROOT)/repository \
 	BACKUP_PUBLICATION_PATH=$(BACKUP_EXERCISE_ROOT)/publication \
@@ -163,46 +162,46 @@ backup-image-versions: build-backup-image ## Print the exact tools installed in 
 	docker run --rm --entrypoint sh $(BACKUP_IMAGE) -c \
 		'pg_dump --version; restic version; rclone version'
 
-.PHONY: backup-database-ready
-backup-database-ready:
+.PHONY: backup-database-ready-prod
+backup-database-ready-prod:
 	$(COMPOSE_PROD) up -d --wait $(BACKUP_DATABASE_SERVICE)
 
-.PHONY: backup-storage-ready
-backup-storage-ready:
+.PHONY: backup-storage-ready-prod
+backup-storage-ready-prod:
 	$(MAKE) prepare-prod
 	$(COMPOSE_PROD) run --rm --no-deps backup-init
 
 .PHONY: backup-prod
 backup-prod: ## Create, retain, prune, and integrity-check an encrypted database backup
 	$(BACKUP_BUILD)
-	$(MAKE) backup-storage-ready
-	$(MAKE) backup-database-ready
-	$(BACKUP_RUN) once
+	$(MAKE) backup-storage-ready-prod
+	$(MAKE) backup-database-ready-prod
+	$(BACKUP_RUN_PROD) once
 
 .PHONY: verify-backup-prod
 verify-backup-prod: ## Restore the latest backup into an isolated temporary database
 	$(BACKUP_BUILD)
-	$(MAKE) backup-storage-ready
-	$(MAKE) backup-database-ready
-	$(BACKUP_RUN) verify
+	$(MAKE) backup-storage-ready-prod
+	$(MAKE) backup-database-ready-prod
+	$(BACKUP_RUN_PROD) verify
 
 .PHONY: inspect-backup-prod
 inspect-backup-prod: ## Refresh backup freshness from the existing repository
 	$(BACKUP_BUILD)
-	$(MAKE) backup-storage-ready
-	$(BACKUP_RUN) inspect
+	$(MAKE) backup-storage-ready-prod
+	$(BACKUP_RUN_PROD) inspect
 
 .PHONY: snapshots-prod
 snapshots-prod: ## List restorable database snapshots without creating a repository
 	$(BACKUP_BUILD)
-	$(MAKE) backup-storage-ready
-	$(BACKUP_RUN) snapshots
+	$(MAKE) backup-storage-ready-prod
+	$(BACKUP_RUN_PROD) snapshots
 
 .PHONY: up-backup-prod
 up-backup-prod: ## Start the scheduled backup and restore-verification worker
 	$(BACKUP_BUILD)
-	$(MAKE) backup-storage-ready
-	$(MAKE) backup-database-ready
+	$(MAKE) backup-storage-ready-prod
+	$(MAKE) backup-database-ready-prod
 	$(COMPOSE_PROD) up -d --no-build $(BACKUP_SERVICE)
 
 .PHONY: logs-backup-prod
@@ -217,9 +216,9 @@ restore-prod: ## Replace the configured database from BACKUP_SNAPSHOT; requires 
 		exit 1; \
 	fi
 	$(BACKUP_BUILD)
-	$(MAKE) backup-storage-ready
+	$(MAKE) backup-storage-ready-prod
 	$(COMPOSE_PROD) stop $(BACKUP_WRITER_SERVICES)
-	$(MAKE) backup-database-ready
+	$(MAKE) backup-database-ready-prod
 	$(COMPOSE_PROD) run --rm --no-deps \
 		-e BACKUP_RESTORE_CONFIRMATION=$(BACKUP_RESTORE_CONFIRM_VALUE) \
 		-e BACKUP_RESTORE_SNAPSHOT=$(BACKUP_SNAPSHOT) $(BACKUP_SERVICE) restore

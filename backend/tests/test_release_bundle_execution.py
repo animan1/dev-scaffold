@@ -25,7 +25,6 @@ def test_environment_removes_inherited_make_and_compose_selection(
         "COMPOSE_PROFILES",
         "DEV_COMPOSE_PROJECT",
         "PROD_COMPOSE_PROJECT",
-        "RELEASE_COMPOSE_PROJECT",
         "EPHEMERAL_COMPOSE_PROJECT",
         "RELEASE_BACKEND_IMAGE",
         "RELEASE_WEB_IMAGE",
@@ -105,7 +104,6 @@ def test_options_bind_existing_project_and_release_metadata(tmp_path: Path) -> N
         "RELEASE_PLATFORM": "linux/arm64",
         "RELEASE_FILE": str(tmp_path / "release.env"),
         "PROD_ENV_FILE": "/private/tenant.env",
-        "RELEASE_COMPOSE_PROJECT": "tenant-prod",
         "PROD_COMPOSE_PROJECT": "tenant-prod",
     }
 

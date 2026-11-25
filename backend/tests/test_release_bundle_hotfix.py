@@ -84,6 +84,8 @@ def test_hotfix_builds_target_platform_and_checks_same_image_ids(
     assert check_values["PROJECT_NAME"] == f"emergency-check-{REVISION[:16]}"
     assert check_values["DEV_COMPOSE_PROJECT"] == check_values["PROJECT_NAME"] + "-dev"
     assert check_values["EPHEMERAL_COMPOSE_PROJECT"] == check_values["PROJECT_NAME"] + "-ephemeral"
+    assert "COMPOSE_PROJECT_NAME" not in check_values
+    assert "RELEASE_COMPOSE_PROJECT" not in check_values
     assert evidence["source"] == "local-checks"
     assert evidence["revision"] == REVISION
     assert evidence["platform"] == "linux/arm64"

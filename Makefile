@@ -37,19 +37,19 @@ MONITORING ?= 0
 HOST_INGRESS_HOST ?= app.example.test
 HOST_INGRESS_PORT ?= 18080
 export HOST_INGRESS_PORT
-PROD_CONFIG_FILES := -f deploy/docker-compose.prod.yml
 PROD_COMPOSE_FILES := -f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml
 PROD_COMPOSE_PROFILES :=
 ifeq ($(HOST_INGRESS),1)
-PROD_CONFIG_FILES += -f deploy/docker-compose.host-ingress.yml
 PROD_COMPOSE_FILES += -f deploy/docker-compose.host-ingress.yml
 endif
 ifeq ($(MONITORING),1)
-PROD_CONFIG_FILES += -f deploy/docker-compose.external-monitoring.yml
 PROD_COMPOSE_FILES += -f deploy/docker-compose.external-monitoring.yml
 PROD_COMPOSE_PROFILES += --profile monitoring
 endif
-PROD_CONFIG = COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose $(PROD_CONFIG_FILES) $(PROD_COMPOSE_PROFILES) --env-file $(PROD_ENV_FILE)
+# Resolve the same topology before a release manifest exists.
+PROD_CONFIG = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
+	COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) \
+	docker compose $(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file $(PROD_ENV_FILE)
 COMPOSE_MONITOR = $(COMPOSE_PROD) -f deploy/docker-compose.external-monitoring.yml --profile monitoring
 RELEASE_BACKEND_TAG = $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG = $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)

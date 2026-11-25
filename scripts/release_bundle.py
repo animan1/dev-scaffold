@@ -35,7 +35,6 @@ def environment():
         "COMPOSE_PROFILES",
         "DEV_COMPOSE_PROJECT",
         "PROD_COMPOSE_PROJECT",
-        "RELEASE_COMPOSE_PROJECT",
         "EPHEMERAL_COMPOSE_PROJECT",
         "RELEASE_BACKEND_IMAGE",
         "RELEASE_WEB_IMAGE",
@@ -113,12 +112,9 @@ def build_hotfix(root, source, rev, target, selected, values, env, spec):
     check_values = {
         **build_values,
         "PROJECT_NAME": check_project,
-        "COMPOSE_PROJECT_NAME": check_project + "-dev",
         "DEV_COMPOSE_PROJECT": check_project + "-dev",
         "PROD_COMPOSE_PROJECT": check_project + "-prod",
         "EPHEMERAL_COMPOSE_PROJECT": check_project + "-ephemeral",
-        # main before #103 (e.g. 4e98a11) reads these legacy project selectors.
-        "RELEASE_COMPOSE_PROJECT": check_project + "-ephemeral",
     }
     for check in spec["check_targets"]:
         make(source, check, check_values, env)
@@ -158,8 +154,6 @@ def options(data, settings, manifest):
         "RELEASE_FILE": str(manifest),
         "PROD_ENV_FILE": settings["env_file"],
         "PROD_COMPOSE_PROJECT": settings["project"],
-        # A bundle can contain deployment sources captured before this rename.
-        "RELEASE_COMPOSE_PROJECT": settings["project"],
     }
 
 
@@ -286,7 +280,6 @@ def inputs(path):
                 "RELEASE_FILE",
                 "RELEASE_PLATFORM",
                 "PROD_ENV_FILE",
-                "RELEASE_COMPOSE_PROJECT",
             },
             "reserved input variable",
         )

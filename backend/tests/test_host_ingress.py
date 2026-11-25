@@ -30,6 +30,7 @@ def _repo_root() -> Path:
 def _production_checkout(tmp_path: Path) -> str:
     for name in (
         "deploy/docker-compose.prod.yml",
+        "deploy/docker-compose.release.yml",
         "deploy/docker-compose.host-ingress.yml",
         "profiles/server-rendered-django/release.compose.yml",
         "profiles/immutable-backup/compose.yml",
