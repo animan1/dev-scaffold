@@ -71,6 +71,7 @@ COMPOSE_RELEASE_INGRESS_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 
 # ---- Paths ----
 PY_DIR := backend
+PYTHON_PROJECT_DIR := $(PY_DIR)
 URL_ROOT ?= http://localhost:8080
 CURL_FLAGS ?=
 
@@ -399,14 +400,6 @@ setup: ## Prepare Docker development dependencies from committed lockfiles
 		--volume "$(CURDIR)/frontend/node_modules:/app/node_modules" \
 		frontend corepack pnpm install --frozen-lockfile
 
-.PHONY: deps.lock
-deps.lock: ## Update the selected profile's Python lockfile with pinned Dockerized uv
-	docker run --rm --user "$$(id -u):$$(id -g)" \
-		--env UV_CACHE_DIR=/tmp/uv-cache \
-		--tmpfs /tmp:rw,mode=1777 \
-		--volume "$(CURDIR)/$(PY_DIR):/workspace" \
-		--workdir /workspace --entrypoint /usr/local/bin/uv $(UV_IMAGE) lock
-
 .PHONY: hooks
 hooks: ## Install pre-commit hooks
 	cd $(PY_DIR) && uv run pre-commit install
@@ -516,7 +509,7 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-HELP_SHARED_COMMANDS := help|help-verbose|prepare-prod|migrations|migrate|superuser|shell
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell
 
 .PHONY: help help-verbose
 help: ## List available commands
@@ -527,6 +520,15 @@ help: ## List available commands
 		{printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
 
 help-verbose: help ## Alias for help
+
+.PHONY: deps.lock
+deps.lock: ## Update the selected profile's Python lockfile with pinned Dockerized uv
+	docker run --rm --user "$$(id -u):$$(id -g)" \
+		--env UV_CACHE_DIR=/tmp/uv-cache \
+		--tmpfs /tmp:rw,mode=1777 \
+		--volume "$(CURDIR):/workspace" \
+		--workdir /workspace --entrypoint /usr/local/bin/uv $(UV_IMAGE) \
+		lock --project $(PYTHON_PROJECT_DIR)
 
 LOCAL_TLS ?= 0
 up-prod: prepare-prod

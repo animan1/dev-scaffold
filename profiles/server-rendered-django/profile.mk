@@ -2,6 +2,7 @@ SHELL := /bin/bash
 HELP_FILES = $(filter-out $(firstword $(MAKEFILE_LIST)),$(MAKEFILE_LIST))
 
 PROJECT_NAME ?= $(notdir $(CURDIR))
+PYTHON_PROJECT_DIR := profiles/server-rendered-django
 APP_PORT ?= 18000
 APP_HOST ?= localhost
 DIFF_BASE ?= origin/main
@@ -129,15 +130,6 @@ coverage: ## Run the single coverage-enabled test suite and write coverage.xml
 	$(RUN) $(UV_RUN) pytest -c $(PROFILE_PROJECT) --cov=src \
 		--cov-config=$(PROFILE_PROJECT) --cov-report=term-missing --cov-report=xml \
 		/workspace/backend
-
-.PHONY: deps.lock
-deps.lock: ## Update this profile's lockfile with pinned Dockerized uv
-	docker run --rm --user "$$(id -u):$$(id -g)" \
-		--env UV_CACHE_DIR=/tmp/uv-cache \
-		--tmpfs /tmp:rw,mode=1777 \
-		--volume "$(CURDIR):/workspace" \
-		--workdir /workspace --entrypoint /usr/local/bin/uv $(UV_IMAGE) \
-		lock --project profiles/server-rendered-django
 
 .PHONY: changed-coverage
 changed-coverage: ## Enforce coverage on Python lines changed from DIFF_BASE
