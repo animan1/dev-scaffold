@@ -154,7 +154,7 @@ def test_host_ingress_routes_django_admin_without_capturing_frontend_routes() ->
 
 
 def test_production_workflows_refresh_nginx_after_backend_replacement() -> None:
-    makefile = (_repo_root() / "Makefile").read_text()
+    makefile = (_repo_root() / "profiles/react-vite/profile.mk").read_text()
 
     refresh = "$(COMPOSE_PROD) up -d --no-deps --force-recreate nginx"
     assert makefile.count(refresh) == 1

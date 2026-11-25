@@ -1,7 +1,5 @@
-SHELL := /bin/bash
 SERVER_PROFILE_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
-PROJECT_NAME ?= $(notdir $(CURDIR))
 APP_PORT ?= 18000
 APP_HOST ?= localhost
 DIFF_BASE ?= origin/main
@@ -16,15 +14,9 @@ RUN := $(COMPOSE) run --rm app
 UV_RUN := uv run --project /workspace/profiles/server-rendered-django
 DJANGO_DEV_MANAGE := $(RUN) $(UV_RUN) python -m app.manage
 PROFILE_PROJECT := /workspace/profiles/server-rendered-django/pyproject.toml
-RELEASE_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
-RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)
-RELEASE_REVISION ?= $(shell git rev-parse HEAD)
 RELEASE_BACKEND_TAG ?= $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG ?= $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
-RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
-RELEASE_PLATFORM ?=
 RELEASE_PULL ?= $(COMPOSE_RELEASE) pull app web
-RELEASE_HTTP_PORT ?= 18080
 RELEASE_CI_ENV_FILE ?= .tmp/server-rendered-release-ci.env
 PROD_SIM_COMPOSE_PROJECT ?= $(PROJECT_NAME)-prod-sim
 PROD_SIM_ENV_FILE ?= .tmp/server-rendered-prod-sim.env
@@ -58,7 +50,6 @@ PROD_CONFIG = $(LOCAL_RELEASE_IMAGES) COMPOSE_PROJECT_NAME=$(PROJECT_NAME) \
 	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory . \
 	$(RELEASE_COMPOSE_FILES) --env-file $(PROD_ENV_FILE)
 
-.DEFAULT_GOAL := help
 
 .PHONY: help
 help: ## Show available commands
