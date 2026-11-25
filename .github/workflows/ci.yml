@@ -65,6 +65,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Compose up (detached) via Make
         run: make up
@@ -73,6 +75,8 @@ jobs:
         run: make be.wait
 
       - name: Verify (inside container) via Make
+        env:
+          DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
         run: make be.ci fe.ci
 
       - name: Smoke test via Nginx

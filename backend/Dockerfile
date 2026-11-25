@@ -24,6 +24,7 @@ RUN uv sync --frozen --all-extras
 # COPY src ./src
 # Install tools needed by CI and committed-release history validation
 RUN apt-get update && apt-get install -y --no-install-recommends bash git make && rm -rf /var/lib/apt/lists/*
+RUN git config --system --add safe.directory /workspace
 # Default command is the dev server (overridden in compose as needed)
 CMD ["python", "-m", "app.manage", "runserver", "0.0.0.0:8000"]
 
