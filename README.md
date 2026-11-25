@@ -20,7 +20,7 @@ application work. Once a project contains real code, use the separate
 - **Backend**: Django with type hints, Ruff formatting and linting, MyPy type checking, pytest, and coverage enforcement.
 - **Frontend**: React (Vite + pnpm) with ESLint, Prettier, and TypeScript.
 - **Dev Experience**:
-  - Unified `Makefile` with common targets (`verify`, `check`, `test`, `smoke`, `up`, `down`, etc.)
+  - Unified `Makefile` with common targets (`verify`, `check`, `test`, `smoke`, `up-dev`, `down-dev`, etc.)
   - Pre-commit hooks (Ruff, ESLint, Prettier, end-of-file fixes).
   - VS Code integration via workspace settings.
   - `.editorconfig` for consistent formatting across tools/editors.
@@ -36,6 +36,20 @@ application work. Once a project contains real code, use the separate
 
 ## Quickstart
 
+Compose projects default to `<project>-dev` for development, `<project>-prod`
+for production (including `deploy-release`), and `<project>-ephemeral` for release
+testing. `PROJECT_NAME` defaults to the checkout directory name. Each environment
+sets its own Compose project explicitly; a global `COMPOSE_PROJECT_NAME` does not
+select the environment.
+
+Existing installations: changing a project name does **not** migrate its volumes.
+Keep the existing production identity with
+`PROD_COMPOSE_PROJECT=<existing-project>` on production commands.
+Use `DEV_COMPOSE_PROJECT` for an existing development identity and
+`EPHEMERAL_COMPOSE_PROJECT` for release-test coordination. Do not give dev,
+prod and release testing the same project name. Preserve the original private
+configuration and volumes when planning any later namespace migration.
+
 ### Docker Dev
 
 `make setup` prepares the selected profile's Docker development dependencies from
@@ -45,13 +59,13 @@ Git hooks remain an explicit `make hooks` operation.
 ```bash
 make setup     # prepare dependencies without starting services
 make hooks     # install Git hooks explicitly
-make up        # start backend + nginx (proxying API, static, and frontend)
+make up-dev        # start backend + nginx (proxying API, static, and frontend)
 make smoke     # run API, static, and FE smokes
-make down      # stop stack while preserving development volumes
+make down-dev      # stop stack while preserving development volumes
 ```
 
 To deliberately remove development volumes and reset local state, run
-`make reset CONFIRM_RESET=1`. The confirmation is required because this cannot
+`make reset-dev CONFIRM_RESET=1`. The confirmation is required because this cannot
 be undone.
 
 ### Docker Prod (local)
@@ -71,17 +85,18 @@ deployments must keep `HOST_INGRESS=0` on production commands until their host
 ingress is configured; otherwise the next startup changes the exposed ports.
 
 ```bash
-make bootstrap-prod HOST_INGRESS=0 LOCAL_TLS=1  # once
-make up-prod HOST_INGRESS=0     # build & start prod stack with nginx + Django + Postgres
+make prepare-prod HOST_INGRESS=0 LOCAL_TLS=1
+make build-release-images     # build once and record this commit's images
+make up-prod HOST_INGRESS=0     # initialize and start the recorded release
 make smoke-prod HOST_INGRESS=0  # run API, static, and FE smokes
 make down-prod HOST_INGRESS=0   # stop stack
 ```
 
-### Optional immutable releases
+### Immutable releases
 
-The default local-production workflow remains intentionally simple and builds
-from the checkout. Projects that need a pull-only host can opt into the
-immutable-release profile.
+Local builds and registry releases use the same recorded-image deployment path.
+`up-prod` uses production inputs; `up-ephemeral` uses test inputs and local ingress.
+Neither startup command rebuilds the application images.
 
 CI reads the committed scaffold selector and waits for that profile's
 verification. A skipped inactive-profile job does not suppress the release.
@@ -136,11 +151,11 @@ Use the machine's destination platform. For this repository's existing laptop
 dummy, use the actual production workflow without a second Compose project:
 
 ```bash
-make prepare-prod HOST_INGRESS=0 LOCAL_TLS=1
+make prepare-prod HOST_INGRESS=0 LOCAL_TLS=1 PROD_COMPOSE_PROJECT=dev-scaffold
 make build-release-images RELEASE_PLATFORM=linux/arm64
-make release-bundle-config HOST_INGRESS=0 RELEASE_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_CONFIG_FILE=.tmp/private-release-compose.json
-make deploy-release HOST_INGRESS=0 RELEASE_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_PULL=true
-make smoke-prod HOST_INGRESS=0 CURL_FLAGS='--cacert deploy/nginx/certs/server.crt'
+make release-bundle-config HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_CONFIG_FILE=.tmp/private-release-compose.json
+make deploy-release HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_PULL=true
+make smoke-prod HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold CURL_FLAGS='--cacert deploy/nginx/certs/server.crt'
 ```
 
 Run from the existing `dev-scaffold` checkout, with its private `deploy/.env.prod`
@@ -165,7 +180,7 @@ leave the dummy running; do not use volume-deleting CI cleanup on it.
 Downstream applications supply their own existing project name, private
 configuration and ingress settings. `RELEASE_PULL=true` uses the local
 images; the initialization, migrations and service startup are the same recipe
-used for a registry release. `make up` remains the development-server workflow.
+used for a registry release. `make up-dev` remains the development-server workflow.
 
 `release-bundle-config` is machine-readable and can contain resolved credentials.
 For a local review, pass `RELEASE_CONFIG_FILE=/absolute/private-compose.json` to
@@ -203,7 +218,7 @@ gh attestation verify oci://ghcr.io/<owner>/<repo>-backend@<digest> \
   --repo <owner>/<repo>
 ```
 
-Set `RELEASE_COMPOSE_PROJECT` when a host runs multiple projects. Its default is
+Set `PROD_COMPOSE_PROJECT` when a host runs multiple projects. Its default is
 derived from the current repository directory so unrelated projects do not
 share Compose resources.
 

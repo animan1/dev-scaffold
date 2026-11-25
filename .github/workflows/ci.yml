@@ -44,20 +44,16 @@ jobs:
           DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
         run: make verify
 
-      - name: Exercise the local production ingress simulation
-        run: >-
-          make up-prod smoke-prod
-          BACKUP_LOCAL_PATH="$PWD/.tmp/server-rendered-backups"
-          BACKUP_PUBLICATION_PATH="$PWD/.tmp/server-rendered-publication"
-          BACKUP_PASSWORD=production-simulation-only
+      - name: Exercise ephemeral deployment and local ingress
+        run: make build-release-images up-ephemeral verify-ephemeral
 
       - name: Exercise the server-rendered immutable-release contract
         if: needs.profile-selection.outputs.selected-profile != 'server-rendered-django'
         run: make build-release-images verify-release-images
 
-      - name: Stop profile services without deleting volumes
+      - name: Stop development and remove ephemeral test data
         if: always()
-        run: make down down-release-ci down-prod
+        run: make down-dev rm-ephemeral
 
   backend:
     needs: profile-selection
@@ -69,10 +65,10 @@ jobs:
           fetch-depth: 0
 
       - name: Compose up (detached) via Make
-        run: make up
+        run: make up-dev
 
       - name: Wait for backend
-        run: make be.wait
+        run: make wait-dev
 
       - name: Verify (inside container) via Make
         env:
@@ -84,7 +80,7 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: make down
+        run: make down-dev
 
   immutable-backup-profile:
     needs: profile-selection
@@ -161,7 +157,7 @@ jobs:
           echo "RELEASE_BACKEND_TAG=${prefix}-backend:${GITHUB_SHA}" >> "$GITHUB_ENV"
           echo "RELEASE_WEB_TAG=${prefix}-web:${GITHUB_SHA}" >> "$GITHUB_ENV"
           project="${GITHUB_REPOSITORY//\//-}"
-          echo "RELEASE_COMPOSE_PROJECT=${project,,}-release-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+          echo "EPHEMERAL_COMPOSE_PROJECT=${project,,}-ephemeral-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
 
       - name: Build production images once
         run: make build-release-images
@@ -195,7 +191,7 @@ jobs:
 
       - name: Tear down release verification
         if: always()
-        run: make down-release-ci
+        run: make rm-ephemeral
 
       - name: Log in to this repository's GHCR packages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

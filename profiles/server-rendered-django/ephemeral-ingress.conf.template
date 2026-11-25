@@ -2,14 +2,14 @@ server {
   listen 80;
 
   location / {
-    return 308 https://$host:${PROD_SIM_HTTPS_PORT}$request_uri;
+    return 308 https://$host:${EPHEMERAL_HTTPS_PORT}$request_uri;
   }
 }
 
 server {
   listen 443 ssl;
-  ssl_certificate /etc/nginx/prod-sim-certs/server.crt;
-  ssl_certificate_key /etc/nginx/prod-sim-certs/server.key;
+  ssl_certificate /etc/nginx/ephemeral-certs/server.crt;
+  ssl_certificate_key /etc/nginx/ephemeral-certs/server.key;
 
   location / {
     proxy_pass http://web:8080;

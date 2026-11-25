@@ -48,7 +48,7 @@ def test_accepts_existing_project_and_preserves_private_configuration(tmp_path: 
         ("project", "UpperCase", "explicit Compose project"),
         ("env_file", "relative.env", "absolute existing env_file"),
         ("variables", {"RELEASE_PULL": "true"}, "reserved input variable"),
-        ("variables", {"COMPOSE_RELEASE": "replacement"}, "reserved input variable"),
+        ("variables", {"COMPOSE_PROD": "replacement"}, "reserved input variable"),
         ("variables", {"DJANGO_SECRET_KEY": "secret"}, "unsupported input variable"),
         ("variables", {"invalid-name": "1"}, "invalid input variable name"),
         ("variables", {"HOST_INGRESS_PORT": "$(touch marker)"}, "simple Make values"),

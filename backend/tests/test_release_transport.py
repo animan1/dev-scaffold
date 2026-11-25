@@ -54,7 +54,7 @@ def test_normal_release_keeps_native_build_and_pull_behavior(profile: str) -> No
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
 def test_installer_can_reuse_migrations_with_an_explicit_no_pull_command(profile: str) -> None:
     output = dry_run(
-        profile, "deploy-release", "RELEASE_PULL=true", "COMPOSE_RELEASE=validated-compose"
+        profile, "deploy-release", "RELEASE_PULL=true", "COMPOSE_PROD=validated-compose"
     )
     assert "pull " not in output
     assert "validated-compose" in output

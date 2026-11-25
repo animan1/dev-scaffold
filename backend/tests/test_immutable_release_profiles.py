@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
+import re
+import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -28,22 +32,124 @@ def _make(profile: str, *arguments: str) -> str:
 def test_react_release_path_remains_selected_by_the_react_profile() -> None:
     build = _make("react-vite", "--dry-run", "build-release-images")
     verify = _make("react-vite", "--dry-run", "verify-release-images")
-    logs = _make("react-vite", "--dry-run", "logs-release-ci")
+    logs = _make("react-vite", "--dry-run", "logs-ephemeral")
 
     assert "docker build --target prod" in build
     assert "docker build -f deploy/nginx/Dockerfile" in build
     assert "profiles/server-rendered-django" not in build
     assert "deploy/docker-compose.release.yml" in verify
-    assert "RELEASE_BACKEND_IMAGE" in verify
-    assert "RELEASE_WEB_IMAGE" in verify
-    assert "docker-compose.release-ci.yml" in logs
-    assert "logs --tail=200" in logs
+    assert "--env-file deploy/releases/" in verify
+    assert "docker-compose.ephemeral.yml" in logs
+    assert "logs -f --tail=200" in logs
+
+
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+def test_environment_namespaces_do_not_inherit_global_compose_project(
+    profile: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "tenant-prod")
+    for suffix, targets in (
+        ("dev", ("up-dev", "down-dev", "reset-dev", "logs-dev", "ps-dev")),
+        ("prod", ("up-prod", "down-prod", "deploy-release", "rollback-release", "prepare-prod")),
+        ("ephemeral", ("verify-release-images", "logs-ephemeral", "down-ephemeral")),
+    ):
+        output = _make(profile, "PROJECT_NAME=tenant", "--dry-run", *targets)
+        projects = re.findall(r"COMPOSE_PROJECT_NAME=([^\s]+)", output)
+        assert projects
+        assert set(projects) == {f"tenant-{suffix}"}
+    verification = _make(profile, "--dry-run", "verify-ephemeral")
+    assert "docker " not in verification
+    assert "migrate" not in verification
+    stopped = _make(profile, "--dry-run", "down-ephemeral")
+    removed = _make(profile, "--dry-run", "rm-ephemeral")
+    assert "down -v" not in stopped
+    assert "down -v" in removed
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Needs Docker Compose client")
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+def test_release_configuration_resolves_production_project_and_volumes(
+    profile: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOCKER_HOST", "unix:///nonexistent")
+    private = tmp_path / "production.env"
+    private.write_text("POSTGRES_USER=app\nPOSTGRES_PASSWORD=test-only\nPOSTGRES_DB=app\n")
+    manifest = tmp_path / "release.env"
+    manifest.write_text(
+        "RELEASE_BACKEND_IMAGE=local/backend:test\nRELEASE_WEB_IMAGE=local/web:test\n"
+        "RELEASE_REVISION=test\nRELEASE_IMAGE_PREFIX=local/app\n"
+    )
+    for project in ("tenant-prod", "legacy-tenant"):
+        config = json.loads(
+            _make(
+                profile,
+                "-s",
+                "release-bundle-config",
+                "PROJECT_NAME=tenant",
+                f"PROD_COMPOSE_PROJECT={project}",
+                "SCAFFOLD_BACKUP_PROFILE=none",
+                f"PROD_ENV_FILE={private}",
+                f"RELEASE_FILE={manifest}",
+            )
+        )
+        assert config["name"] == project
+        assert all(
+            volume["name"].startswith(f"{project}_") for volume in config["volumes"].values()
+        )
+        if profile == "server-rendered-django":
+            for mount in config["services"]["web"]["volumes"]:
+                assert mount["read_only"] is True
+                assert mount["volume"]["nocopy"] is True
+            assert not any(
+                mount.get("volume", {}).get("nocopy", False)
+                for mount in config["services"]["app"]["volumes"]
+            )
+
+
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+def test_shared_lifecycle_commands_select_each_requested_environment(profile: str) -> None:
+    for command in ("down", "logs", "ps"):
+        output = _make(
+            profile,
+            "--dry-run",
+            "PROJECT_NAME=tenant",
+            *(f"{command}-{env}" for env in ("dev", "prod", "ephemeral")),
+        )
+        assert re.findall(r"COMPOSE_PROJECT_NAME=([^\s]+)", output) == [
+            "tenant-dev",
+            "tenant-prod",
+            "tenant-ephemeral",
+        ]
+    waiting = _make(profile, "--dry-run", "PROJECT_NAME=tenant", "wait-prod")
+    assert "COMPOSE_PROJECT_NAME=tenant-prod" in waiting
+    assert "tenant-dev" not in waiting
+    assert "X-Forwarded-Proto: https" in waiting
+    assert "http://127.0.0.1:18080/api/healthz" in waiting
+
+
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+def test_restart_aborts_before_startup_when_teardown_fails(profile: str) -> None:
+    result = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            f"SCAFFOLD_PROFILE={profile}",
+            "COMPOSE_DEV=false",
+            "restart-dev",
+        ],
+        cwd=_repository_root(),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "false down --remove-orphans" in result.stdout
+    assert "up-dev" not in result.stdout
 
 
 def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> None:
     build = _make("server-rendered-django", "--dry-run", "build-release-images")
     verify = _make("server-rendered-django", "--dry-run", "verify-release-images")
-    logs = _make("server-rendered-django", "--dry-run", "logs-release-ci")
+    logs = _make("server-rendered-django", "--dry-run", "logs-ephemeral")
 
     assert "profiles/server-rendered-django/backend.Dockerfile" in build
     assert "profiles/server-rendered-django/release-nginx.Dockerfile" in build
@@ -56,7 +162,7 @@ def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> Non
     production_check = verify.index("python -m app.manage check --deploy")
     migration = verify.index("python -m app.manage migrate")
     static_collection = verify.index("python -m app.manage collectstatic --noinput --clear")
-    application_start = verify.index("up -d --no-build app web")
+    application_start = verify.index("up -d --no-build\n")
     assert db_start < production_check < migration < static_collection < application_start
     assert verify.count("run --rm --no-deps app") == 4
     assert "up -d --no-build db app" not in verify
@@ -65,22 +171,23 @@ def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> Non
     assert "/media/release-smoketest.txt" in verify
     assert "stop app" in verify
     assert "profiles/server-rendered-django/release.compose.yml" in logs
-    assert "logs --tail=200" in logs
+    assert "logs -f --tail=200" in logs
 
 
 def test_server_rendered_release_preserves_manifest_deploy_and_rollback_contract() -> None:
     makefile = (_repository_root() / "profiles/server-rendered-django/profile.mk").read_text()
+    makefile += (_repository_root() / "Makefile").read_text()
 
     for target in (
         "build-release-images",
-        "initialize-release-ci",
+        "initialize-ephemeral",
         "initialize-release",
         "verify-release-images",
         "push-release-images",
         "deploy-release",
         "rollback-release",
-        "down-release-ci",
-        "logs-release-ci",
+        "down-ephemeral",
+        "logs-ephemeral",
     ):
         assert f"\n{target}:" in makefile
     assert "RELEASE_BACKEND_IMAGE=%s" in makefile
@@ -94,7 +201,10 @@ def test_server_rendered_release_preserves_manifest_deploy_and_rollback_contract
 @pytest.mark.parametrize(
     ("target", "extra_arguments"),
     (
-        ("verify-release-images", ("RELEASE_CI_ENV_FILE={ci_env_file}",)),
+        (
+            "verify-release-images",
+            ("EPHEMERAL_ENV_FILE={ci_env_file}", "RELEASE_FILE={release_file}"),
+        ),
         ("deploy-release", ("RELEASE_FILE={release_file}",)),
     ),
 )
@@ -105,16 +215,26 @@ def test_failed_migration_never_starts_a_persistent_application(
 ) -> None:
     docker_log = tmp_path / "docker.log"
     fake_docker = tmp_path / "docker"
+    real_docker = shutil.which("docker")
+    config_check = (
+        f'  *" config --quiet") {shlex.quote(real_docker)} "$@" ;;\n' if real_docker else ""
+    )
     fake_docker.write_text(
         "#!/bin/sh\n"
-        'printf "%s\\n" "$*" >> "$DOCKER_LOG"\n'
+        'printf "%s %s\\n" "${COMPOSE_PROJECT_NAME:-build}" "$*" >> "$DOCKER_LOG"\n'
         'case "$*" in\n'
-        '  *"run --rm --no-deps app python -m app.manage migrate"*) exit 23 ;;\n'
+        + config_check
+        + '  *"run --rm --no-deps app python -m app.manage migrate"*) exit 23 ;;\n'
         "esac\n"
     )
     fake_docker.chmod(0o755)
     release_file = tmp_path / "release.env"
-    release_file.write_text("SCAFFOLD_PROFILE=server-rendered-django\n")
+    release_file.write_text(
+        "SCAFFOLD_PROFILE=server-rendered-django\nRELEASE_BACKEND_IMAGE=local/backend:test\n"
+        "RELEASE_WEB_IMAGE=local/web:test\nRELEASE_REVISION=test\nRELEASE_IMAGE_PREFIX=local/app\n"
+    )
+    prod_file = tmp_path / "production.env"
+    prod_file.write_text("POSTGRES_USER=app\nPOSTGRES_PASSWORD=test-only\nPOSTGRES_DB=app\n")
     ci_env_file = tmp_path / "release-ci.env"
     arguments = tuple(
         argument.format(release_file=release_file, ci_env_file=ci_env_file)
@@ -123,12 +243,15 @@ def test_failed_migration_never_starts_a_persistent_application(
     environment = os.environ.copy()
     environment["DOCKER_LOG"] = str(docker_log)
     environment["PATH"] = f"{tmp_path}:{environment['PATH']}"
+    environment["DOCKER_HOST"] = "unix:///nonexistent"
 
     result = subprocess.run(
         [
             "make",
             "--no-print-directory",
             "SCAFFOLD_PROFILE=server-rendered-django",
+            "SCAFFOLD_BACKUP_PROFILE=none",
+            f"PROD_ENV_FILE={prod_file}",
             target,
             *arguments,
         ],
@@ -141,6 +264,12 @@ def test_failed_migration_never_starts_a_persistent_application(
 
     assert result.returncode != 0
     commands = docker_log.read_text().splitlines()
+    suffix = "ephemeral" if target == "verify-release-images" else "prod"
+    assert all(
+        command.startswith(f"{_repository_root().name}-{suffix} ")
+        for command in commands
+        if " compose " in command
+    )
     database_start = next(
         index for index, command in enumerate(commands) if "up -d --no-build db" in command
     )
@@ -150,7 +279,7 @@ def test_failed_migration_never_starts_a_persistent_application(
         if "run --rm --no-deps app python -m app.manage migrate" in command
     )
     assert database_start < failed_migration
-    assert not any("up -d --no-build app web" in command for command in commands)
+    assert not any(command.endswith("up -d --no-build") for command in commands)
     assert not any("exec -T app" in command for command in commands)
 
 
@@ -164,7 +293,7 @@ def test_server_rendered_only_selector_runs_the_shared_release_publication() -> 
 
     assert "make build-release-images verify-release-images" in server_job
     assert "selected-profile != 'server-rendered-django'" in server_job
-    assert "make down down-release-ci" in server_job
+    assert "make down-dev rm-ephemeral" in server_job
     assert "needs: [profile-selection, server-rendered-profile, backend]" in gate_job
     assert "scripts/check-immutable-release-gate" in gate_job
     assert "--react-result '${{ needs.backend.result }}'" in gate_job

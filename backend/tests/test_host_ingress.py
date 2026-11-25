@@ -30,6 +30,7 @@ def _repo_root() -> Path:
 def _production_checkout(tmp_path: Path) -> str:
     for name in (
         "deploy/docker-compose.prod.yml",
+        "deploy/docker-compose.release.yml",
         "deploy/docker-compose.host-ingress.yml",
         "profiles/server-rendered-django/release.compose.yml",
         "profiles/immutable-backup/compose.yml",
@@ -160,7 +161,7 @@ def test_production_workflows_refresh_nginx_after_backend_replacement() -> None:
     assert makefile.count(refresh) == 1
     bootstrap = makefile.split("bootstrap-prod: prepare-prod", 1)[1].split(".PHONY:", 1)[0]
     assert "$(MAKE) up-prod" in bootstrap
-    assert "$(COMPOSE_RELEASE) up -d --no-deps --force-recreate nginx" in makefile
+    assert "$(COMPOSE_PROD) up -d --no-deps --force-recreate nginx" in makefile
 
 
 def test_host_ingress_normalizes_forwarding_headers_at_the_proxy_boundary() -> None:

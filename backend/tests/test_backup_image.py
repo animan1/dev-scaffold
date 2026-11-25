@@ -120,7 +120,7 @@ def test_default_production_start_prepares_and_builds_backups_for_both_applicati
         assert "profiles/immutable-backup/Dockerfile" in startup
         assert "profiles/immutable-backup/compose.yml" in startup
         if profile == "server-rendered-django":
-            assert "app web prod-sim-ingress backup" in startup
+            assert "ephemeral-ingress" not in startup
     disabled = _make("SCAFFOLD_BACKUP_PROFILE=none", "up-prod")
     assert "profiles/immutable-backup/compose.yml" not in disabled
     assert "profiles/immutable-backup/Dockerfile" not in disabled

@@ -8,11 +8,13 @@ action=${1:-}
 case "${action}" in
   up | smoke | down)
     shift
+    target="${action}-ephemeral"
+    [ "${action}" != smoke ] || target=verify-ephemeral
     exec make --no-print-directory --directory="${repository_root}" \
-      SCAFFOLD_PROFILE=server-rendered-django "${action}-prod" "$@"
+      SCAFFOLD_PROFILE=server-rendered-django "${target}" "$@"
     ;;
   *)
-    echo "Usage: profiles/server-rendered-django/prod-sim {up|smoke|down} [make arguments...]" >&2
+    echo "Usage: profiles/server-rendered-django/ephemeral {up|smoke|down} [make arguments...]" >&2
     exit 2
     ;;
 esac

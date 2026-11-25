@@ -23,7 +23,9 @@ def test_environment_removes_inherited_make_and_compose_selection(
         "MAKEFILES",
         "COMPOSE_FILE",
         "COMPOSE_PROFILES",
-        "COMPOSE_PROJECT_NAME",
+        "DEV_COMPOSE_PROJECT",
+        "PROD_COMPOSE_PROJECT",
+        "EPHEMERAL_COMPOSE_PROJECT",
         "RELEASE_BACKEND_IMAGE",
         "RELEASE_WEB_IMAGE",
     )
@@ -102,7 +104,7 @@ def test_options_bind_existing_project_and_release_metadata(tmp_path: Path) -> N
         "RELEASE_PLATFORM": "linux/arm64",
         "RELEASE_FILE": str(tmp_path / "release.env"),
         "PROD_ENV_FILE": "/private/tenant.env",
-        "RELEASE_COMPOSE_PROJECT": "tenant-prod",
+        "PROD_COMPOSE_PROJECT": "tenant-prod",
     }
 
 
@@ -113,7 +115,7 @@ def test_options_reject_project_override_that_changes_existing_identity() -> Non
             {
                 "project": "tenant-prod",
                 "env_file": "/private/tenant.env",
-                "variables": {"PRODUCTION_COMPOSE_PROJECT": "other-project"},
+                "variables": {"PROD_COMPOSE_PROJECT": "other-project"},
             },
             Path("/tmp/release.env"),
         )
@@ -128,7 +130,7 @@ def test_compose_checks_project_and_nonempty_services(
     monkeypatch.setattr(bundle, "make", lambda *args, **kwargs: payload)
 
     result = bundle.compose(
-        Path("/repo"), {"RELEASE_COMPOSE_PROJECT": "tenant-prod"}, {"PATH": "/bin"}
+        Path("/repo"), {"PROD_COMPOSE_PROJECT": "tenant-prod"}, {"PATH": "/bin"}
     )
 
     assert result["services"]["app"]["image"] == "app@sha256:x"
@@ -149,6 +151,6 @@ def test_compose_rejects_wrong_project_or_empty_topology(
     with pytest.raises(bundle.Rejected, match=message):
         bundle.compose(
             Path("/repo"),
-            {"RELEASE_COMPOSE_PROJECT": "tenant-prod"},
+            {"PROD_COMPOSE_PROJECT": "tenant-prod"},
             {"PATH": "/bin"},
         )

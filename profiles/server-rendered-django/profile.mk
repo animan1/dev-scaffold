@@ -3,138 +3,98 @@ HELP_FILES = $(filter-out $(firstword $(MAKEFILE_LIST)),$(MAKEFILE_LIST))
 PYTHON_PROJECT_DIR := profiles/server-rendered-django
 APP_PORT ?= 18000
 APP_HOST ?= localhost
+URL_ROOT ?= http://127.0.0.1:$(APP_PORT)
+CURL_FLAGS ?= -H 'Host: $(APP_HOST)'
+wait-prod: URL_ROOT = http://127.0.0.1:$(RELEASE_HTTP_PORT)
+wait-prod: CURL_FLAGS = -H 'Host: $(APP_HOST)' -H 'X-Forwarded-Proto: https'
 DIFF_BASE ?= origin/main
 PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
 GIT_COMMON_DIR ?= $(shell git rev-parse --path-format=absolute --git-common-dir)
 HOST_UID ?= $(shell id -u)
 HOST_GID ?= $(shell id -g)
-COMPOSE := COMPOSE_PROJECT_NAME=$(PROJECT_NAME) APP_HOST=$(APP_HOST) APP_PORT=$(APP_PORT) \
+COMPOSE_DEV := COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) APP_HOST=$(APP_HOST) APP_PORT=$(APP_PORT) \
 	GIT_COMMON_DIR=$(GIT_COMMON_DIR) HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
 	docker compose --project-directory . -f profiles/server-rendered-django/compose.yml
-RUN := $(COMPOSE) run --rm app
+RUN_DEV := $(COMPOSE_DEV) run --rm app
 UV_RUN := uv run --project /workspace/profiles/server-rendered-django
-DJANGO_DEV_MANAGE := $(RUN) $(UV_RUN) python -m app.manage
+DJANGO_DEV_MANAGE := $(RUN_DEV) $(UV_RUN) python -m app.manage
 PROFILE_PROJECT := /workspace/profiles/server-rendered-django/pyproject.toml
 RELEASE_BACKEND_TAG ?= $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG ?= $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
-RELEASE_PULL ?= $(COMPOSE_RELEASE) pull app web
-RELEASE_CI_ENV_FILE ?= .tmp/server-rendered-release-ci.env
-PROD_SIM_COMPOSE_PROJECT ?= $(PROJECT_NAME)-prod-sim
-PROD_SIM_ENV_FILE ?= .tmp/server-rendered-prod-sim.env
-PROD_SIM_HTTP_PORT ?= 18081
-PROD_SIM_HTTPS_PORT ?= 18444
-PROD_SIM_INGRESS_IMAGE ?= local/$(PROJECT_NAME)-prod-sim-ingress:test
-PROD_SIM_COMPOSE_FILE := profiles/server-rendered-django/prod-sim.compose.yml
+RELEASE_PULL ?= $(COMPOSE_PROD) pull app web
+EPHEMERAL_HTTP_PORT ?= 18081
+EPHEMERAL_HTTPS_PORT ?= 18444
+EPHEMERAL_INGRESS_IMAGE ?= local/$(PROJECT_NAME)-ephemeral-ingress:test
+EPHEMERAL_COMPOSE_FILE := profiles/server-rendered-django/ephemeral.compose.yml
 RELEASE_COMPOSE_FILE := profiles/server-rendered-django/release.compose.yml
-RELEASE_COMPOSE_FILES := -f $(RELEASE_COMPOSE_FILE)
-COMPOSE_RELEASE = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
+PROD_COMPOSE_FILES := -f $(RELEASE_COMPOSE_FILE)
+COMPOSE_PROD = COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(PROD_ENV_FILE) docker compose --project-directory . \
-	$(RELEASE_COMPOSE_FILES) --env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
-COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
-	PROD_ENV_FILE=$(RELEASE_CI_ENV_FILE) docker compose --project-directory . \
-	-f $(RELEASE_COMPOSE_FILE) --env-file $(RELEASE_CI_ENV_FILE)
-COMPOSE_PROD_SIM = COMPOSE_PROJECT_NAME=$(PROD_SIM_COMPOSE_PROJECT) \
-	PROD_ENV_FILE=$(PROD_SIM_ENV_FILE) PROD_SIM_HTTP_PORT=$(PROD_SIM_HTTP_PORT) \
-	PROD_SIM_HTTPS_PORT=$(PROD_SIM_HTTPS_PORT) \
-	PROD_SIM_INGRESS_IMAGE=$(PROD_SIM_INGRESS_IMAGE) \
+	$(PROD_COMPOSE_FILES) --env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
+COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
+	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) EPHEMERAL_HTTP_PORT=$(EPHEMERAL_HTTP_PORT) \
+	EPHEMERAL_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) \
+	EPHEMERAL_INGRESS_IMAGE=$(EPHEMERAL_INGRESS_IMAGE) \
 	docker compose --project-directory . -f $(RELEASE_COMPOSE_FILE) \
-	-f $(PROD_SIM_COMPOSE_FILE) $(PROD_SIM_BACKUP_FILES) \
-	--env-file $(PROD_ENV_FILE) --env-file $(PROD_SIM_ENV_FILE)
-RUN_RELEASE = $(COMPOSE_RELEASE) run --rm --no-deps app
-RUN_RELEASE_CI = $(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) run --rm --no-deps app
+	-f $(EPHEMERAL_COMPOSE_FILE) $(EPHEMERAL_BACKUP_FILES) \
+	--env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
+RUN_PROD = $(COMPOSE_PROD) run --rm --no-deps app
+RUN_EPHEMERAL = $(COMPOSE_EPHEMERAL) run --rm --no-deps app
 LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
 	RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) RELEASE_IMAGE_PREFIX=$(RELEASE_IMAGE_PREFIX) \
 	RELEASE_REVISION=$(RELEASE_REVISION) RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT)
 PROD_APPLICATION_SERVICE := app
 # Resolve configuration before a release manifest or its images exist.
-PROD_CONFIG = $(LOCAL_RELEASE_IMAGES) COMPOSE_PROJECT_NAME=$(PROJECT_NAME) \
+PROD_CONFIG = $(LOCAL_RELEASE_IMAGES) COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory . \
-	$(RELEASE_COMPOSE_FILES) --env-file $(PROD_ENV_FILE)
+	$(PROD_COMPOSE_FILES) --env-file $(PROD_ENV_FILE)
 
 .PHONY: build
 build: ## Build the deterministic development application image
-	$(COMPOSE) build app
+	$(COMPOSE_DEV) build app
 
 .PHONY: setup
 setup: build ## Prepare Docker development dependencies from the committed lockfile
 
-.PHONY: up
-up: ## Start Django and PostgreSQL in full-Docker development
-	$(COMPOSE) up -d --build db app
-
-.PHONY: down
-down: ## Stop development services while preserving project volumes
-	$(COMPOSE) down --remove-orphans
-
-.PHONY: logs
-logs: ## Follow recent development service logs
-	$(COMPOSE) logs -f --tail=200
-
-.PHONY: ps
-ps: ## List development containers
-	$(COMPOSE) ps
-
-.PHONY: reset
-reset: ## Destructively remove development services and volumes; requires CONFIRM_RESET=1
-	@if [[ "$(CONFIRM_RESET)" != "1" ]]; then \
-		echo "Refusing to remove development volumes."; \
-		echo "Re-run with: make reset CONFIRM_RESET=1"; \
-		exit 1; \
-	fi
-	$(COMPOSE) down -v --remove-orphans
-
-.PHONY: wait
-wait: ## Wait for the routed Django health endpoint
-	@for attempt in $$(seq 1 60); do \
-		if curl -fsS -H 'Host: $(APP_HOST)' \
-			'http://127.0.0.1:$(APP_PORT)/api/healthz' >/dev/null; then \
-			echo "Django is ready"; exit 0; \
-		fi; \
-		sleep 1; \
-	done; \
-	echo "Django did not become ready"; \
-	$(COMPOSE) logs app; \
-	exit 1
-
 .PHONY: format
 format: ## Apply the single deterministic Python formatter and safe lint fixes
-	$(RUN) $(UV_RUN) ruff check --config $(PROFILE_PROJECT) --fix .
-	$(RUN) $(UV_RUN) ruff format --config $(PROFILE_PROJECT) .
+	$(RUN_DEV) $(UV_RUN) ruff check --config $(PROFILE_PROJECT) --fix .
+	$(RUN_DEV) $(UV_RUN) ruff format --config $(PROFILE_PROJECT) .
 
 .PHONY: format-check
 format-check: ## Check Python formatting without mutation
-	$(RUN) $(UV_RUN) ruff format --config $(PROFILE_PROJECT) --check .
+	$(RUN_DEV) $(UV_RUN) ruff format --config $(PROFILE_PROJECT) --check .
 
 .PHONY: lint
 lint: ## Run strict Ruff linting
-	$(RUN) $(UV_RUN) ruff check --config $(PROFILE_PROJECT) .
+	$(RUN_DEV) $(UV_RUN) ruff check --config $(PROFILE_PROJECT) .
 
 .PHONY: typecheck
 typecheck: ## Run strict MyPy type checking
-	$(RUN) $(UV_RUN) mypy --config-file $(PROFILE_PROJECT) .
+	$(RUN_DEV) $(UV_RUN) mypy --config-file $(PROFILE_PROJECT) .
 
 .PHONY: test
 test: ## Run backend tests once without the coverage gate
-	$(RUN) $(UV_RUN) pytest -c $(PROFILE_PROJECT) /workspace/backend
+	$(RUN_DEV) $(UV_RUN) pytest -c $(PROFILE_PROJECT) /workspace/backend
 
 .PHONY: coverage
 coverage: ## Run the single coverage-enabled test suite and write coverage.xml
-	$(RUN) $(UV_RUN) pytest -c $(PROFILE_PROJECT) --cov=src \
+	$(RUN_DEV) $(UV_RUN) pytest -c $(PROFILE_PROJECT) --cov=src \
 		--cov-config=$(PROFILE_PROJECT) --cov-report=term-missing --cov-report=xml \
 		/workspace/backend
 
 .PHONY: changed-coverage
 changed-coverage: ## Enforce coverage on Python lines changed from DIFF_BASE
-	$(RUN) sh -lc 'cd /workspace/backend && $(UV_RUN) diff-cover \
+	$(RUN_DEV) sh -lc 'cd /workspace/backend && $(UV_RUN) diff-cover \
 		coverage.xml --compare-branch=$(DIFF_BASE) --fail-under=90'
 
 .PHONY: migrations-check
 migrations-check: ## Reject model changes without migrations
-	$(RUN) $(UV_RUN) python -m app.manage makemigrations --check --dry-run
+	$(RUN_DEV) $(UV_RUN) python -m app.manage makemigrations --check --dry-run
 
 .PHONY: django-check
 django-check: ## Run Django's production deployment checks
-	$(RUN) sh -lc 'DJANGO_SETTINGS_MODULE=app.project.settings.prod \
+	$(RUN_DEV) sh -lc 'DJANGO_SETTINGS_MODULE=app.project.settings.prod \
 		DJANGO_SECRET_KEY=check-only-abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ \
 		DATABASE_URL=postgresql://app:app@db:5432/app \
 		$(UV_RUN) python -m app.manage check --deploy'
@@ -170,9 +130,10 @@ build-release-images: ## Build commit-addressed Django and application Nginx ima
 		--backend $(RELEASE_BACKEND_TAG) --web $(RELEASE_WEB_TAG) \
 		$(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) --output $(RELEASE_FILE)
 
-.PHONY: prepare-release-ci
-prepare-release-ci: ## Prepare isolated, non-secret server-rendered release configuration
-	@mkdir -p $(dir $(RELEASE_CI_ENV_FILE))
+.PHONY: prepare-ephemeral
+prepare-ephemeral: ## Prepare isolated, non-secret server-rendered release configuration
+	@mkdir -p $(dir $(EPHEMERAL_ENV_FILE))publication
+	@chmod 2770 $(dir $(EPHEMERAL_ENV_FILE))publication
 	@printf '%s\n' \
 		'DJANGO_SECRET_KEY=release-ci-only-abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ' \
 		'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1' \
@@ -181,24 +142,15 @@ prepare-release-ci: ## Prepare isolated, non-secret server-rendered release conf
 		'POSTGRES_PASSWORD=release-ci-only' \
 		'POSTGRES_DB=app' \
 		'DATABASE_URL=postgresql://app:release-ci-only@db:5432/app' \
-		> $(RELEASE_CI_ENV_FILE)
-
-.PHONY: initialize-release-ci
-initialize-release-ci: prepare-release-ci ## Initialize a fresh release test database and static volume
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) config --quiet
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) up -d --no-build db
-	$(RUN_RELEASE_CI) \
-		python -m app.manage check --deploy
-	$(RUN_RELEASE_CI) \
-		python -m app.manage migrate
-	$(RUN_RELEASE_CI) \
-		python -m app.manage collectstatic --noinput --clear
+		'BACKUP_PASSWORD=ephemeral-only' \
+		'BACKUP_PUBLICATION_PATH=$(dir $(EPHEMERAL_ENV_FILE))publication' \
+		'BACKUP_RUNTIME_GID=$(shell id -g)' \
+		> $(EPHEMERAL_ENV_FILE)
 
 .PHONY: verify-release-images
-verify-release-images: initialize-release-ci ## Smoke-test the exact production image set
-	$(RUN_RELEASE_CI) \
+verify-release-images: up-ephemeral ## Smoke-test the exact production image set
+	$(RUN_EPHEMERAL) \
 		sh -c "printf 'MEDIA_OK\\n' > /media/release-smoketest.txt"
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) up -d --no-build app web
 	@for attempt in $$(seq 1 60); do \
 		if curl -fsS -H 'Host: localhost' -H 'X-Forwarded-Proto: https' \
 			'http://127.0.0.1:$(RELEASE_HTTP_PORT)/api/healthz' >/dev/null; then \
@@ -215,30 +167,20 @@ verify-release-images: initialize-release-ci ## Smoke-test the exact production 
 		| grep -q 'STATIC_OK'
 	curl -fsS 'http://127.0.0.1:$(RELEASE_HTTP_PORT)/media/release-smoketest.txt' \
 		| grep -q 'MEDIA_OK'
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) stop app
+	$(COMPOSE_EPHEMERAL) stop app
 	curl -fsS 'http://127.0.0.1:$(RELEASE_HTTP_PORT)/static/smoketest.txt' \
 		| grep -q 'STATIC_OK'
 	curl -fsS 'http://127.0.0.1:$(RELEASE_HTTP_PORT)/media/release-smoketest.txt' \
 		| grep -q 'MEDIA_OK'
 
 .PHONY: verify-host-ingress
-verify-host-ingress: prepare-release-ci ## Verify the loopback-only application origin boundary
-	@$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) config \
+verify-host-ingress: prepare-ephemeral ## Verify the loopback-only application origin boundary
+	@$(COMPOSE_EPHEMERAL) config \
 		| grep -q 'host_ip: 127.0.0.1'
 
 .PHONY: verify-monitoring-config
-verify-monitoring-config: prepare-release-ci ## Validate the optional release monitor
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) --profile monitoring config --quiet
-
-.PHONY: down-release-ci
-down-release-ci: ## Remove the isolated immutable-release verification stack
-	@if [[ -f $(RELEASE_CI_ENV_FILE) ]]; then \
-		$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) down -v --remove-orphans; \
-	fi
-
-.PHONY: logs-release-ci
-logs-release-ci: ## Show logs from the isolated immutable-release verification stack
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_RELEASE_CI) logs --tail=200
+verify-monitoring-config: prepare-ephemeral ## Validate the optional release monitor
+	$(COMPOSE_EPHEMERAL) --profile monitoring config --quiet
 
 .PHONY: push-release-images
 push-release-images: ## Publish verified images and record immutable digests
@@ -256,35 +198,29 @@ push-release-images: ## Publish verified images and record immutable digests
 .PHONY: initialize-release
 initialize-release: ## Initialize the database and static volume with recorded images
 	@test -f $(RELEASE_FILE) || { echo 'Set RELEASE_FILE to a recorded release manifest'; exit 1; }
-	$(COMPOSE_RELEASE) config --quiet
+	$(COMPOSE_PROD) config --quiet
 	$(RELEASE_PULL)
-	$(COMPOSE_RELEASE) up -d --no-build db
-	$(RUN_RELEASE) python -m app.manage check --deploy
-	$(RUN_RELEASE) python -m app.manage migrate
-	$(RUN_RELEASE) python -m app.manage collectstatic --noinput --clear
+	$(COMPOSE_PROD) up -d --no-build db
+	$(RUN_PROD) python -m app.manage check --deploy
+	$(RUN_PROD) python -m app.manage migrate
+	$(RUN_PROD) python -m app.manage collectstatic --noinput --clear
 
 .PHONY: deploy-release
 deploy-release: initialize-release ## Deploy the digest-pinned server-rendered image set
-	$(COMPOSE_RELEASE) up -d --no-build app web
+	$(COMPOSE_PROD) up -d --no-build
 
-.PHONY: up-prod
-up-prod: build-release-images build-prod-sim-ingress ## Build and start an isolated production-shaped local stack
-	$(MAKE) initialize-release-ci \
-		RELEASE_COMPOSE_PROJECT=$(PROD_SIM_COMPOSE_PROJECT) \
-		RELEASE_CI_ENV_FILE=$(PROD_SIM_ENV_FILE)
-	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_PROD_SIM) up -d --no-build \
-		app web prod-sim-ingress $(PROD_SIM_BACKUP_SERVICES)
+prepare-ephemeral: build-ephemeral-ingress
 
-.PHONY: build-prod-sim-ingress
-build-prod-sim-ingress: ## Build the local-only TLS ingress image
-	docker build -f profiles/server-rendered-django/prod-sim-ingress.Dockerfile \
-		-t $(PROD_SIM_INGRESS_IMAGE) .
+.PHONY: build-ephemeral-ingress
+build-ephemeral-ingress: ## Build the local-only TLS ingress image
+	docker build -f profiles/server-rendered-django/ephemeral-ingress.Dockerfile \
+		-t $(EPHEMERAL_INGRESS_IMAGE) .
 
-.PHONY: smoke-prod
-smoke-prod: ## Verify local HTTP redirect, HTTPS customer/admin routes, and secure cookies
+.PHONY: verify-ephemeral
+verify-ephemeral: ## Verify local HTTP redirect, HTTPS customer/admin routes, and secure cookies
 	@for attempt in $$(seq 1 60); do \
 		if curl -kfsS -H 'Host: localhost' \
-			'https://127.0.0.1:$(PROD_SIM_HTTPS_PORT)/api/healthz' >/dev/null; then \
+			'https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/api/healthz' >/dev/null; then \
 			break; \
 		fi; \
 		if [[ "$$attempt" = "60" ]]; then \
@@ -293,22 +229,23 @@ smoke-prod: ## Verify local HTTP redirect, HTTPS customer/admin routes, and secu
 		sleep 1; \
 	done
 	@curl -fsSI -H 'Host: localhost' \
-		'http://127.0.0.1:$(PROD_SIM_HTTP_PORT)/' \
-		| grep -Eiq '^location: https://localhost:$(PROD_SIM_HTTPS_PORT)/'
+		'http://127.0.0.1:$(EPHEMERAL_HTTP_PORT)/' \
+		| grep -Eiq '^location: https://localhost:$(EPHEMERAL_HTTPS_PORT)/'
 	curl -kfsS -H 'Host: localhost' \
-		'https://127.0.0.1:$(PROD_SIM_HTTPS_PORT)/' | grep -q '<main'
+		'https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/' | grep -q '<main'
 	curl -kfsS -D - -o /dev/null -H 'Host: localhost' \
-		'https://127.0.0.1:$(PROD_SIM_HTTPS_PORT)/admin/' \
+		'https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/admin/' \
 		| grep -Eiq '^location: /admin/login/\?next=/admin/'
 	curl -kfsS -D - -o /dev/null -H 'Host: localhost' \
-		'https://127.0.0.1:$(PROD_SIM_HTTPS_PORT)/admin/login/' \
+		'https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/admin/login/' \
 		| grep -Eiq '^set-cookie: csrftoken=.*; secure(;|[[:space:]]*$$)'
 
-.PHONY: down-prod
-down-prod: ## Stop the local production simulation while preserving volumes
-	@if [[ -f $(PROD_SIM_ENV_FILE) ]]; then \
-		$(LOCAL_RELEASE_IMAGES) $(COMPOSE_PROD_SIM) down --remove-orphans; \
-	fi
+.PHONY: smoke-prod
+smoke-prod: ## Check the production origin behind host-managed ingress
+	curl -fsS -H 'Host: $(APP_HOST)' -H 'X-Forwarded-Proto: https' \
+		'http://127.0.0.1:$(RELEASE_HTTP_PORT)/api/healthz' | grep -q '\"status\": \"ok\"'
+	curl -fsS -H 'Host: $(APP_HOST)' -H 'X-Forwarded-Proto: https' \
+		'http://127.0.0.1:$(RELEASE_HTTP_PORT)/' | grep -q '<main'
 
 .PHONY: rollback-release
 rollback-release: ## Deploy a previously recorded release manifest
@@ -316,7 +253,7 @@ rollback-release: deploy-release
 
 .PHONY: smoke
 smoke: ## Smoke-test Django through its configurable loopback route
-	$(MAKE) wait
+	$(MAKE) wait-dev
 	curl -fsS -H 'Host: $(APP_HOST)' \
 		'http://127.0.0.1:$(APP_PORT)/api/healthz' | grep -q '"status": "ok"'
 	curl -fsS -H 'Host: $(APP_HOST)' \
@@ -325,12 +262,12 @@ smoke: ## Smoke-test Django through its configurable loopback route
 .PHONY: verify
 verify: ## Run the identical aggregate contract used by developers and CI
 	$(MAKE) build
-	$(MAKE) up
+	$(MAKE) up-dev
 	$(MAKE) check
 	$(MAKE) build-production
 	$(MAKE) smoke
 
 .PHONY: precommit
 precommit: ## Run repository pre-commit hooks in the Docker toolchain
-	$(RUN) $(UV_RUN) pre-commit run \
+	$(RUN_DEV) $(UV_RUN) pre-commit run \
 		--config /workspace/profiles/server-rendered-django/pre-commit-config.yaml --all-files
