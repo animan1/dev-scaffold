@@ -82,9 +82,9 @@ def test_hotfix_builds_target_platform_and_checks_same_image_ids(
     assert all(call[3]["DOCKER_DEFAULT_PLATFORM"] == "linux/arm64" for call in make_calls)
     check_values = make_calls[1][2]
     assert check_values["PROJECT_NAME"] == f"emergency-check-{REVISION[:16]}"
-    assert check_values["RELEASE_COMPOSE_PROJECT"] == f"emergency-check-{REVISION[:16]}-release"
-    assert check_values["DEVELOPMENT_COMPOSE_PROJECT"] == check_values["PROJECT_NAME"]
-    assert check_values["RELEASE_CI_COMPOSE_PROJECT"] == check_values["RELEASE_COMPOSE_PROJECT"]
+    assert check_values["DEVELOPMENT_COMPOSE_PROJECT"] == check_values["PROJECT_NAME"] + "-dev"
+    assert check_values["EPHEMERAL_COMPOSE_PROJECT"] == check_values["PROJECT_NAME"] + "-ephemeral"
+    assert check_values["RELEASE_CI_COMPOSE_PROJECT"] == check_values["EPHEMERAL_COMPOSE_PROJECT"]
     assert evidence["source"] == "local-checks"
     assert evidence["revision"] == REVISION
     assert evidence["platform"] == "linux/arm64"

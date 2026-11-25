@@ -3,9 +3,8 @@ include $(SCAFFOLD_ROOT).scaffold-profile
 SHELL := /bin/bash
 PROJECT_NAME ?= $(notdir $(CURDIR))
 DEVELOPMENT_COMPOSE_PROJECT ?= $(PROJECT_NAME)-dev
-PRODUCTION_COMPOSE_PROJECT ?= $(PROJECT_NAME)-prod
-RELEASE_COMPOSE_PROJECT ?= $(PRODUCTION_COMPOSE_PROJECT)
-RELEASE_CI_COMPOSE_PROJECT ?= $(PROJECT_NAME)-release
+PROD_COMPOSE_PROJECT ?= $(PROJECT_NAME)-prod
+EPHEMERAL_COMPOSE_PROJECT ?= $(PROJECT_NAME)-ephemeral
 RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)
 RELEASE_REVISION ?= $(shell git rev-parse HEAD)
 RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
@@ -49,23 +48,23 @@ PROD_COMPOSE_FILES += -f deploy/docker-compose.external-monitoring.yml
 RELEASE_COMPOSE_FILES += -f deploy/docker-compose.external-monitoring.yml
 PROD_COMPOSE_PROFILES += --profile monitoring
 endif
-COMPOSE_PROD = COMPOSE_PROJECT_NAME=$(PRODUCTION_COMPOSE_PROJECT) PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose $(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file $(PROD_ENV_FILE)
-COMPOSE_MONITOR = COMPOSE_PROJECT_NAME=$(PRODUCTION_COMPOSE_PROJECT) docker compose -f deploy/docker-compose.prod.yml \
+COMPOSE_PROD = COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose $(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file $(PROD_ENV_FILE)
+COMPOSE_MONITOR = COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) docker compose -f deploy/docker-compose.prod.yml \
 	-f deploy/docker-compose.external-monitoring.yml --profile monitoring \
 	--env-file deploy/.env.prod
 RELEASE_BACKEND_TAG = $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG = $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
 RELEASE_PULL ?= $(COMPOSE_RELEASE) pull backend nginx
 RELEASE_HTTPS_PORT ?= 18443
-COMPOSE_RELEASE = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) docker compose \
+COMPOSE_RELEASE = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) docker compose \
 	$(RELEASE_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) \
 	--env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
 RUN_RELEASE = $(COMPOSE_RELEASE) run --rm --no-deps backend
-COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_CI_COMPOSE_PROJECT) \
+COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
 	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
 	-f deploy/docker-compose.release-ci.yml
-COMPOSE_RELEASE_INGRESS_CI = COMPOSE_PROJECT_NAME=$(RELEASE_CI_COMPOSE_PROJECT) \
+COMPOSE_EPHEMERAL_INGRESS = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
 	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
 	-f deploy/docker-compose.host-ingress.yml
@@ -288,19 +287,19 @@ prepare-release-ci: ## Prepare isolated, non-secret release smoke-test configura
 verify-release-images: prepare-release-ci ## Verify and smoke-test the exact SHA-tagged images
 	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
 		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
-		$(COMPOSE_RELEASE_CI) config --quiet
+		$(COMPOSE_EPHEMERAL) config --quiet
 	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
 		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
-		$(COMPOSE_RELEASE_CI) up -d --no-build db backend
+		$(COMPOSE_EPHEMERAL) up -d --no-build db backend
 	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_RELEASE_CI) exec -T backend python -m app.manage check
+		$(COMPOSE_EPHEMERAL) exec -T backend python -m app.manage check
 	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_RELEASE_CI) exec -T backend python -m app.manage migrate
+		$(COMPOSE_EPHEMERAL) exec -T backend python -m app.manage migrate
 	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_RELEASE_CI) exec -T backend python -m app.manage collectstatic --noinput
+		$(COMPOSE_EPHEMERAL) exec -T backend python -m app.manage collectstatic --noinput
 	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
 		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
-		$(COMPOSE_RELEASE_CI) up -d --no-build
+		$(COMPOSE_EPHEMERAL) up -d --no-build
 	@for i in $$(seq 1 60); do \
 		if curl -kfsS https://localhost:$(RELEASE_HTTPS_PORT)/api/healthz >/dev/null; then \
 			curl -kfsS https://localhost:$(RELEASE_HTTPS_PORT)/ >/dev/null; \
@@ -313,17 +312,17 @@ verify-release-images: prepare-release-ci ## Verify and smoke-test the exact SHA
 .PHONY: verify-host-ingress
 verify-host-ingress: prepare-release-ci ## Verify exact images through the loopback ingress boundary
 	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_RELEASE_INGRESS_CI) config --quiet
+		$(COMPOSE_EPHEMERAL_INGRESS) config --quiet
 	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_RELEASE_INGRESS_CI) up -d --no-build db backend
+		$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build db backend
 	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_RELEASE_INGRESS_CI) exec -T backend python -m app.manage check
+		$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage check
 	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_RELEASE_INGRESS_CI) exec -T backend python -m app.manage migrate
+		$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage migrate
 	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_RELEASE_INGRESS_CI) exec -T backend python -m app.manage collectstatic --noinput
+		$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage collectstatic --noinput
 	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_RELEASE_INGRESS_CI) up -d --no-build
+		$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build
 	$(MAKE) smoke-host-ingress
 
 .PHONY: verify-monitoring-config
@@ -338,14 +337,14 @@ down-release-ci: ## Stop the isolated immutable-release test stack
 	@if [ -f .tmp/release-ci.env ]; then \
 		RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
 		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
-		$(COMPOSE_RELEASE_CI) down -v --remove-orphans; \
+		$(COMPOSE_EPHEMERAL) down -v --remove-orphans; \
 	fi
 
 .PHONY: logs-release-ci
 logs-release-ci: ## Show logs from the isolated immutable-release test stack
 	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
 		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
-		$(COMPOSE_RELEASE_CI) logs --tail=200
+		$(COMPOSE_EPHEMERAL) logs --tail=200
 
 .PHONY: push-release-images
 push-release-images: ## Push verified images and record their immutable digests

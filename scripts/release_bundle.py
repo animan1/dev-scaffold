@@ -36,8 +36,10 @@ def environment():
         "COMPOSE_PROJECT_NAME",
         "DEVELOPMENT_COMPOSE_PROJECT",
         "PRODUCTION_COMPOSE_PROJECT",
+        "PROD_COMPOSE_PROJECT",
         "RELEASE_COMPOSE_PROJECT",
         "RELEASE_CI_COMPOSE_PROJECT",
+        "EPHEMERAL_COMPOSE_PROJECT",
         "RELEASE_BACKEND_IMAGE",
         "RELEASE_WEB_IMAGE",
     ):
@@ -114,11 +116,14 @@ def build_hotfix(root, source, rev, target, selected, values, env, spec):
     check_values = {
         **build_values,
         "PROJECT_NAME": check_project,
-        "COMPOSE_PROJECT_NAME": check_project,
-        "DEVELOPMENT_COMPOSE_PROJECT": check_project,
+        "COMPOSE_PROJECT_NAME": check_project + "-dev",
+        "DEVELOPMENT_COMPOSE_PROJECT": check_project + "-dev",
+        "PROD_COMPOSE_PROJECT": check_project + "-prod",
+        "EPHEMERAL_COMPOSE_PROJECT": check_project + "-ephemeral",
+        # Older committed deployment sources still read these selectors.
         "PRODUCTION_COMPOSE_PROJECT": check_project + "-prod",
-        "RELEASE_COMPOSE_PROJECT": check_project + "-release",
-        "RELEASE_CI_COMPOSE_PROJECT": check_project + "-release",
+        "RELEASE_COMPOSE_PROJECT": check_project + "-ephemeral",
+        "RELEASE_CI_COMPOSE_PROJECT": check_project + "-ephemeral",
     }
     for check in spec["check_targets"]:
         make(source, check, check_values, env)
@@ -145,11 +150,12 @@ def build_hotfix(root, source, rev, target, selected, values, env, spec):
 
 
 def options(data, settings, manifest):
-    require(
-        "PRODUCTION_COMPOSE_PROJECT" not in settings["variables"]
-        or settings["variables"]["PRODUCTION_COMPOSE_PROJECT"] == settings["project"],
-        "production wrapper project must equal explicit project",
-    )
+    for selector in ("PROD_COMPOSE_PROJECT", "PRODUCTION_COMPOSE_PROJECT"):
+        require(
+            selector not in settings["variables"]
+            or settings["variables"][selector] == settings["project"],
+            "production wrapper project must equal explicit project",
+        )
     return {
         **settings["variables"],
         "SCAFFOLD_PROFILE": data["profile"],
@@ -157,6 +163,8 @@ def options(data, settings, manifest):
         "RELEASE_PLATFORM": data["platform"],
         "RELEASE_FILE": str(manifest),
         "PROD_ENV_FILE": settings["env_file"],
+        "PROD_COMPOSE_PROJECT": settings["project"],
+        # A bundle can contain deployment sources captured before this rename.
         "RELEASE_COMPOSE_PROJECT": settings["project"],
         "PRODUCTION_COMPOSE_PROJECT": settings["project"],
     }
@@ -166,7 +174,7 @@ def compose(root, values, env):
     # Never print resolved configuration: Compose embeds credentials here.
     config = json.loads(make(root, "release-bundle-config", values, env, output=True))
     require(
-        config.get("name") == values["RELEASE_COMPOSE_PROJECT"],
+        config.get("name") == values["PROD_COMPOSE_PROJECT"],
         "Compose project mismatch",
     )
     require(config.get("services"), "empty runtime topology")
@@ -300,6 +308,7 @@ def inputs(path):
                 "RELEASE_HTTPS_PORT",
                 "RELEASE_HOST",
                 "PRODUCTION_COMPOSE_PROJECT",
+                "PROD_COMPOSE_PROJECT",
                 "PRODUCTION_HTTP_PORT",
                 "PRODUCTION_SMOKE_HOST",
             },

@@ -51,7 +51,7 @@ def test_environment_namespaces_do_not_inherit_global_compose_project(
     for suffix, targets in (
         ("dev", ("up", "down", "reset", "logs", "ps")),
         ("prod", ("up-prod", "down-prod", "deploy-release", "rollback-release", "prepare-prod")),
-        ("release", ("verify-release-images", "logs-release-ci", "down-release-ci")),
+        ("ephemeral", ("verify-release-images", "logs-release-ci", "down-release-ci")),
     ):
         output = _make(profile, "PROJECT_NAME=tenant", "--dry-run", *targets)
         projects = re.findall(r"COMPOSE_PROJECT_NAME=([^\s]+)", output)
@@ -79,7 +79,7 @@ def test_release_configuration_resolves_production_project_and_volumes(
                 "-s",
                 "release-bundle-config",
                 "PROJECT_NAME=tenant",
-                f"PRODUCTION_COMPOSE_PROJECT={project}",
+                f"PROD_COMPOSE_PROJECT={project}",
                 "SCAFFOLD_BACKUP_PROFILE=none",
                 f"PROD_ENV_FILE={private}",
                 f"RELEASE_FILE={manifest}",

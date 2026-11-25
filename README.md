@@ -37,17 +37,16 @@ application work. Once a project contains real code, use the separate
 ## Quickstart
 
 Compose projects default to `<project>-dev` for development, `<project>-prod`
-for production (including `deploy-release`), and `<project>-release` for release
+for production (including `deploy-release`), and `<project>-ephemeral` for release
 testing. `PROJECT_NAME` defaults to the checkout directory name. Each environment
 sets its own Compose project explicitly; a global `COMPOSE_PROJECT_NAME` does not
 select the environment.
 
 Existing installations: changing a project name does **not** migrate its volumes.
 Keep the existing production identity with
-`PRODUCTION_COMPOSE_PROJECT=<existing-project>` on production commands; the
-release deployment selector `RELEASE_COMPOSE_PROJECT` defaults to that identity.
+`PROD_COMPOSE_PROJECT=<existing-project>` on production commands.
 Use `DEVELOPMENT_COMPOSE_PROJECT` for an existing development identity and
-`RELEASE_CI_COMPOSE_PROJECT` for release-test coordination. Do not give dev,
+`EPHEMERAL_COMPOSE_PROJECT` for release-test coordination. Do not give dev,
 prod and release testing the same project name. Preserve the original private
 configuration and volumes when planning any later namespace migration.
 
@@ -151,11 +150,11 @@ Use the machine's destination platform. For this repository's existing laptop
 dummy, use the actual production workflow without a second Compose project:
 
 ```bash
-make prepare-prod HOST_INGRESS=0 LOCAL_TLS=1
+make prepare-prod HOST_INGRESS=0 LOCAL_TLS=1 PROD_COMPOSE_PROJECT=dev-scaffold
 make build-release-images RELEASE_PLATFORM=linux/arm64
-make release-bundle-config HOST_INGRESS=0 RELEASE_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_CONFIG_FILE=.tmp/private-release-compose.json
-make deploy-release HOST_INGRESS=0 RELEASE_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_PULL=true
-make smoke-prod HOST_INGRESS=0 CURL_FLAGS='--cacert deploy/nginx/certs/server.crt'
+make release-bundle-config HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_CONFIG_FILE=.tmp/private-release-compose.json
+make deploy-release HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_PULL=true
+make smoke-prod HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold CURL_FLAGS='--cacert deploy/nginx/certs/server.crt'
 ```
 
 Run from the existing `dev-scaffold` checkout, with its private `deploy/.env.prod`
@@ -218,7 +217,7 @@ gh attestation verify oci://ghcr.io/<owner>/<repo>-backend@<digest> \
   --repo <owner>/<repo>
 ```
 
-Set `RELEASE_COMPOSE_PROJECT` when a host runs multiple projects. Its default is
+Set `PROD_COMPOSE_PROJECT` when a host runs multiple projects. Its default is
 derived from the current repository directory so unrelated projects do not
 share Compose resources.
 

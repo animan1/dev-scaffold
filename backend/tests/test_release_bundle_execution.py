@@ -26,8 +26,10 @@ def test_environment_removes_inherited_make_and_compose_selection(
         "COMPOSE_PROJECT_NAME",
         "DEVELOPMENT_COMPOSE_PROJECT",
         "PRODUCTION_COMPOSE_PROJECT",
+        "PROD_COMPOSE_PROJECT",
         "RELEASE_COMPOSE_PROJECT",
         "RELEASE_CI_COMPOSE_PROJECT",
+        "EPHEMERAL_COMPOSE_PROJECT",
         "RELEASE_BACKEND_IMAGE",
         "RELEASE_WEB_IMAGE",
     )
@@ -107,18 +109,20 @@ def test_options_bind_existing_project_and_release_metadata(tmp_path: Path) -> N
         "RELEASE_FILE": str(tmp_path / "release.env"),
         "PROD_ENV_FILE": "/private/tenant.env",
         "RELEASE_COMPOSE_PROJECT": "tenant-prod",
+        "PROD_COMPOSE_PROJECT": "tenant-prod",
         "PRODUCTION_COMPOSE_PROJECT": "tenant-prod",
     }
 
 
-def test_options_reject_project_override_that_changes_existing_identity() -> None:
+@pytest.mark.parametrize("selector", ["PROD_COMPOSE_PROJECT", "PRODUCTION_COMPOSE_PROJECT"])
+def test_options_reject_project_override_that_changes_existing_identity(selector: str) -> None:
     with pytest.raises(bundle.Rejected, match="project must equal"):
         bundle.options(
             {"profile": "server", "revision": "a" * 40, "platform": "linux/arm64"},
             {
                 "project": "tenant-prod",
                 "env_file": "/private/tenant.env",
-                "variables": {"PRODUCTION_COMPOSE_PROJECT": "other-project"},
+                "variables": {selector: "other-project"},
             },
             Path("/tmp/release.env"),
         )
@@ -133,7 +137,7 @@ def test_compose_checks_project_and_nonempty_services(
     monkeypatch.setattr(bundle, "make", lambda *args, **kwargs: payload)
 
     result = bundle.compose(
-        Path("/repo"), {"RELEASE_COMPOSE_PROJECT": "tenant-prod"}, {"PATH": "/bin"}
+        Path("/repo"), {"PROD_COMPOSE_PROJECT": "tenant-prod"}, {"PATH": "/bin"}
     )
 
     assert result["services"]["app"]["image"] == "app@sha256:x"
@@ -154,6 +158,6 @@ def test_compose_rejects_wrong_project_or_empty_topology(
     with pytest.raises(bundle.Rejected, match=message):
         bundle.compose(
             Path("/repo"),
-            {"RELEASE_COMPOSE_PROJECT": "tenant-prod"},
+            {"PROD_COMPOSE_PROJECT": "tenant-prod"},
             {"PATH": "/bin"},
         )
