@@ -28,14 +28,15 @@ def _make(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[st
 
 def test_server_rendered_make_contract_and_quality_gates() -> None:
     makefile = (_repository_root() / "profiles/server-rendered-django/profile.mk").read_text()
+    makefile += (_repository_root() / "Makefile").read_text()
 
     for target in (
         "build",
-        "up",
-        "down",
-        "logs",
-        "ps",
-        "reset",
+        "up-dev",
+        "down-dev",
+        "logs-dev",
+        "ps-dev",
+        "reset-dev",
         "format",
         "lint",
         "typecheck",
@@ -64,26 +65,26 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
 
 
 def test_server_rendered_teardown_is_safe_and_reset_is_guarded() -> None:
-    down = _make("--dry-run", "down").stdout
+    down = _make("--dry-run", "down-dev").stdout
     assert "down --remove-orphans" in down
     assert "down -v" not in down
 
-    reset = _make("reset", check=False)
+    reset = _make("reset-dev", check=False)
     assert reset.returncode != 0
     assert "Refusing to remove development volumes." in reset.stdout
 
-    confirmed = _make("--dry-run", "reset", "CONFIRM_RESET=1").stdout
+    confirmed = _make("--dry-run", "reset-dev", "CONFIRM_RESET=1").stdout
     assert "down -v --remove-orphans" in confirmed
     assert " up " not in confirmed
 
 
 def test_server_rendered_diagnostics_use_selected_compose_and_help() -> None:
     help_output = _make("help").stdout
-    logs = _make("--dry-run", "logs").stdout
-    ps = _make("--dry-run", "ps").stdout
+    logs = _make("--dry-run", "logs-dev").stdout
+    ps = _make("--dry-run", "ps-dev").stdout
 
-    assert "logs" in help_output
-    assert "ps" in help_output
+    assert "logs-dev" in help_output
+    assert "ps-dev" in help_output
     assert "profiles/server-rendered-django/compose.yml logs -f --tail=200" in logs
     assert "COMPOSE_PROJECT_NAME=" in logs
     assert "profiles/server-rendered-django/compose.yml ps" in ps
@@ -96,25 +97,28 @@ def test_server_rendered_precommit_is_a_recipe() -> None:
     assert "--all-files" in output
 
 
-def test_server_rendered_up_prod_uses_isolated_production_simulation() -> None:
-    output = _make("--dry-run", "up-prod").stdout
+def test_prod_and_ephemeral_use_the_same_recorded_release_workflow() -> None:
     project_name = _repository_root().name
-
-    assert "profiles/server-rendered-django/backend.Dockerfile" in output
-    assert "profiles/server-rendered-django/release-nginx.Dockerfile" in output
-    assert "profiles/server-rendered-django/prod-sim-ingress.Dockerfile" in output
-    assert "profiles/server-rendered-django/prod-sim.compose.yml" in output
-    assert f"COMPOSE_PROJECT_NAME={project_name}-prod" in output
-    assert "server-rendered-prod-sim.env" in output
-    assert "DJANGO_SECURE_SSL_REDIRECT" not in output
-    assert "pull app web" not in output
-    assert "Set RELEASE_FILE" not in output
-    database_start = output.index("up -d --no-build db")
-    production_check = output.index("python -m app.manage check --deploy")
-    migration = output.index("python -m app.manage migrate")
-    static_collection = output.index("python -m app.manage collectstatic --noinput --clear")
-    application_start = output.index("app web prod-sim-ingress")
-    assert database_start < production_check < migration < static_collection < application_start
+    production = _make("--dry-run", "up-prod").stdout
+    ephemeral = _make("--dry-run", "up-ephemeral").stdout
+    for suffix, output in (("prod", production), ("ephemeral", ephemeral)):
+        assert f"COMPOSE_PROJECT_NAME={project_name}-{suffix}" in output
+        assert "profiles/server-rendered-django/backend.Dockerfile" not in output
+        assert "profiles/server-rendered-django/release-nginx.Dockerfile" not in output
+        assert "Set RELEASE_FILE" in output
+        database_start = output.index("up -d --no-build db")
+        production_check = output.index("python -m app.manage check --deploy")
+        migration = output.index("python -m app.manage migrate")
+        static_collection = output.index("python -m app.manage collectstatic --noinput --clear")
+        application_start = output.index("up -d --no-build\n")
+        assert database_start < production_check < migration < static_collection < application_start
+    assert "ephemeral-ingress" not in production
+    assert "release-ci-only" not in production
+    assert "pull app web" in production
+    assert "ephemeral-ingress" in ephemeral
+    assert "release-ci-only" in ephemeral
+    assert "pull app web" not in ephemeral
+    assert "deploy/.env.prod" not in ephemeral
 
     down = _make("--dry-run", "down-prod").stdout
     assert f"COMPOSE_PROJECT_NAME={project_name}-prod" in down
@@ -122,18 +126,17 @@ def test_server_rendered_up_prod_uses_isolated_production_simulation() -> None:
     assert "down -v" not in down
 
 
-def test_server_rendered_prod_sim_uses_local_tls_ingress() -> None:
+def test_server_rendered_ephemeral_uses_local_tls_ingress() -> None:
     root = _repository_root()
-    overlay = (root / "profiles/server-rendered-django/prod-sim.compose.yml").read_text()
-    ingress = (root / "profiles/server-rendered-django/prod-sim-ingress.conf.template").read_text()
+    overlay = (root / "profiles/server-rendered-django/ephemeral.compose.yml").read_text()
+    ingress = (root / "profiles/server-rendered-django/ephemeral-ingress.conf.template").read_text()
     release = (root / "profiles/server-rendered-django/release.compose.yml").read_text()
-    smoke = _make("--dry-run", "smoke-prod").stdout
+    smoke = _make("--dry-run", "verify-ephemeral").stdout
 
-    assert "ports: !override []" in overlay
-    assert "127.0.0.1:${PROD_SIM_HTTP_PORT:-18081}:80" in overlay
-    assert "127.0.0.1:${PROD_SIM_HTTPS_PORT:-18444}:443" in overlay
-    assert "prod-sim-ingress" not in release
-    assert "return 308 https://$host:${PROD_SIM_HTTPS_PORT}$request_uri" in ingress
+    assert "127.0.0.1:${EPHEMERAL_HTTP_PORT:-18081}:80" in overlay
+    assert "127.0.0.1:${EPHEMERAL_HTTPS_PORT:-18444}:443" in overlay
+    assert "ephemeral-ingress" not in release
+    assert "return 308 https://$host:${EPHEMERAL_HTTPS_PORT}$request_uri" in ingress
     assert "proxy_pass http://web:8080" in ingress
     assert "proxy_set_header Host $http_host" in ingress
     assert "proxy_set_header X-Forwarded-Proto https" in ingress
@@ -161,8 +164,8 @@ def test_server_rendered_profile_exposes_django_admin() -> None:
     assert 'path("admin/", admin.site.urls)' in urls
 
 
-def test_server_rendered_prod_sim_wrapper_selects_the_profile() -> None:
-    script = _repository_root() / "profiles/server-rendered-django/prod-sim"
+def test_server_rendered_ephemeral_wrapper_selects_the_profile() -> None:
+    script = _repository_root() / "profiles/server-rendered-django/ephemeral"
     project_name = _repository_root().name
 
     assert os.access(script, os.X_OK)
@@ -174,8 +177,8 @@ def test_server_rendered_prod_sim_wrapper_selects_the_profile() -> None:
         text=True,
     ).stdout
 
-    assert "profiles/server-rendered-django/backend.Dockerfile" in output
-    assert f"COMPOSE_PROJECT_NAME={project_name}-prod" in output
+    assert "profiles/server-rendered-django/ephemeral-ingress.Dockerfile" in output
+    assert f"COMPOSE_PROJECT_NAME={project_name}-ephemeral" in output
     assert "deploy/docker-compose.prod.yml" not in output
 
     smoke = subprocess.run(

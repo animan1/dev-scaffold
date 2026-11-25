@@ -2,7 +2,7 @@ SCAFFOLD_ROOT := $(dir $(abspath $(firstword $(MAKEFILE_LIST))))
 include $(SCAFFOLD_ROOT).scaffold-profile
 SHELL := /bin/bash
 PROJECT_NAME ?= $(notdir $(CURDIR))
-DEVELOPMENT_COMPOSE_PROJECT ?= $(PROJECT_NAME)-dev
+DEV_COMPOSE_PROJECT ?= $(PROJECT_NAME)-dev
 PROD_COMPOSE_PROJECT ?= $(PROJECT_NAME)-prod
 EPHEMERAL_COMPOSE_PROJECT ?= $(PROJECT_NAME)-ephemeral
 RELEASE_IMAGE_PREFIX ?= local/$(PROJECT_NAME)
@@ -27,10 +27,11 @@ profiles:
 		--backups $(CI_BACKUP_PROFILES)
 
 HELP_FILES = $(MAKEFILE_LIST)
+EPHEMERAL_ENV_FILE ?= $(CURDIR)/.tmp/ephemeral.env
 
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 
-COMPOSE_DEV = COMPOSE_PROJECT_NAME=$(DEVELOPMENT_COMPOSE_PROJECT) docker compose -f deploy/docker-compose.dev.yml
+COMPOSE_DEV = COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) docker compose -f deploy/docker-compose.dev.yml
 FRONTEND_DIR := frontend
 MONITORING ?= 0
 HOST_INGRESS_HOST ?= app.example.test
@@ -48,26 +49,24 @@ PROD_COMPOSE_FILES += -f deploy/docker-compose.external-monitoring.yml
 RELEASE_COMPOSE_FILES += -f deploy/docker-compose.external-monitoring.yml
 PROD_COMPOSE_PROFILES += --profile monitoring
 endif
-COMPOSE_PROD = COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose $(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file $(PROD_ENV_FILE)
-COMPOSE_MONITOR = COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) docker compose -f deploy/docker-compose.prod.yml \
-	-f deploy/docker-compose.external-monitoring.yml --profile monitoring \
-	--env-file deploy/.env.prod
+PROD_CONFIG = COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose $(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file $(PROD_ENV_FILE)
+COMPOSE_MONITOR = $(COMPOSE_PROD) -f deploy/docker-compose.external-monitoring.yml --profile monitoring
 RELEASE_BACKEND_TAG = $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG = $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
-RELEASE_PULL ?= $(COMPOSE_RELEASE) pull backend nginx
+RELEASE_PULL ?= $(COMPOSE_PROD) pull backend nginx
 RELEASE_HTTPS_PORT ?= 18443
-COMPOSE_RELEASE = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) docker compose \
+COMPOSE_PROD = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) docker compose \
 	$(RELEASE_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) \
 	--env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
-RUN_RELEASE = $(COMPOSE_RELEASE) run --rm --no-deps backend
+RUN_PROD = $(COMPOSE_PROD) run --rm --no-deps backend
 COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
-	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
+	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) docker compose \
 	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
-	-f deploy/docker-compose.release-ci.yml
+	-f deploy/docker-compose.release-ci.yml $(EPHEMERAL_COMPOSE_FILES) --env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
 COMPOSE_EPHEMERAL_INGRESS = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
-	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
+	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) docker compose \
 	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
-	-f deploy/docker-compose.host-ingress.yml
+	-f deploy/docker-compose.host-ingress.yml --env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
 
 # ---- Paths ----
 PY_DIR := backend
@@ -75,41 +74,16 @@ PYTHON_PROJECT_DIR := $(PY_DIR)
 URL_ROOT ?= http://localhost:8080
 CURL_FLAGS ?=
 
-.PHONY: up
-up: ## (Docker) Start dev stack (backend + nginx + frontend proxy)
-	$(COMPOSE_DEV) up --build -d
-
-.PHONY: down
-down: ## (Docker) Stop dev stack while preserving persistent volumes
-	$(COMPOSE_DEV) down
-
-.PHONY: reset
-reset: ## (Docker, destructive) Stop dev stack and remove volumes; requires CONFIRM_RESET=1
-	@if [ "$(CONFIRM_RESET)" != "1" ]; then \
-		echo "Refusing to remove development volumes."; \
-		echo "Re-run with: make reset CONFIRM_RESET=1"; \
-		exit 1; \
-	fi
-	$(COMPOSE_DEV) down -v
-
 .PHONY: restart
 restart: ## (Docker) Restart dev stack
-restart: down up
-
-.PHONY: logs
-logs: ## (Docker) Tail dev logs
-	$(COMPOSE_DEV) logs -f --tail=200
-
-.PHONY: ps
-ps: ## (Docker) List dev containers
-	$(COMPOSE_DEV) ps
+restart: down-dev up-dev
 
 .PHONY: be.bash
 be.bash: ## (Docker) Shell into backend container
 	$(COMPOSE_DEV) exec backend bash
 
-.PHONY: be.wait
-be.wait: ## Wait for backend health (dev)
+.PHONY: wait-dev
+wait-dev: ## Wait for backend health (dev)
 	@echo "Waiting for backend on $(URL_ROOT)/api/healthz ..."
 	@for i in $$(seq 1 60); do \
 		if curl -fsS $(CURL_FLAGS) $(URL_ROOT)/api/healthz >/dev/null; then \
@@ -147,7 +121,7 @@ smoke:
 
 .PHONY: ci
 ci: ## (Docker) One-shot CI recipe (dev stack + FE/BE verify + smoke)
-ci: up be.wait be.ci fe.ci smoke
+ci: up-dev wait-dev be.ci fe.ci smoke
 	@echo "CI checks passed"
 
 # Prod
@@ -155,26 +129,12 @@ ci: up be.wait be.ci fe.ci smoke
 bootstrap-prod: prepare-prod ## Prepare inputs and start the production stack
 	# Bring up stack, run migrations, and smoke test
 	$(MAKE) up-prod
-	$(COMPOSE_PROD) run --rm backend bash -lc "cd /app && python -m app.manage migrate"
 	$(MAKE) smoke-prod HOST_INGRESS=$(HOST_INGRESS) \
 		HOST_INGRESS_HOST=$(HOST_INGRESS_HOST) HOST_INGRESS_PORT=$(HOST_INGRESS_PORT)
 
 .PHONY: restart-prod
 restart-prod: ## Restart prod stack
 restart-prod: down-prod up-prod
-
-.PHONY: up-prod
-up-prod: ## Start prod stack
-	$(COMPOSE_PROD) up -d --build
-	$(COMPOSE_PROD) up -d --no-deps --force-recreate nginx
-
-.PHONY: down-prod
-down-prod: ## Stop prod stack while preserving persistent volumes
-	$(COMPOSE_PROD) down
-
-.PHONY: logs-prod
-logs-prod: ## Tail prod logs
-	$(COMPOSE_PROD) logs -f --tail=200
 
 .PHONY: migrate-prod
 migrate-prod: ## Run Django migrations in prod
@@ -263,9 +223,10 @@ build-release-images: ## Build SHA-tagged production images once
 		--backend $(RELEASE_BACKEND_TAG) --web $(RELEASE_WEB_TAG) \
 		$(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) --output $(RELEASE_FILE)
 
-.PHONY: prepare-release-ci
-prepare-release-ci: ## Prepare isolated, non-secret release smoke-test configuration
-	@mkdir -p .tmp deploy/nginx/certs
+.PHONY: prepare-ephemeral
+prepare-ephemeral: ## Prepare isolated, non-secret release smoke-test configuration
+	@mkdir -p $(dir $(EPHEMERAL_ENV_FILE))publication $(dir $(EPHEMERAL_ENV_FILE))certs
+	@chmod 2770 $(dir $(EPHEMERAL_ENV_FILE))publication
 	@printf '%s\n' \
 		'DJANGO_SECRET_KEY=release-ci-only' \
 		'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,$(HOST_INGRESS_HOST)' \
@@ -274,32 +235,21 @@ prepare-release-ci: ## Prepare isolated, non-secret release smoke-test configura
 		'POSTGRES_PASSWORD=release-ci-only' \
 		'POSTGRES_DB=app' \
 		'DATABASE_URL=postgresql://app:release-ci-only@db:5432/app' \
-		> .tmp/release-ci.env
-	@if [ ! -f deploy/nginx/certs/server.crt ] || [ ! -f deploy/nginx/certs/server.key ]; then \
+		'BACKUP_PASSWORD=ephemeral-only' \
+		'BACKUP_PUBLICATION_PATH=$(dir $(EPHEMERAL_ENV_FILE))publication' \
+		'BACKUP_RUNTIME_GID=$(shell id -g)' \
+		'EPHEMERAL_CERTS_PATH=$(dir $(EPHEMERAL_ENV_FILE))certs' \
+		> $(EPHEMERAL_ENV_FILE)
+	@if [ ! -f $(dir $(EPHEMERAL_ENV_FILE))certs/server.crt ] || [ ! -f $(dir $(EPHEMERAL_ENV_FILE))certs/server.key ]; then \
 		openssl req -x509 -nodes -newkey rsa:2048 \
-			-keyout deploy/nginx/certs/server.key \
-			-out deploy/nginx/certs/server.crt \
+			-keyout $(dir $(EPHEMERAL_ENV_FILE))certs/server.key \
+			-out $(dir $(EPHEMERAL_ENV_FILE))certs/server.crt \
 			-days 1 -subj '/CN=localhost' \
 			-addext 'subjectAltName=DNS:localhost'; \
 	fi
 
-.PHONY: verify-release-images
-verify-release-images: prepare-release-ci ## Verify and smoke-test the exact SHA-tagged images
-	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
-		$(COMPOSE_EPHEMERAL) config --quiet
-	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
-		$(COMPOSE_EPHEMERAL) up -d --no-build db backend
-	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_EPHEMERAL) exec -T backend python -m app.manage check
-	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_EPHEMERAL) exec -T backend python -m app.manage migrate
-	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_EPHEMERAL) exec -T backend python -m app.manage collectstatic --noinput
-	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
-		$(COMPOSE_EPHEMERAL) up -d --no-build
+.PHONY: verify-ephemeral
+verify-ephemeral: ## Verify the running recorded release in ephemeral
 	@for i in $$(seq 1 60); do \
 		if curl -kfsS https://localhost:$(RELEASE_HTTPS_PORT)/api/healthz >/dev/null; then \
 			curl -kfsS https://localhost:$(RELEASE_HTTPS_PORT)/ >/dev/null; \
@@ -309,42 +259,23 @@ verify-release-images: prepare-release-ci ## Verify and smoke-test the exact SHA
 	done; \
 	echo 'Release images did not become ready'; exit 1
 
+.PHONY: verify-release-images
+verify-release-images: up-ephemeral ## Verify and smoke-test the exact recorded images
+	$(MAKE) verify-ephemeral
+
 .PHONY: verify-host-ingress
-verify-host-ingress: prepare-release-ci ## Verify exact images through the loopback ingress boundary
-	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_EPHEMERAL_INGRESS) config --quiet
-	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build db backend
-	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage check
-	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage migrate
-	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage collectstatic --noinput
-	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build
+verify-host-ingress: prepare-ephemeral ## Verify exact images through the loopback ingress boundary
+	$(COMPOSE_EPHEMERAL_INGRESS) config --quiet
+	$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build db backend
+	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage check
+	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage migrate
+	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage collectstatic --noinput
+	$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build
 	$(MAKE) smoke-host-ingress
 
 .PHONY: verify-monitoring-config
-verify-monitoring-config: prepare-release-ci ## Validate the optional monitoring Compose profile
-	PROD_ENV_FILE=../.tmp/release-ci.env docker compose \
-		-f deploy/docker-compose.prod.yml \
-		-f deploy/docker-compose.external-monitoring.yml \
-		--profile monitoring config --quiet
-
-.PHONY: down-release-ci
-down-release-ci: ## Stop the isolated immutable-release test stack
-	@if [ -f .tmp/release-ci.env ]; then \
-		RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
-		$(COMPOSE_EPHEMERAL) down -v --remove-orphans; \
-	fi
-
-.PHONY: logs-release-ci
-logs-release-ci: ## Show logs from the isolated immutable-release test stack
-	RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
-		RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT) RELEASE_HTTPS_PORT=$(RELEASE_HTTPS_PORT) \
-		$(COMPOSE_EPHEMERAL) logs --tail=200
+verify-monitoring-config: prepare-ephemeral ## Validate the optional monitoring Compose profile
+	$(COMPOSE_EPHEMERAL) -f deploy/docker-compose.external-monitoring.yml --profile monitoring config --quiet
 
 .PHONY: push-release-images
 push-release-images: ## Push verified images and record their immutable digests
@@ -361,27 +292,27 @@ push-release-images: ## Push verified images and record their immutable digests
 .PHONY: initialize-release
 initialize-release: ## Initialize the database/static volume with the recorded backend image
 	@test -f $(RELEASE_FILE) || { echo 'Set RELEASE_FILE to a recorded release manifest'; exit 1; }
-	$(COMPOSE_RELEASE) config --quiet
+	$(COMPOSE_PROD) config --quiet
 	$(RELEASE_PULL)
-	$(COMPOSE_RELEASE) up -d --no-build db
-	$(RUN_RELEASE) python -m app.manage check --deploy
-	$(RUN_RELEASE) python -m app.manage migrate
-	$(RUN_RELEASE) python -m app.manage collectstatic --noinput
+	$(COMPOSE_PROD) up -d --no-build db
+	$(RUN_PROD) python -m app.manage check --deploy
+	$(RUN_PROD) python -m app.manage migrate
+	$(RUN_PROD) python -m app.manage collectstatic --noinput
 
 .PHONY: deploy-release
 deploy-release: initialize-release ## Deploy the recorded images through normal production initialization
-	$(COMPOSE_RELEASE) up -d --no-build
-	$(COMPOSE_RELEASE) up -d --no-deps --force-recreate nginx
+	$(COMPOSE_PROD) up -d --no-build
+	$(COMPOSE_PROD) up -d --no-deps --force-recreate nginx
 
 .PHONY: rollback-release
 rollback-release: ## Deploy a previously recorded RELEASE_FILE
 rollback-release: deploy-release
 
-.PHONY: be.wait-prod
-be.wait-prod: ## Wait for backend health (prod)
-be.wait-prod: URL_ROOT := https://localhost
-be.wait-prod: CURL_FLAGS := -k
-be.wait-prod: be.wait
+.PHONY: wait-prod
+wait-prod: ## Wait for backend health (prod)
+wait-prod: URL_ROOT := https://localhost
+wait-prod: CURL_FLAGS := -k
+wait-prod: wait-dev
 
 # ---- Django dev helpers ----
 DJANGO_DEV_MANAGE ?= cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage
@@ -509,7 +440,7 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod
 
 .PHONY: help help-verbose
 help: ## List available commands
@@ -530,8 +461,48 @@ deps.lock: ## Update the selected profile's Python lockfile with pinned Dockeriz
 		--workdir /workspace --entrypoint /usr/local/bin/uv $(UV_IMAGE) \
 		lock --project $(PYTHON_PROJECT_DIR)
 
+.PHONY: up-dev down-dev reset-dev logs-dev ps-dev up-prod down-prod logs-prod
+up-dev: ## Build and start development services
+	$(COMPOSE_DEV) up -d --build
+
+down-dev: ## Stop development services and orphans while preserving volumes
+	$(COMPOSE_DEV) down --remove-orphans
+
+reset-dev: ## Remove development services and volumes; requires CONFIRM_RESET=1
+	@test "$(CONFIRM_RESET)" = 1 || { echo 'Refusing to remove development volumes.'; echo 'Re-run with: make reset-dev CONFIRM_RESET=1'; exit 1; }
+	$(COMPOSE_DEV) down -v --remove-orphans
+
+logs-dev: ## Follow recent development logs
+	$(COMPOSE_DEV) logs -f --tail=200
+
+ps-dev: ## List development containers
+	$(COMPOSE_DEV) ps
+
+down-prod: ## Stop production services while preserving volumes
+	$(COMPOSE_PROD) down --remove-orphans
+
+logs-prod: ## Follow recent production logs
+	$(COMPOSE_PROD) logs -f --tail=200
+
+.PHONY: initialize-ephemeral up-ephemeral down-ephemeral rm-ephemeral logs-ephemeral
+initialize-ephemeral: prepare-ephemeral ## Initialize test data through the recorded-release workflow
+	$(MAKE) initialize-release 'COMPOSE_PROD=$(COMPOSE_EPHEMERAL)' RELEASE_PULL=true
+
+up-ephemeral: prepare-ephemeral ## Start the recorded release with test-environment inputs
+	$(MAKE) deploy-release 'COMPOSE_PROD=$(COMPOSE_EPHEMERAL)' RELEASE_PULL=true
+
+down-ephemeral: ## Stop ephemeral services while preserving test volumes
+	$(COMPOSE_EPHEMERAL) down --remove-orphans
+
+rm-ephemeral: ## Remove ephemeral services and disposable test volumes
+	@if [ -f "$(EPHEMERAL_ENV_FILE)" ]; then $(COMPOSE_EPHEMERAL) down -v --remove-orphans; fi
+
+logs-ephemeral: ## Show recent ephemeral logs
+	$(COMPOSE_EPHEMERAL) logs --tail=200
+
 LOCAL_TLS ?= 0
-up-prod: prepare-prod
+up-prod: prepare-prod ## Deploy the recorded production release
+	$(MAKE) deploy-release
 
 .PHONY: prepare-prod
 prepare-prod: ## Prepare and validate private production inputs without starting services

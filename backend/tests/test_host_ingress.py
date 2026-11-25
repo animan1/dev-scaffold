@@ -160,7 +160,7 @@ def test_production_workflows_refresh_nginx_after_backend_replacement() -> None:
     assert makefile.count(refresh) == 1
     bootstrap = makefile.split("bootstrap-prod: prepare-prod", 1)[1].split(".PHONY:", 1)[0]
     assert "$(MAKE) up-prod" in bootstrap
-    assert "$(COMPOSE_RELEASE) up -d --no-deps --force-recreate nginx" in makefile
+    assert "$(COMPOSE_PROD) up -d --no-deps --force-recreate nginx" in makefile
 
 
 def test_host_ingress_normalizes_forwarding_headers_at_the_proxy_boundary() -> None:

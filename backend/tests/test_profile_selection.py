@@ -45,7 +45,7 @@ def test_committed_profile_selects_its_make_and_ci_contracts() -> None:
     assert metadata["selected"]["application"] == selected_profile
     assert metadata["selected"]["backup"] == "immutable-backup"
     assert metadata["validation"]["application"] == ci_profiles
-    assert expected_compose[selected_profile] in _make("--dry-run", "up").stdout
+    assert expected_compose[selected_profile] in _make("--dry-run", "up-dev").stdout
 
 
 def test_unknown_profile_requires_its_own_implementation() -> None:

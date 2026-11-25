@@ -351,7 +351,7 @@ def test_routine_teardown_preserves_all_persistent_volume_classes() -> None:
     server_down = _make(
         "SCAFFOLD_PROFILE=server-rendered-django",
         "SCAFFOLD_BACKUP_PROFILE=immutable-backup",
-        "down",
+        "down-dev",
     ).stdout
     react_compose = (_repository_root() / "deploy/docker-compose.prod.yml").read_text()
     server_compose = (

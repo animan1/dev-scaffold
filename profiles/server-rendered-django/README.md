@@ -11,10 +11,10 @@ future scaffold merges can update both profiles normally.
 - PostgreSQL for development, tests, and CI; the supported workflow does not
   use the development SQLite fallback.
 - Project-scoped Compose resources and a configurable loopback-only port.
-- A persistent PostgreSQL volume. `make down` preserves it; `make reset
+- A persistent PostgreSQL volume. `make down-dev` preserves it; `make reset-dev
   CONFIRM_RESET=1` is the explicit destructive operation.
-- The same Make interface for developers and CI: `prepare-prod`, `build`, `up`, `down`,
-  `reset`, `deps.lock`, `format`, `lint`, `typecheck`, `test`, `coverage`,
+- The same Make interface for developers and CI: `prepare-prod`, `build`, `up-dev`, `down-dev`,
+  `reset-dev`, `deps.lock`, `format`, `lint`, `typecheck`, `test`, `coverage`,
   `migrations`, `migrate`, `superuser`, `shell`, `check`, `verify`, `precommit`,
   `build-production`, and `smoke`.
 - Ruff formatting and linting, strict MyPy, pytest, total and changed-line
@@ -71,33 +71,34 @@ that replaces the local media volume with object storage owns that explicit
 adaptation and its credentials; no object-storage or host-proxy credentials
 belong in the generic scaffold web image.
 
-### Exercise the production topology locally
+### Exercise the production topology in ephemeral
 
 In the multi-profile scaffold repository, use the profile-local wrapper so the
 React/Vite default selection remains unchanged:
 
 ```sh
-profiles/server-rendered-django/prod-sim up
-profiles/server-rendered-django/prod-sim smoke
-profiles/server-rendered-django/prod-sim down
+make build-release-images SCAFFOLD_PROFILE=server-rendered-django
+profiles/server-rendered-django/ephemeral up
+profiles/server-rendered-django/ephemeral smoke
+profiles/server-rendered-django/ephemeral down
 ```
 
-`up` builds local backend and Nginx images, initializes an isolated
-`<project>-prod-sim` database and static volume, and starts the production-shaped
-origin behind a local-only TLS ingress without a published release manifest.
-The private application origin is not exposed to the host. HTTP at
+`up` uses the recorded image manifest and the same initialization/deployment
+recipes as production, with test inputs and an isolated `<project>-ephemeral`
+database and volumes. A local-only TLS ingress replaces shared host ingress.
+The application origin remains loopback-only. HTTP at
 `http://localhost:18081` redirects to HTTPS at `https://localhost:18444`; the
 locally generated certificate causes the expected browser warning. `smoke`
 accepts that test certificate and verifies the redirect, customer page, admin
 redirect, and secure CSRF cookie. `down` stops the stack while preserving its
-database, static, and media volumes. Override `PROD_SIM_HTTP_PORT` and
-`PROD_SIM_HTTPS_PORT` when those loopback ports are occupied.
+database, static, and media volumes. Override `EPHEMERAL_HTTP_PORT` and
+`EPHEMERAL_HTTPS_PORT` when those loopback ports are occupied.
 
 In a downstream repository that selects this profile, the equivalent commands
-are `make up-prod`, `make smoke-prod`, and `make down-prod`. The local ingress is
-test infrastructure in `prod-sim.compose.yml`; it is not part of the deployable
-application topology. Digest-pinned deployment remains the separate
-`make deploy-release` operation.
+are `make up-ephemeral`, `make verify-ephemeral`, and `make down-ephemeral`. The local ingress is
+test infrastructure in `ephemeral.compose.yml`; it is not part of the deployable
+application topology. `make rm-ephemeral` removes disposable test volumes.
+`make up-prod` uses the same recorded deployment with production configuration.
 
 ## Select the profile
 
@@ -118,7 +119,7 @@ React/Vite profile files tracked. They are dormant under this selector, and
 retaining them prevents modify/delete conflicts when merging later scaffold
 improvements.
 
-As with React/Vite, `make up` starts development services without applying
+As with React/Vite, `make up-dev` starts development services without applying
 migrations. Run `make migrate` explicitly when initializing a database or
 applying committed schema changes; restarting services does not change schema.
 
@@ -138,10 +139,10 @@ Set a unique project name and unused port when the directory defaults are not
 suitable:
 
 ```bash
-make up PROJECT_NAME=example-site APP_PORT=18123
+make up-dev PROJECT_NAME=example-site APP_PORT=18123
 make migrate PROJECT_NAME=example-site APP_PORT=18123
 make smoke PROJECT_NAME=example-site APP_PORT=18123
-make down PROJECT_NAME=example-site APP_PORT=18123
+make down-dev PROJECT_NAME=example-site APP_PORT=18123
 ```
 
 ## Downstream boundary
