@@ -8,7 +8,7 @@ PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
 GIT_COMMON_DIR ?= $(shell git rev-parse --path-format=absolute --git-common-dir)
 HOST_UID ?= $(shell id -u)
 HOST_GID ?= $(shell id -g)
-COMPOSE := COMPOSE_PROJECT_NAME=$(PROJECT_NAME) APP_HOST=$(APP_HOST) APP_PORT=$(APP_PORT) \
+COMPOSE := COMPOSE_PROJECT_NAME=$(DEVELOPMENT_COMPOSE_PROJECT) APP_HOST=$(APP_HOST) APP_PORT=$(APP_PORT) \
 	GIT_COMMON_DIR=$(GIT_COMMON_DIR) HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
 	docker compose --project-directory . -f profiles/server-rendered-django/compose.yml
 RUN := $(COMPOSE) run --rm app
@@ -19,7 +19,7 @@ RELEASE_BACKEND_TAG ?= $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG ?= $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
 RELEASE_PULL ?= $(COMPOSE_RELEASE) pull app web
 RELEASE_CI_ENV_FILE ?= .tmp/server-rendered-release-ci.env
-PROD_SIM_COMPOSE_PROJECT ?= $(PROJECT_NAME)-prod-sim
+PROD_SIM_COMPOSE_PROJECT ?= $(PRODUCTION_COMPOSE_PROJECT)
 PROD_SIM_ENV_FILE ?= .tmp/server-rendered-prod-sim.env
 PROD_SIM_HTTP_PORT ?= 18081
 PROD_SIM_HTTPS_PORT ?= 18444
@@ -30,7 +30,7 @@ RELEASE_COMPOSE_FILES := -f $(RELEASE_COMPOSE_FILE)
 COMPOSE_RELEASE = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(PROD_ENV_FILE) docker compose --project-directory . \
 	$(RELEASE_COMPOSE_FILES) --env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
-COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_COMPOSE_PROJECT) \
+COMPOSE_RELEASE_CI = COMPOSE_PROJECT_NAME=$(RELEASE_CI_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(RELEASE_CI_ENV_FILE) docker compose --project-directory . \
 	-f $(RELEASE_COMPOSE_FILE) --env-file $(RELEASE_CI_ENV_FILE)
 COMPOSE_PROD_SIM = COMPOSE_PROJECT_NAME=$(PROD_SIM_COMPOSE_PROJECT) \
@@ -47,7 +47,7 @@ LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
 	RELEASE_REVISION=$(RELEASE_REVISION) RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT)
 PROD_APPLICATION_SERVICE := app
 # Resolve configuration before a release manifest or its images exist.
-PROD_CONFIG = $(LOCAL_RELEASE_IMAGES) COMPOSE_PROJECT_NAME=$(PROJECT_NAME) \
+PROD_CONFIG = $(LOCAL_RELEASE_IMAGES) COMPOSE_PROJECT_NAME=$(PRODUCTION_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory . \
 	$(RELEASE_COMPOSE_FILES) --env-file $(PROD_ENV_FILE)
 
@@ -270,7 +270,7 @@ deploy-release: initialize-release ## Deploy the digest-pinned server-rendered i
 .PHONY: up-prod
 up-prod: build-release-images build-prod-sim-ingress ## Build and start an isolated production-shaped local stack
 	$(MAKE) initialize-release-ci \
-		RELEASE_COMPOSE_PROJECT=$(PROD_SIM_COMPOSE_PROJECT) \
+		RELEASE_CI_COMPOSE_PROJECT=$(PROD_SIM_COMPOSE_PROJECT) \
 		RELEASE_CI_ENV_FILE=$(PROD_SIM_ENV_FILE)
 	$(LOCAL_RELEASE_IMAGES) $(COMPOSE_PROD_SIM) up -d --no-build \
 		app web prod-sim-ingress $(PROD_SIM_BACKUP_SERVICES)

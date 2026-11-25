@@ -24,6 +24,10 @@ def test_environment_removes_inherited_make_and_compose_selection(
         "COMPOSE_FILE",
         "COMPOSE_PROFILES",
         "COMPOSE_PROJECT_NAME",
+        "DEVELOPMENT_COMPOSE_PROJECT",
+        "PRODUCTION_COMPOSE_PROJECT",
+        "RELEASE_COMPOSE_PROJECT",
+        "RELEASE_CI_COMPOSE_PROJECT",
         "RELEASE_BACKEND_IMAGE",
         "RELEASE_WEB_IMAGE",
     )
@@ -103,6 +107,7 @@ def test_options_bind_existing_project_and_release_metadata(tmp_path: Path) -> N
         "RELEASE_FILE": str(tmp_path / "release.env"),
         "PROD_ENV_FILE": "/private/tenant.env",
         "RELEASE_COMPOSE_PROJECT": "tenant-prod",
+        "PRODUCTION_COMPOSE_PROJECT": "tenant-prod",
     }
 
 

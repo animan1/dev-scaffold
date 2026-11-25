@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
+import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -38,6 +41,54 @@ def test_react_release_path_remains_selected_by_the_react_profile() -> None:
     assert "RELEASE_WEB_IMAGE" in verify
     assert "docker-compose.release-ci.yml" in logs
     assert "logs --tail=200" in logs
+
+
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+def test_environment_namespaces_do_not_inherit_global_compose_project(
+    profile: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "tenant-prod")
+    for suffix, targets in (
+        ("dev", ("up", "down", "reset", "logs", "ps")),
+        ("prod", ("up-prod", "down-prod", "deploy-release", "rollback-release", "prepare-prod")),
+        ("release", ("verify-release-images", "logs-release-ci", "down-release-ci")),
+    ):
+        output = _make(profile, "PROJECT_NAME=tenant", "--dry-run", *targets)
+        projects = re.findall(r"COMPOSE_PROJECT_NAME=([^\s]+)", output)
+        assert projects
+        assert set(projects) == {f"tenant-{suffix}"}
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Needs Docker Compose client")
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+def test_release_configuration_resolves_production_project_and_volumes(
+    profile: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOCKER_HOST", "unix:///nonexistent")
+    private = tmp_path / "production.env"
+    private.write_text("POSTGRES_USER=app\nPOSTGRES_PASSWORD=test-only\nPOSTGRES_DB=app\n")
+    manifest = tmp_path / "release.env"
+    manifest.write_text(
+        "RELEASE_BACKEND_IMAGE=local/backend:test\nRELEASE_WEB_IMAGE=local/web:test\n"
+        "RELEASE_REVISION=test\nRELEASE_IMAGE_PREFIX=local/app\n"
+    )
+    for project in ("tenant-prod", "legacy-tenant"):
+        config = json.loads(
+            _make(
+                profile,
+                "-s",
+                "release-bundle-config",
+                "PROJECT_NAME=tenant",
+                f"PRODUCTION_COMPOSE_PROJECT={project}",
+                "SCAFFOLD_BACKUP_PROFILE=none",
+                f"PROD_ENV_FILE={private}",
+                f"RELEASE_FILE={manifest}",
+            )
+        )
+        assert config["name"] == project
+        assert all(
+            volume["name"].startswith(f"{project}_") for volume in config["volumes"].values()
+        )
 
 
 def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> None:

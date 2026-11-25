@@ -161,7 +161,7 @@ jobs:
           echo "RELEASE_BACKEND_TAG=${prefix}-backend:${GITHUB_SHA}" >> "$GITHUB_ENV"
           echo "RELEASE_WEB_TAG=${prefix}-web:${GITHUB_SHA}" >> "$GITHUB_ENV"
           project="${GITHUB_REPOSITORY//\//-}"
-          echo "RELEASE_COMPOSE_PROJECT=${project,,}-release-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+          echo "RELEASE_CI_COMPOSE_PROJECT=${project,,}-release-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
 
       - name: Build production images once
         run: make build-release-images

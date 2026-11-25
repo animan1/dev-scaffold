@@ -34,6 +34,10 @@ def environment():
         "COMPOSE_FILE",
         "COMPOSE_PROFILES",
         "COMPOSE_PROJECT_NAME",
+        "DEVELOPMENT_COMPOSE_PROJECT",
+        "PRODUCTION_COMPOSE_PROJECT",
+        "RELEASE_COMPOSE_PROJECT",
+        "RELEASE_CI_COMPOSE_PROJECT",
         "RELEASE_BACKEND_IMAGE",
         "RELEASE_WEB_IMAGE",
     ):
@@ -111,7 +115,10 @@ def build_hotfix(root, source, rev, target, selected, values, env, spec):
         **build_values,
         "PROJECT_NAME": check_project,
         "COMPOSE_PROJECT_NAME": check_project,
+        "DEVELOPMENT_COMPOSE_PROJECT": check_project,
+        "PRODUCTION_COMPOSE_PROJECT": check_project + "-prod",
         "RELEASE_COMPOSE_PROJECT": check_project + "-release",
+        "RELEASE_CI_COMPOSE_PROJECT": check_project + "-release",
     }
     for check in spec["check_targets"]:
         make(source, check, check_values, env)
@@ -151,6 +158,7 @@ def options(data, settings, manifest):
         "RELEASE_FILE": str(manifest),
         "PROD_ENV_FILE": settings["env_file"],
         "RELEASE_COMPOSE_PROJECT": settings["project"],
+        "PRODUCTION_COMPOSE_PROJECT": settings["project"],
     }
 
 

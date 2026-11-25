@@ -36,6 +36,21 @@ application work. Once a project contains real code, use the separate
 
 ## Quickstart
 
+Compose projects default to `<project>-dev` for development, `<project>-prod`
+for production (including `deploy-release`), and `<project>-release` for release
+testing. `PROJECT_NAME` defaults to the checkout directory name. Each environment
+sets its own Compose project explicitly; a global `COMPOSE_PROJECT_NAME` does not
+select the environment.
+
+Existing installations: changing a project name does **not** migrate its volumes.
+Keep the existing production identity with
+`PRODUCTION_COMPOSE_PROJECT=<existing-project>` on production commands; the
+release deployment selector `RELEASE_COMPOSE_PROJECT` defaults to that identity.
+Use `DEVELOPMENT_COMPOSE_PROJECT` for an existing development identity and
+`RELEASE_CI_COMPOSE_PROJECT` for release-test coordination. Do not give dev,
+prod and release testing the same project name. Preserve the original private
+configuration and volumes when planning any later namespace migration.
+
 ### Docker Dev
 
 `make setup` prepares the selected profile's Docker development dependencies from
