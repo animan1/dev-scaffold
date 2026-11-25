@@ -146,6 +146,54 @@ def test_restart_aborts_before_startup_when_teardown_fails(profile: str) -> None
     assert "up-dev" not in result.stdout
 
 
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+@pytest.mark.parametrize("target", ["smoke", "smoke-prod"])
+@pytest.mark.parametrize("missing_static", [False, True])
+def test_smoke_requires_static_delivery_in_both_profiles(
+    profile: str, target: str, missing_static: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    curl = tmp_path / "curl"
+    log = tmp_path / "requests"
+    curl.write_text(
+        "#!/bin/sh\n"
+        "for url; do :; done\n"
+        'printf "%s\\n" "$url" >> "$REQUEST_LOG"\n'
+        'case "$url" in */static/smoketest.txt)\n'
+        '  if [ "$MISSING_STATIC" = 1 ]; then exit 22; fi ;;\n'
+        "esac\n"
+        'printf "%s\\n" "$HOME_BODY"\n'
+    )
+    curl.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    monkeypatch.setenv("REQUEST_LOG", str(log))
+    monkeypatch.setenv("MISSING_STATIC", str(int(missing_static)))
+    monkeypatch.setenv(
+        "HOME_BODY",
+        "<main>Django</main>" if profile == "server-rendered-django" else '<div id="root"></div>',
+    )
+    result = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            f"SCAFFOLD_PROFILE={profile}",
+            "HOST_INGRESS=0",
+            "URL_ROOT=http://smoke.test",
+            target,
+        ],
+        cwd=_repository_root(),
+        capture_output=True,
+        text=True,
+    )
+    requests = log.read_text().splitlines()
+    assert requests[:3] == [
+        "http://smoke.test/api/healthz",
+        "http://smoke.test/api/healthz",
+        "http://smoke.test/static/smoketest.txt",
+    ]
+    assert (result.returncode != 0) == missing_static
+    assert ("http://smoke.test/" in requests) != missing_static
+
+
 def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> None:
     build = _make("server-rendered-django", "--dry-run", "build-release-images")
     verify = _make("server-rendered-django", "--dry-run", "verify-release-images")

@@ -76,6 +76,7 @@ PY_DIR := backend
 PYTHON_PROJECT_DIR := $(PY_DIR)
 URL_ROOT ?= http://localhost:8080
 CURL_FLAGS ?=
+SMOKE_HOME_PATTERN := dev-scaffold\|id="root"
 
 .PHONY: be.bash
 be.bash: ## (Docker) Shell into backend container
@@ -100,14 +101,6 @@ fe.ci: ## (Docker) Run frontend verify inside dev container
 	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
 		backend $(CONTAINER_PYTHON_PROJECT_DIR)/.venv/bin/diff-cover coverage/lcov.info \
 		--config-file /workspace/backend/pyproject.toml $(if $(DIFF_BASE),--compare-branch=$(DIFF_BASE))
-
-.PHONY: smoke
-smoke: ## Dev smoketest (API + static + FE root)
-smoke: CURL_CMD = curl $(CURL_FLAGS) -fsS
-smoke:
-	$(CURL_CMD) "$(URL_ROOT)/api/healthz" >/dev/null
-	$(CURL_CMD) "$(URL_ROOT)/static/smoketest.txt" >/dev/null
-	$(CURL_CMD) "$(URL_ROOT)/" | grep -qi 'dev-scaffold\|id="root"'
 
 .PHONY: ci
 ci: ## (Docker) One-shot CI recipe (dev stack + FE/BE verify + smoke)
@@ -420,7 +413,7 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke
 
 .PHONY: format format-check
 RUFF = $(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) $(UV_RUN) ruff
@@ -453,7 +446,7 @@ deps.lock: ## Update the selected profile's Python lockfile with pinned Dockeriz
 COMPOSE ?= $(COMPOSE_DEV)
 ENV ?= dev
 down-dev logs-dev ps-dev wait-dev: COMPOSE = $(COMPOSE_DEV)
-down-prod logs-prod ps-prod wait-prod: COMPOSE = $(COMPOSE_PROD)
+down-prod logs-prod ps-prod wait-prod smoke-prod: COMPOSE = $(COMPOSE_PROD)
 down-ephemeral logs-ephemeral ps-ephemeral: COMPOSE = $(COMPOSE_EPHEMERAL)
 
 .PHONY: down logs ps wait restart restart-dev restart-prod ps-prod ps-ephemeral wait-dev wait-prod
@@ -480,6 +473,14 @@ wait wait-dev wait-prod:
 
 wait-dev: ## Wait for development health
 wait-prod: ## Wait for production health
+
+.PHONY: smoke
+smoke: CURL_CMD = curl $(CURL_FLAGS) -fsS
+smoke: wait ## Check application health, static delivery, and homepage
+	$(CURL_CMD) "$(URL_ROOT)/api/healthz" >/dev/null
+	$(CURL_CMD) "$(URL_ROOT)/static/smoketest.txt" >/dev/null
+	$(CURL_CMD) "$(URL_ROOT)/" | grep -qi '$(SMOKE_HOME_PATTERN)'
+
 restart-dev: ENV := dev
 restart-prod: ENV := prod
 restart-dev: ## Restart development services
