@@ -31,8 +31,9 @@ def test_react_profile_dependency_lock_uses_pinned_dockerized_uv() -> None:
     output = _make("--dry-run", "deps.lock").stdout
 
     assert "docker run --rm" in output
-    assert "ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim lock" in output
-    assert 'backend:/workspace"' in output
+    assert "ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim" in output
+    assert f'--volume "{_repository_root()}:/workspace"' in output
+    assert "lock --project backend" in output
     assert "--entrypoint /usr/local/bin/uv" in output
 
 

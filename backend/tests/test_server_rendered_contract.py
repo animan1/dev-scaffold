@@ -36,7 +36,6 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "logs",
         "ps",
         "reset",
-        "deps.lock",
         "format",
         "lint",
         "typecheck",
@@ -196,6 +195,7 @@ def test_server_rendered_dependency_lock_uses_pinned_dockerized_uv() -> None:
     assert "docker run --rm" in output
     assert "ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim" in output
     assert "lock --project profiles/server-rendered-django" in output
+    assert "deps.lock" in _make("help").stdout
 
 
 def test_server_rendered_django_migration_commands_use_docker() -> None:
