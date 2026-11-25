@@ -54,10 +54,16 @@ def test_server_rendered_web_owns_static_and_media_delivery_only() -> None:
 
     assert '"127.0.0.1:${RELEASE_HTTP_PORT:-18080}:8080"' in compose
     assert "- media:/media" in compose
-    assert "- media:/media:ro" in compose
-    assert "- staticfiles:/static:ro" in compose
     assert "/var/run/docker.sock" not in compose
     web = compose.split("  web:", 1)[1].split("\n  monitor:", 1)[0]
+    for source, target in (("media", "/media"), ("staticfiles", "/static")):
+        assert (
+            f"source: {source}\n"
+            f"        target: {target}\n"
+            "        read_only: true\n"
+            "        volume:\n"
+            "          nocopy: true"
+        ) in web
     assert "DJANGO_SECRET_KEY" not in web
     assert "location /static/" in nginx
     assert "location /media/" in nginx
