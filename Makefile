@@ -21,7 +21,12 @@ PROD_CONFIG = $(COMPOSE_PROD)
 HOST_INGRESS ?= 1
 # Capture tenant/operator input before the smoke-test placeholder default.
 PREPARE_PUBLIC_HOST := $(HOST_INGRESS_HOST)
-HOST_INGRESS_HOST ?= localhost
+HOST_INGRESS_HOST ?= 127.0.0.1
+APP_HOST ?= 127.0.0.1
+DEV_HTTP_PORT ?= 8080
+export DEV_HTTP_PORT
+DEV_URL_ROOT ?= http://127.0.0.1:$(DEV_HTTP_PORT)
+CURL_FLAGS ?= -H 'Host: $(APP_HOST)'
 HOST_INGRESS_PORT ?= $(RELEASE_HTTP_PORT)
 export HOST_INGRESS_PORT
 PROD_URL_ROOT ?= http://127.0.0.1:$(HOST_INGRESS_PORT)
@@ -78,8 +83,6 @@ COMPOSE_EPHEMERAL_INGRESS = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 # ---- Paths ----
 PY_DIR := backend
 PYTHON_PROJECT_DIR := $(PY_DIR)
-URL_ROOT ?= http://localhost:8080
-CURL_FLAGS ?=
 SMOKE_HOME_PATTERN := dev-scaffold\|id="root"
 
 .PHONY: be.bash
@@ -206,15 +209,15 @@ prepare-ephemeral: ## Prepare isolated, non-secret release smoke-test configurat
 		openssl req -x509 -nodes -newkey rsa:2048 \
 			-keyout $(dir $(EPHEMERAL_ENV_FILE))certs/server.key \
 			-out $(dir $(EPHEMERAL_ENV_FILE))certs/server.crt \
-			-days 1 -subj '/CN=localhost' \
-			-addext 'subjectAltName=DNS:localhost'; \
+			-days 1 -subj '/CN=$(HOST_INGRESS_HOST)' \
+			-addext 'subjectAltName=DNS:$(HOST_INGRESS_HOST),IP:127.0.0.1,DNS:localhost'; \
 	fi
 
 .PHONY: verify-ephemeral
 verify-ephemeral: ## Verify the running recorded release in ephemeral
 	@for i in $$(seq 1 60); do \
-		if curl -kfsS https://localhost:$(EPHEMERAL_HTTPS_PORT)/api/healthz >/dev/null; then \
-			curl -kfsS https://localhost:$(EPHEMERAL_HTTPS_PORT)/ >/dev/null; \
+		if curl -kfsS https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/api/healthz >/dev/null; then \
+			curl -kfsS https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/ >/dev/null; \
 			echo 'Release images passed smoke tests'; exit 0; \
 		fi; \
 		sleep 1; \
@@ -419,6 +422,7 @@ deps.lock: ## Update the selected profile's Python lockfile with pinned Dockeriz
 		lock --project $(PYTHON_PROJECT_DIR)
 
 COMPOSE ?= $(COMPOSE_DEV)
+URL_ROOT ?= $(DEV_URL_ROOT)
 ENV ?= dev
 down-dev logs-dev ps-dev wait-dev: COMPOSE = $(COMPOSE_DEV)
 down-prod logs-prod ps-prod wait-prod smoke-prod: COMPOSE = $(COMPOSE_PROD)
@@ -526,10 +530,10 @@ prepare-prod: ## Prepare and validate private production inputs without starting
 			umask 077; mkdir -p deploy/nginx/certs; \
 			openssl req -x509 -nodes -newkey rsa:2048 \
 				-keyout deploy/nginx/certs/server.key -out deploy/nginx/certs/server.crt \
-				-days 365 -subj '/CN=localhost' \
-				-addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' || exit 1; \
+				-days 365 -subj '/CN=$(HOST_INGRESS_HOST)' \
+				-addext 'subjectAltName=DNS:$(HOST_INGRESS_HOST),IP:127.0.0.1,DNS:localhost' || exit 1; \
 		fi; \
-		echo 'Local TLS certificate ready for localhost and 127.0.0.1'; \
+		echo 'Local TLS certificate ready for $(HOST_INGRESS_HOST), localhost and 127.0.0.1'; \
 	else \
 		test -f deploy/nginx/certs/server.key && \
 			openssl x509 -in deploy/nginx/certs/server.crt -noout -checkend 0 >/dev/null || \

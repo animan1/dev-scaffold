@@ -142,6 +142,20 @@ def test_release_configuration_resolves_production_project_and_volumes(
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
 def test_shared_lifecycle_commands_select_each_requested_environment(profile: str) -> None:
+    default_dev = _make(profile, "--dry-run", "smoke")
+    assert "http://127.0.0.1:8080/api/healthz" in default_dev
+    assert "http://localhost" not in default_dev
+    if profile == "server-rendered-django":
+        assert "Host: 127.0.0.1" in default_dev
+        assert "Host: localhost" not in default_dev
+    dev = _make(profile, "--dry-run", "smoke", "DEV_URL_ROOT=http://dev.example")
+    assert "http://dev.example/api/healthz" in dev
+    assert "http://dev.example/static/smoketest.txt" in dev
+    custom_port = _make(
+        profile, "--dry-run", "smoke", "DEV_HTTP_PORT=18123", "APP_HOST=dev.example"
+    )
+    assert "http://127.0.0.1:18123/api/healthz" in custom_port
+    assert "Host: dev.example" in custom_port
     for command in ("down", "logs", "ps"):
         output = _make(
             profile,
@@ -154,11 +168,15 @@ def test_shared_lifecycle_commands_select_each_requested_environment(profile: st
             "tenant-prod",
             "tenant-ephemeral",
         ]
-    waiting = _make(profile, "--dry-run", "PROJECT_NAME=tenant", "wait-prod")
+    waiting = _make(
+        profile, "--dry-run", "PROJECT_NAME=tenant", "wait-prod", "DEV_URL_ROOT=http://dev.example"
+    )
     assert "COMPOSE_PROJECT_NAME=tenant-prod" in waiting
     assert "tenant-dev" not in waiting
     assert "X-Forwarded-Proto: https" in waiting
+    assert "Host: 127.0.0.1" in waiting
     assert "http://127.0.0.1:18080/api/healthz" in waiting
+    assert "http://dev.example" not in waiting
     smoke = _make(
         profile,
         "--dry-run",
@@ -243,7 +261,7 @@ def test_smoke_requires_static_delivery_in_both_profiles(
             "--no-print-directory",
             f"SCAFFOLD_PROFILE={profile}",
             "HOST_INGRESS=0",
-            "URL_ROOT=http://smoke.test",
+            f"{'PROD' if target == 'smoke-prod' else 'DEV'}_URL_ROOT=http://smoke.test",
             target,
         ],
         cwd=_repository_root(),

@@ -17,7 +17,7 @@ def test_server_rendered_compose_is_isolated_and_postgres_only() -> None:
 
     assert "postgres:16.10-bookworm" in compose
     assert 'name: "${COMPOSE_PROJECT_NAME:?' in compose
-    assert '"127.0.0.1:${APP_PORT:-18000}:8000"' in compose
+    assert '"127.0.0.1:${DEV_HTTP_PORT:-8080}:8000"' in compose
     assert "postgres_data:" in compose
     assert "frontend:" not in compose
     assert "node:" not in compose

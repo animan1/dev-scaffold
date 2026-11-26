@@ -32,7 +32,7 @@ services:
     environment:
       DATABASE_URL: postgresql://app:app@db:5432/app
       DEPLOYMENT_ENVIRONMENT: development
-      DJANGO_ALLOWED_HOSTS: "${APP_HOST:-localhost},127.0.0.1"
+      DJANGO_ALLOWED_HOSTS: "${APP_HOST:-127.0.0.1},127.0.0.1,localhost"
       DJANGO_DEBUG: "true"
       DJANGO_SECRET_KEY: development-only
       HOME: /tmp
@@ -46,13 +46,13 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/healthz', timeout=2)",
+          "import urllib.request; request = urllib.request.Request('http://127.0.0.1:8000/api/healthz', headers={'Host': '${APP_HOST:-127.0.0.1}'}); urllib.request.urlopen(request, timeout=2)",
         ]
       interval: 2s
       timeout: 3s
       retries: 30
     ports:
-      - "127.0.0.1:${APP_PORT:-18000}:8000"
+      - "127.0.0.1:${DEV_HTTP_PORT:-8080}:8000"
     user: "${HOST_UID:?Set HOST_UID through the profile Makefile}:${HOST_GID:?Set HOST_GID through the profile Makefile}"
     volumes:
       - .:/workspace

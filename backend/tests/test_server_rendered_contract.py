@@ -144,6 +144,14 @@ def test_server_rendered_ephemeral_uses_local_tls_ingress() -> None:
     assert "https://127.0.0.1:18444/" in smoke
     assert "/admin/login/\\?next=/admin/" in smoke
     assert "set-cookie: csrftoken=.*; secure" in smoke
+    custom = _make(
+        "--dry-run", "up-ephemeral", "verify-ephemeral", "HOST_INGRESS_HOST=tenant.example"
+    ).stdout
+    assert "--build-arg EPHEMERAL_HOST=tenant.example" in custom
+    assert "DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,tenant.example" in custom
+    assert "DJANGO_CSRF_TRUSTED_ORIGINS=https://tenant.example" in custom
+    assert "Host: tenant.example" in custom
+    assert "location: https://tenant.example:" in custom
 
 
 def test_server_rendered_production_security_fails_closed() -> None:
@@ -218,7 +226,9 @@ def test_server_rendered_django_migration_commands_use_docker() -> None:
         ("profiles/server-rendered-django/compose.yml", "app"),
     ],
 )
-def test_development_startup_does_not_apply_migrations(compose_file: str, service: str) -> None:
+def test_development_startup_uses_selected_port_without_migrations(
+    compose_file: str, service: str
+) -> None:
     if not shutil.which("docker"):
         pytest.skip("Needs the Docker Compose client")
     root = _repository_root()
@@ -241,12 +251,23 @@ def test_development_startup_does_not_apply_migrations(compose_file: str, servic
             "HOST_GID": str(os.getgid()),
             "GIT_COMMON_DIR": str(root / ".git"),
             "DOCKER_HOST": "unix:///nonexistent",
+            "DEV_HTTP_PORT": "18123",
+            "APP_HOST": "dev.example",
         },
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    command = json.loads(result.stdout)["services"][service]["command"]
+    services = json.loads(result.stdout)["services"]
+    command = services[service]["command"]
+    entry = "nginx" if service == "backend" else "app"
+    assert services[entry]["ports"][0]["published"] == "18123"
+    if service == "app":
+        assert "dev.example" in services[service]["environment"]["DJANGO_ALLOWED_HOSTS"]
+        assert "dev.example" in " ".join(services[service]["healthcheck"]["test"])
+    else:
+        assert services["frontend"]["environment"]["DEV_HTTP_PORT"] == "18123"
+        assert services["frontend"]["environment"]["APP_HOST"] == "dev.example"
     assert "runserver" in " ".join(command)
     assert "migrate" not in " ".join(command)
 
