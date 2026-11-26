@@ -58,7 +58,9 @@ def test_react_profile_exposes_django_development_helpers() -> None:
 
 def test_down_preserves_development_volumes() -> None:
     output = _make("--dry-run", "down-dev").stdout
-    assert "docker compose -f deploy/docker-compose.dev.yml down" in output
+    assert (
+        "docker compose --project-directory deploy -f deploy/docker-compose.dev.yml down" in output
+    )
     assert "down -v" not in output
 
 
@@ -71,4 +73,7 @@ def test_reset_requires_explicit_confirmation() -> None:
 
 def test_confirmed_reset_removes_development_volumes() -> None:
     output = _make("--dry-run", "reset-dev", "CONFIRM_RESET=1").stdout
-    assert "docker compose -f deploy/docker-compose.dev.yml down -v" in output
+    assert (
+        "docker compose --project-directory deploy -f deploy/docker-compose.dev.yml down -v"
+        in output
+    )
