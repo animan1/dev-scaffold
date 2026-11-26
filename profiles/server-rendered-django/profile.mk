@@ -54,9 +54,9 @@ fe.lint: ## No frontend lint checks for this profile
 fe.typecheck: ## No frontend type checks for this profile
 	@:
 
-.PHONY: test
-test: ## Run backend tests once without the coverage gate
-	$(RUN_DEV) $(UV_RUN) pytest -c $(PROFILE_PROJECT) /workspace/backend
+.PHONY: fe.test-in-container
+fe.test-in-container:
+	@:
 
 .PHONY: coverage
 coverage: ## Run the single coverage-enabled test suite and write coverage.xml

@@ -318,10 +318,6 @@ preflight: ## Format + lint + typecheck + coverage + precommit
 preflight: format lint typecheck coverage precommit
 	@echo "✅ Preflight complete."
 
-.PHONY: test
-test: ## Pytest (backend)
-	cd $(PY_DIR) && uv run pytest -q
-
 .PHONY: coverage
 coverage: ## Pytest coverage gate (backend)
 	cd $(PY_DIR) && uv run pytest --cov=src --cov-report=term-missing --cov-report=xml
@@ -368,13 +364,13 @@ fe.format: ## Prettier write (frontend)
 fe.fmt-check: ## Prettier check (frontend)
 	cd $(FRONTEND_DIR) && pnpm fmt-check
 
-.PHONY: fe.test
+.PHONY: fe.test-in-container
 FE_COVERAGE_ARGS :=
 ifeq ($(COVERAGE),1)
 FE_COVERAGE_ARGS := --coverage
 endif
-fe.test: ## Vitest (frontend)
-	cd $(FRONTEND_DIR) && pnpm run test $(FE_COVERAGE_ARGS)
+fe.test-in-container:
+	cd $(FRONTEND_DIR) && corepack pnpm run test $(FE_COVERAGE_ARGS)
 
 .PHONY: fe.typecheck
 fe.typecheck: ## TypeScript typecheck (frontend)
@@ -412,6 +408,24 @@ typecheck: ## Run Django type checks, then applicable frontend type checks
 
 be.typecheck-in-container:
 	$(UV_RUN) mypy --config-file /workspace/backend/pyproject.toml .
+
+HELP_SHARED_COMMANDS += |test
+.PHONY: test test-in-container be.test-in-container
+test: ## Run backend and applicable frontend tests in Docker
+	$(COMPOSE_DEV) run --rm --workdir /workspace/backend --env REPO_DIR=/workspace --env PYTEST_ADDOPTS \
+		$(DEV_APPLICATION_SERVICE) make --no-print-directory -f /workspace/Makefile \
+		SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE) be.test-in-container
+ifdef FRONTEND_DIR
+	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
+		--volume "$(abspath $(FRONTEND_DIR))/node_modules:/app/node_modules" \
+		frontend make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE) \
+		FRONTEND_DIR=/workspace/frontend COVERAGE=$(COVERAGE) fe.test-in-container
+endif
+
+test-in-container: be.test-in-container fe.test-in-container
+
+be.test-in-container:
+	cd "$(SCAFFOLD_ROOT)backend" && $(UV_RUN) pytest -q -c "$(SCAFFOLD_ROOT)$(PYTHON_PROJECT_DIR)/pyproject.toml"
 
 .PHONY: format format-check
 RUFF = $(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) $(UV_RUN) ruff
