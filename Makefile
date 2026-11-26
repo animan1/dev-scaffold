@@ -44,6 +44,7 @@ profiles:
 HELP_FILES = $(MAKEFILE_LIST)
 EPHEMERAL_ENV_FILE ?= $(CURDIR)/.tmp/ephemeral.env
 UV_RUN = uv run --project $(CONTAINER_PYTHON_PROJECT_DIR)
+PRECOMMIT_CONFIG := .pre-commit-config.yaml
 GIT_COMMON_DIR ?= $(shell git rev-parse --path-format=absolute --git-common-dir)
 HOST_UID ?= $(shell id -u)
 HOST_GID ?= $(shell id -g)
@@ -321,12 +322,6 @@ preflight: format lint typecheck coverage precommit
 	@echo "✅ Preflight complete."
 
 
-# ---- Pre-commit runner ----
-.PHONY: precommit
-precommit: ## Run pre-commit on all files
-precommit: fe.setup
-	cd $(PY_DIR) && uv run --extra dev pre-commit run --all-files
-
 # ---- Clean ----
 .PHONY: clean
 clean: ## Remove caches and build artifacts
@@ -352,7 +347,7 @@ fe.build: ## Build frontend (Vite)
 fe.lint: ## ESLint (frontend)
 	$(COMPOSE_DEV) run --rm --no-deps \
 		--volume "$(abspath $(FRONTEND_DIR))/node_modules:/app/node_modules" \
-		frontend corepack pnpm lint
+		frontend corepack pnpm lint --max-warnings 0
 
 .PHONY: fe.format
 fe.format: ## Prettier write (frontend)
@@ -360,7 +355,9 @@ fe.format: ## Prettier write (frontend)
 
 .PHONY: fe.fmt-check
 fe.fmt-check: ## Prettier check (frontend)
-	cd $(FRONTEND_DIR) && pnpm fmt-check
+	$(COMPOSE_DEV) run --rm --no-deps \
+		--volume "$(abspath $(FRONTEND_DIR))/node_modules:/app/node_modules" \
+		frontend corepack pnpm fmt-check
 
 .PHONY: fe.test fe.test-in-container
 fe.test: ## Run frontend tests in Docker
@@ -390,7 +387,17 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit
+
+.PHONY: precommit
+precommit: ## Run repository pre-commit hooks in the Docker toolchain
+	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace \
+		--user "$(HOST_UID):$(HOST_GID)" --env HOME=/tmp \
+		--env SKIP="$${SKIP:+$$SKIP,}fe-eslint,fe-prettier" \
+		--volume "$(GIT_COMMON_DIR):$(GIT_COMMON_DIR):ro" \
+		$(DEV_APPLICATION_SERVICE) $(UV_RUN) --no-sync pre-commit run \
+		--config "$(PRECOMMIT_CONFIG)" --all-files
+	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.lint fe.fmt-check
 
 .PHONY: coverage coverage-in-container
 coverage: ## Run backend tests and enforce total and changed-line coverage in Docker

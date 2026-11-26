@@ -93,8 +93,10 @@ def test_server_rendered_diagnostics_use_selected_compose_and_help() -> None:
 
 def test_server_rendered_precommit_is_a_recipe() -> None:
     output = _make("--dry-run", "precommit").stdout
-    assert "pre-commit run" in output
-    assert "--all-files" in output
+    assert "docker compose" in output
+    assert "uv run --project /workspace/profiles/server-rendered-django --no-sync" in output
+    assert '--config ".pre-commit-config.yaml" --all-files' in output
+    assert "corepack pnpm" not in output
 
 
 def test_prod_and_ephemeral_use_the_same_recorded_release_workflow() -> None:

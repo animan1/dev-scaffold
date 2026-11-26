@@ -5,7 +5,6 @@ SMOKE_HOME_PATTERN := <main
 PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
 DEV_COMPOSE_FILE := profiles/server-rendered-django/compose.yml
 DEV_COMPOSE_PROJECT_DIR := .
-RUN_DEV := $(COMPOSE_DEV) run --rm app
 CONTAINER_PYTHON_PROJECT_DIR := /workspace/profiles/server-rendered-django
 DEV_APPLICATION_SERVICE := app
 RELEASE_PULL ?= $(COMPOSE_PROD) pull app web
@@ -43,10 +42,10 @@ build: ## Build the deterministic development application image
 .PHONY: setup
 setup: build ## Prepare Docker development dependencies from the committed lockfile
 
-.PHONY: fe.lint fe.typecheck fe.test fe.test-in-container
+.PHONY: fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check
 fe.lint: ## No frontend lint checks for this profile
 fe.typecheck: ## No frontend type checks for this profile
-fe.lint fe.typecheck fe.test fe.test-in-container:
+fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check:
 	@:
 
 .PHONY: build-production
@@ -192,8 +191,3 @@ verify: ## Run the identical aggregate contract used by developers and CI
 	$(MAKE) check
 	$(MAKE) build-production
 	$(MAKE) smoke
-
-.PHONY: precommit
-precommit: ## Run repository pre-commit hooks in the Docker toolchain
-	$(RUN_DEV) $(UV_RUN) pre-commit run \
-		--config /workspace/profiles/server-rendered-django/pre-commit-config.yaml --all-files
