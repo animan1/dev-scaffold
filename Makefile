@@ -123,14 +123,8 @@ migrate-prod: ## Run Django migrations in prod
 bash-prod: ## Shell into backend container (prod)
 	$(COMPOSE_PROD) exec backend bash
 
-.PHONY: smoke-prod
-smoke-prod: ## Prod smoketest (API + static + FE root)
 ifeq ($(HOST_INGRESS),1)
 smoke-prod: smoke-host-ingress
-else
-smoke-prod: URL_ROOT := https://localhost
-smoke-prod: CURL_FLAGS := -k
-smoke-prod: smoke
 endif
 
 .PHONY: ops.check-prod
@@ -147,23 +141,10 @@ ops.monitor-prod: ## Follow the unattended production monitor
 
 .PHONY: smoke-host-ingress
 smoke-host-ingress: ## Smoke-test the loopback origin as routed by a host ingress
-smoke-host-ingress:
-	@echo "Waiting for routed backend on http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz ..."
-	@for i in $$(seq 1 60); do \
-		if curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' \
-			-H 'X-Forwarded-Proto: https' \
-			'http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz' >/dev/null; then \
-			echo "Routed backend is up"; break; \
-		fi; \
-		if [ "$$i" = "60" ]; then \
-			echo "Routed backend did not become ready in time"; exit 1; \
-		fi; \
-		sleep 1; \
-	done
-	curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
-		'http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz' >/dev/null
-	curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
-		'http://127.0.0.1:$(HOST_INGRESS_PORT)/static/smoketest.txt' >/dev/null
+smoke-host-ingress: COMPOSE = $(COMPOSE_PROD)
+smoke-host-ingress: URL_ROOT = http://127.0.0.1:$(HOST_INGRESS_PORT)
+smoke-host-ingress: CURL_FLAGS = -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https'
+smoke-host-ingress: smoke
 	@location="$$(curl -fsS -D - -o /dev/null \
 		-H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
 		'http://127.0.0.1:$(HOST_INGRESS_PORT)/admin' \
@@ -180,8 +161,6 @@ smoke-host-ingress:
 		/admin/login/*) ;; \
 		*) echo "Django admin login was not routed (got $$location)"; exit 1 ;; \
 	esac
-	curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
-		'http://127.0.0.1:$(HOST_INGRESS_PORT)/' | grep -qi 'dev-scaffold\|id="root"'
 	@code="$$(curl -sS -o /dev/null -w '%{http_code}' \
 		-H 'Host: $(HOST_INGRESS_HOST)' \
 		'http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz')"; \
@@ -250,7 +229,7 @@ verify-host-ingress: prepare-ephemeral ## Verify exact images through the loopba
 	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage migrate
 	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage collectstatic --noinput
 	$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build
-	$(MAKE) smoke-host-ingress
+	$(MAKE) smoke-host-ingress 'COMPOSE=$(COMPOSE_EPHEMERAL_INGRESS)'
 
 .PHONY: verify-monitoring-config
 verify-monitoring-config: prepare-ephemeral ## Validate the optional monitoring Compose profile
@@ -288,11 +267,11 @@ rollback-release: ## Deploy a previously recorded RELEASE_FILE
 rollback-release: deploy-release
 
 ifeq ($(HOST_INGRESS),1)
-wait-prod: URL_ROOT := http://127.0.0.1:$(HOST_INGRESS_PORT)
-wait-prod: CURL_FLAGS := -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https'
+PROD_URL_ROOT = http://127.0.0.1:$(HOST_INGRESS_PORT)
+PROD_CURL_FLAGS = -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https'
 else
-wait-prod: URL_ROOT := https://localhost
-wait-prod: CURL_FLAGS := -k
+PROD_URL_ROOT := https://localhost
+PROD_CURL_FLAGS := -k
 endif
 
 # ---- Django dev helpers ----
@@ -413,7 +392,7 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod
 
 .PHONY: format format-check
 RUFF = $(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) $(UV_RUN) ruff
@@ -447,6 +426,8 @@ COMPOSE ?= $(COMPOSE_DEV)
 ENV ?= dev
 down-dev logs-dev ps-dev wait-dev: COMPOSE = $(COMPOSE_DEV)
 down-prod logs-prod ps-prod wait-prod smoke-prod: COMPOSE = $(COMPOSE_PROD)
+wait-prod smoke-prod: URL_ROOT = $(PROD_URL_ROOT)
+wait-prod smoke-prod: CURL_FLAGS = $(PROD_CURL_FLAGS)
 down-ephemeral logs-ephemeral ps-ephemeral: COMPOSE = $(COMPOSE_EPHEMERAL)
 
 .PHONY: down logs ps wait restart restart-dev restart-prod ps-prod ps-ephemeral wait-dev wait-prod
@@ -474,7 +455,8 @@ wait wait-dev wait-prod:
 wait-dev: ## Wait for development health
 wait-prod: ## Wait for production health
 
-.PHONY: smoke
+.PHONY: smoke smoke-prod
+smoke-prod: smoke ## Check production health, static delivery, and homepage
 smoke: CURL_CMD = curl $(CURL_FLAGS) -fsS
 smoke: wait ## Check application health, static delivery, and homepage
 	$(CURL_CMD) "$(URL_ROOT)/api/healthz" >/dev/null

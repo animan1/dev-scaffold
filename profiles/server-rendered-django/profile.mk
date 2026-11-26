@@ -6,8 +6,8 @@ APP_HOST ?= localhost
 URL_ROOT ?= http://127.0.0.1:$(APP_PORT)
 CURL_FLAGS ?= -H 'Host: $(APP_HOST)'
 SMOKE_HOME_PATTERN := <main
-wait-prod smoke-prod: URL_ROOT = http://127.0.0.1:$(RELEASE_HTTP_PORT)
-wait-prod smoke-prod: CURL_FLAGS = -H 'Host: $(APP_HOST)' -H 'X-Forwarded-Proto: https'
+PROD_URL_ROOT = http://127.0.0.1:$(RELEASE_HTTP_PORT)
+PROD_CURL_FLAGS = -H 'Host: $(APP_HOST)' -H 'X-Forwarded-Proto: https'
 DIFF_BASE ?= origin/main
 PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
 GIT_COMMON_DIR ?= $(shell git rev-parse --path-format=absolute --git-common-dir)
@@ -232,9 +232,6 @@ verify-ephemeral: ## Verify local HTTP redirect, HTTPS customer/admin routes, an
 	curl -kfsS -D - -o /dev/null -H 'Host: localhost' \
 		'https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/admin/login/' \
 		| grep -Eiq '^set-cookie: csrftoken=.*; secure(;|[[:space:]]*$$)'
-
-.PHONY: smoke-prod
-smoke-prod: smoke ## Check the production origin behind host-managed ingress
 
 .PHONY: rollback-release
 rollback-release: ## Deploy a previously recorded release manifest

@@ -125,6 +125,20 @@ def test_shared_lifecycle_commands_select_each_requested_environment(profile: st
     assert "tenant-dev" not in waiting
     assert "X-Forwarded-Proto: https" in waiting
     assert "http://127.0.0.1:18080/api/healthz" in waiting
+    smoke = _make(
+        profile,
+        "--dry-run",
+        "smoke-prod",
+        "HOST_INGRESS_PORT=19080",
+        "RELEASE_HTTP_PORT=19080",
+        "APP_HOST=tenant.example",
+        "HOST_INGRESS_HOST=tenant.example",
+    )
+    assert "http://127.0.0.1:19080/api/healthz" in smoke
+    assert "Host: tenant.example" in smoke
+    assert "X-Forwarded-Proto: https" in smoke
+    assert smoke.count("/static/smoketest.txt") == 1
+    assert smoke.count("grep -qi") == 1
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
