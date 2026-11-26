@@ -131,16 +131,18 @@ def test_prod_and_ephemeral_use_the_same_recorded_release_workflow() -> None:
 def test_server_rendered_ephemeral_uses_local_tls_ingress() -> None:
     root = _repository_root()
     overlay = (root / "profiles/server-rendered-django/ephemeral.compose.yml").read_text()
-    ingress = (root / "profiles/server-rendered-django/ephemeral-ingress.conf.template").read_text()
+    ingress = (root / "profiles/server-rendered-django/ingress.conf.template").read_text()
     release = (root / "profiles/server-rendered-django/release.compose.yml").read_text()
+    web = (root / "profiles/server-rendered-django/release-nginx.conf").read_text()
     smoke = _make("--dry-run", "verify-ephemeral").stdout
 
     assert "127.0.0.1:${EPHEMERAL_HTTP_PORT:-18081}:80" in overlay
     assert "127.0.0.1:${EPHEMERAL_HTTPS_PORT:-18444}:443" in overlay
     assert "ephemeral-ingress" not in release
-    assert "return 308 https://$host:${EPHEMERAL_HTTPS_PORT}$request_uri" in ingress
+    assert "return 308 https://$host:${INGRESS_HTTPS_PORT}$request_uri" in ingress
     assert "proxy_pass http://web:8080" in ingress
     assert "proxy_set_header Host $http_host" in ingress
+    assert "proxy_set_header Host $http_host" in web
     assert "proxy_set_header X-Forwarded-Proto https" in ingress
     assert "http://127.0.0.1:18081/" in smoke
     assert "https://127.0.0.1:18444/" in smoke

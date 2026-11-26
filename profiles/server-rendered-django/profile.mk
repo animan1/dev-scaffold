@@ -14,6 +14,9 @@ EPHEMERAL_INGRESS_IMAGE ?= local/$(PROJECT_NAME)-ephemeral-ingress:test
 EPHEMERAL_COMPOSE_FILE := profiles/server-rendered-django/ephemeral.compose.yml
 RELEASE_COMPOSE_FILE := profiles/server-rendered-django/release.compose.yml
 PROD_COMPOSE_FILES := -f $(RELEASE_COMPOSE_FILE)
+ifeq ($(HOST_INGRESS),0)
+PROD_COMPOSE_FILES += -f profiles/server-rendered-django/standalone.compose.yml
+endif
 COMPOSE_PROD = COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(PROD_ENV_FILE) docker compose --project-directory . \
 	$(PROD_COMPOSE_FILES) --env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)

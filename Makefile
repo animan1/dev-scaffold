@@ -34,12 +34,21 @@ HOST_INGRESS_PORT ?= $(RELEASE_HTTP_PORT)
 export HOST_INGRESS_PORT
 PROD_URL_ROOT ?= http://127.0.0.1:$(HOST_INGRESS_PORT)
 PROD_CURL_FLAGS ?= -L $(if $(wildcard deploy/nginx/certs/server.crt),--cacert deploy/nginx/certs/server.crt) -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https'
+ifeq ($(HOST_INGRESS),1)
+PROD_HTTPS_URL ?= https://$(HOST_INGRESS_HOST)
+else
+PROD_HTTPS_URL ?= https://127.0.0.1:$(PROD_HTTPS_PORT)
+PROD_HTTPS_CA ?= deploy/nginx/certs/server.crt
+endif
+PROD_HTTPS_CURL_FLAGS = --proto '=https' --proto-redir '=https' -L $(if $(PROD_HTTPS_CA),--cacert '$(PROD_HTTPS_CA)')
 
 .PHONY: profiles
 profiles:
 	@python3 scripts/profile_metadata.py --application '$(SCAFFOLD_PROFILE)' \
 		--backup '$(SCAFFOLD_BACKUP_PROFILE)' --applications $(CI_PROFILES) \
 		--backups $(CI_BACKUP_PROFILES)
+
+smoke-prod: wait
 
 HELP_FILES = $(MAKEFILE_LIST)
 EPHEMERAL_ENV_FILE ?= $(CURDIR)/.tmp/ephemeral.env
@@ -144,7 +153,7 @@ bash-prod: ## Shell into backend container (prod)
 	$(COMPOSE_PROD) exec backend bash
 
 ifeq ($(HOST_INGRESS),1)
-smoke-prod: smoke-host-ingress
+smoke-prod: check-host-ingress
 endif
 
 .PHONY: ops.check-prod
@@ -159,12 +168,13 @@ ops.check-external-prod: ## Run checks once through the external monitoring prof
 ops.monitor-prod: ## Follow the unattended production monitor
 	$(COMPOSE_MONITOR) logs -f monitor
 
-.PHONY: smoke-host-ingress
+.PHONY: smoke-host-ingress check-host-ingress
 smoke-host-ingress: ## Smoke-test the loopback origin as routed by a host ingress
 smoke-host-ingress: COMPOSE = $(COMPOSE_PROD)
 smoke-host-ingress: URL_ROOT = $(PROD_URL_ROOT)
 smoke-host-ingress: CURL_FLAGS = $(PROD_CURL_FLAGS)
-smoke-host-ingress: smoke
+smoke-host-ingress: smoke check-host-ingress
+check-host-ingress:
 	@location="$$(curl -fsS -D - -o /dev/null \
 		-H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
 		'http://127.0.0.1:$(HOST_INGRESS_PORT)/admin' \
@@ -486,8 +496,13 @@ URL_ROOT ?= $(DEV_URL_ROOT)
 ENV ?= dev
 down-dev logs-dev ps-dev wait-dev: COMPOSE = $(COMPOSE_DEV)
 down-prod logs-prod ps-prod wait-prod smoke-prod: COMPOSE = $(COMPOSE_PROD)
-wait-prod smoke-prod: URL_ROOT = $(PROD_URL_ROOT)
-wait-prod smoke-prod: CURL_FLAGS = $(PROD_CURL_FLAGS)
+ifeq ($(HOST_INGRESS),1)
+wait-prod: URL_ROOT = $(PROD_URL_ROOT)
+wait-prod: CURL_FLAGS = $(PROD_CURL_FLAGS)
+else
+wait-prod: URL_ROOT = $(PROD_HTTPS_URL)
+wait-prod: CURL_FLAGS = $(PROD_HTTPS_CURL_FLAGS)
+endif
 down-ephemeral logs-ephemeral ps-ephemeral: COMPOSE = $(COMPOSE_EPHEMERAL)
 
 .PHONY: down logs ps wait restart restart-dev restart-prod ps-prod ps-ephemeral wait-dev wait-prod
@@ -516,9 +531,12 @@ wait-dev: ## Wait for development health
 wait-prod: ## Wait for production health
 
 .PHONY: smoke smoke-prod
-smoke-prod: smoke ## Check production health, static delivery, and homepage
-smoke: CURL_CMD = curl $(CURL_FLAGS) -fsS
+smoke-prod: URL_ROOT = $(PROD_HTTPS_URL)
+smoke-prod: override CURL_FLAGS = $(PROD_HTTPS_CURL_FLAGS)
+smoke-prod: ## Check production health, static delivery, and homepage over HTTPS
 smoke: wait ## Check application health, static delivery, and homepage
+smoke smoke-prod: CURL_CMD = curl $(CURL_FLAGS) -fsS
+smoke smoke-prod:
 	$(CURL_CMD) "$(URL_ROOT)/api/healthz" >/dev/null
 	$(CURL_CMD) "$(URL_ROOT)/static/smoketest.txt" >/dev/null
 	$(CURL_CMD) "$(URL_ROOT)/" | grep -qi '$(SMOKE_HOME_PATTERN)'

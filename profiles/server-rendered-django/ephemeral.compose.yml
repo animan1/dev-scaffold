@@ -5,7 +5,7 @@ services:
       web:
         condition: service_started
     environment:
-      EPHEMERAL_HTTPS_PORT: "${EPHEMERAL_HTTPS_PORT:-18444}"
+      INGRESS_HTTPS_PORT: "${EPHEMERAL_HTTPS_PORT:-18444}"
     ports:
       - "127.0.0.1:${EPHEMERAL_HTTP_PORT:-18081}:80"
       - "127.0.0.1:${EPHEMERAL_HTTPS_PORT:-18444}:443"
