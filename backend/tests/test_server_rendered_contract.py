@@ -327,8 +327,15 @@ def test_server_rendered_tools_explicitly_load_profile_configuration() -> None:
         "mypy --config-file /workspace/backend/pyproject.toml"
         in _make("--dry-run", "be.typecheck-in-container").stdout
     )
-    test_output = _make("--dry-run", "test").stdout
-    assert f"pytest -c {profile_config}" in test_output
+    test_output = _make("--dry-run", "test-in-container").stdout
+    assert "pytest -q -c" in test_output
+    assert "profiles/server-rendered-django/pyproject.toml" in test_output
+    assert "docker compose" not in test_output
+    assert "pnpm" not in test_output
+    host_test = _make("--dry-run", "test").stdout
+    assert "be.test-in-container" in host_test
+    assert "Makefile fe.test" in host_test
+    assert "frontend sh" not in host_test
     coverage_output = _make("--dry-run", "coverage").stdout
     assert f"pytest -c {profile_config}" in coverage_output
     assert f"--cov-config={profile_config}" in coverage_output

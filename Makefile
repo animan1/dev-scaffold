@@ -318,10 +318,6 @@ preflight: ## Format + lint + typecheck + coverage + precommit
 preflight: format lint typecheck coverage precommit
 	@echo "✅ Preflight complete."
 
-.PHONY: test
-test: ## Pytest (backend)
-	cd $(PY_DIR) && uv run pytest -q
-
 .PHONY: coverage
 coverage: ## Pytest coverage gate (backend)
 	cd $(PY_DIR) && uv run pytest --cov=src --cov-report=term-missing --cov-report=xml
@@ -368,13 +364,18 @@ fe.format: ## Prettier write (frontend)
 fe.fmt-check: ## Prettier check (frontend)
 	cd $(FRONTEND_DIR) && pnpm fmt-check
 
-.PHONY: fe.test
+.PHONY: fe.test fe.test-in-container
+fe.test: ## Run frontend tests in Docker
+	$(COMPOSE_DEV) run --rm --no-deps frontend sh -ec 'corepack pnpm install --frozen-lockfile && \
+		make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=react-vite \
+		FRONTEND_DIR=/app COVERAGE=$(COVERAGE) fe.test-in-container'
+
 FE_COVERAGE_ARGS :=
 ifeq ($(COVERAGE),1)
 FE_COVERAGE_ARGS := --coverage
 endif
-fe.test: ## Vitest (frontend)
-	cd $(FRONTEND_DIR) && pnpm run test $(FE_COVERAGE_ARGS)
+fe.test-in-container:
+	cd $(FRONTEND_DIR) && corepack pnpm run test $(FE_COVERAGE_ARGS)
 
 .PHONY: fe.typecheck
 fe.typecheck: ## TypeScript typecheck (frontend)
@@ -391,7 +392,7 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test
 
 .PHONY: lint be.lint-in-container
 lint: ## Run Django lint checks, then applicable frontend lint checks
@@ -402,7 +403,6 @@ lint: ## Run Django lint checks, then applicable frontend lint checks
 be.lint-in-container:
 	$(UV_RUN) python /workspace/backend/scripts/check_no_any.py
 	$(UV_RUN) ruff check --config /workspace/backend/pyproject.toml .
-HELP_SHARED_COMMANDS := $(HELP_SHARED_COMMANDS)|typecheck
 
 .PHONY: typecheck be.typecheck-in-container
 typecheck: ## Run Django type checks, then applicable frontend type checks
@@ -412,6 +412,18 @@ typecheck: ## Run Django type checks, then applicable frontend type checks
 
 be.typecheck-in-container:
 	$(UV_RUN) mypy --config-file /workspace/backend/pyproject.toml .
+
+.PHONY: test test-in-container be.test-in-container
+test: ## Run backend and applicable frontend tests in Docker
+	$(COMPOSE_DEV) run --rm --workdir /workspace/backend --env REPO_DIR=/workspace --env PYTEST_ADDOPTS \
+		$(DEV_APPLICATION_SERVICE) make --no-print-directory -f /workspace/Makefile \
+		SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE) be.test-in-container
+	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.test
+
+test-in-container: be.test-in-container fe.test-in-container
+
+be.test-in-container:
+	cd "$(SCAFFOLD_ROOT)backend" && $(UV_RUN) pytest -q -c "$(SCAFFOLD_ROOT)$(PYTHON_PROJECT_DIR)/pyproject.toml"
 
 .PHONY: format format-check
 RUFF = $(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) $(UV_RUN) ruff

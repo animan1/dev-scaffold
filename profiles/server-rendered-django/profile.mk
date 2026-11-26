@@ -46,17 +46,11 @@ build: ## Build the deterministic development application image
 .PHONY: setup
 setup: build ## Prepare Docker development dependencies from the committed lockfile
 
-.PHONY: fe.lint
+.PHONY: fe.lint fe.typecheck fe.test fe.test-in-container
 fe.lint: ## No frontend lint checks for this profile
-	@:
-
-.PHONY: fe.typecheck
 fe.typecheck: ## No frontend type checks for this profile
+fe.lint fe.typecheck fe.test fe.test-in-container:
 	@:
-
-.PHONY: test
-test: ## Run backend tests once without the coverage gate
-	$(RUN_DEV) $(UV_RUN) pytest -c $(PROFILE_PROJECT) /workspace/backend
 
 .PHONY: coverage
 coverage: ## Run the single coverage-enabled test suite and write coverage.xml
