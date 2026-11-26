@@ -65,6 +65,10 @@ def test_format_commands_use_container_tooling_and_one_configuration() -> None:
             "docker compose" in command and "run --rm --no-deps" in command for command in commands
         )
         assert all("--config /workspace/backend/pyproject.toml" in command for command in commands)
+        project = (
+            "/app" if profile == "react-vite" else "/workspace/profiles/server-rendered-django"
+        )
+        assert all(f"uv run --project {project} ruff" in command for command in commands)
         assert "--fix ." in commands[0]
         assert "--check ." in commands[2]
 

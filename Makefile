@@ -28,12 +28,13 @@ profiles:
 
 HELP_FILES = $(MAKEFILE_LIST)
 EPHEMERAL_ENV_FILE ?= $(CURDIR)/.tmp/ephemeral.env
+UV_RUN = uv run --project $(CONTAINER_PYTHON_PROJECT_DIR)
 
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 
 COMPOSE_DEV = COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) docker compose -f deploy/docker-compose.dev.yml
 DEV_APPLICATION_SERVICE := backend
-UV_RUN := uv run --project /app
+CONTAINER_PYTHON_PROJECT_DIR := /app
 FRONTEND_DIR := frontend
 MONITORING ?= 0
 HOST_INGRESS_HOST ?= app.example.test
@@ -87,7 +88,7 @@ be.ci: be.verify
 .PHONY: be.verify
 be.verify: ## Run backend verification in the development container
 	$(COMPOSE_DEV) run --rm --workdir /workspace/backend \
-		--env UV_PROJECT_ENVIRONMENT=/app/.venv \
+		--env UV_PROJECT_ENVIRONMENT=$(CONTAINER_PYTHON_PROJECT_DIR)/.venv \
 		--env PYTHONPATH=/workspace/backend/src --env DIFF_BASE \
 		backend bash -lc 'REPO_DIR=/workspace make -f /workspace/Makefile PY_DIR=/workspace/backend be.verify-in-container'
 
@@ -97,7 +98,7 @@ fe.ci: ## (Docker) Run frontend verify inside dev container
 		--volume "$(CURDIR)/frontend/node_modules:/app/node_modules" \
 		frontend sh -lc 'apk add --no-cache make >/dev/null 2>&1 || true; corepack enable; git config --global --add safe.directory /workspace; make -f /workspace/Makefile FRONTEND_DIR=/workspace/frontend fe.setup fe.verify'
 	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
-		backend /app/.venv/bin/diff-cover coverage/lcov.info \
+		backend $(CONTAINER_PYTHON_PROJECT_DIR)/.venv/bin/diff-cover coverage/lcov.info \
 		--config-file /workspace/backend/pyproject.toml $(if $(DIFF_BASE),--compare-branch=$(DIFF_BASE))
 
 .PHONY: smoke
