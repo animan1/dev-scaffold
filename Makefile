@@ -2,6 +2,7 @@ SCAFFOLD_ROOT := $(dir $(abspath $(firstword $(MAKEFILE_LIST))))
 include $(SCAFFOLD_ROOT).scaffold-profile
 SHELL := /bin/bash
 PROJECT_NAME ?= $(notdir $(CURDIR))
+DIFF_BASE ?= origin/main
 DEV_COMPOSE_PROJECT ?= $(PROJECT_NAME)-dev
 PROD_COMPOSE_PROJECT ?= $(PROJECT_NAME)-prod
 EPHEMERAL_COMPOSE_PROJECT ?= $(PROJECT_NAME)-ephemeral

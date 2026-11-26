@@ -2,7 +2,6 @@ HELP_FILES = $(filter-out $(firstword $(MAKEFILE_LIST)),$(MAKEFILE_LIST))
 
 PYTHON_PROJECT_DIR := profiles/server-rendered-django
 SMOKE_HOME_PATTERN := <main
-DIFF_BASE ?= origin/main
 PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
 GIT_COMMON_DIR ?= $(shell git rev-parse --path-format=absolute --git-common-dir)
 HOST_UID ?= $(shell id -u)
