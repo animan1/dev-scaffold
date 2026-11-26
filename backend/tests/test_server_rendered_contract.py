@@ -316,8 +316,6 @@ def test_server_rendered_help_includes_selected_optional_profiles() -> None:
 
 
 def test_server_rendered_tools_explicitly_load_profile_configuration() -> None:
-    profile_config = "/workspace/profiles/server-rendered-django/pyproject.toml"
-
     assert (
         "ruff check --config /workspace/backend/pyproject.toml"
         in _make("--dry-run", "be.lint-in-container").stdout

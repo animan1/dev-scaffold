@@ -48,6 +48,8 @@ HOST_GID ?= $(shell id -g)
 COMPOSE_DEV = COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) APP_HOST=$(APP_HOST) DEV_HTTP_PORT=$(DEV_HTTP_PORT) \
 	GIT_COMMON_DIR="$(GIT_COMMON_DIR)" HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
 	docker compose --project-directory $(DEV_COMPOSE_PROJECT_DIR) -f $(DEV_COMPOSE_FILE)
+RUN_BACKEND_MAKE = $(COMPOSE_DEV) run --rm --workdir /workspace/backend $(1) \
+	$(DEV_APPLICATION_SERVICE) make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE)
 DJANGO_DEV_MANAGE = $(COMPOSE_DEV) run --rm --workdir $(CONTAINER_PYTHON_PROJECT_DIR) \
 	$(DEV_APPLICATION_SERVICE) $(UV_RUN) python -m app.manage
 
@@ -392,8 +394,7 @@ HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|mig
 
 .PHONY: coverage coverage-in-container
 coverage: ## Run backend tests and enforce total and changed-line coverage in Docker
-	$(COMPOSE_DEV) run --rm --workdir /workspace/backend --env REPO_DIR=/workspace $(DEV_APPLICATION_SERVICE) \
-		make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE) \
+	$(call RUN_BACKEND_MAKE,--env REPO_DIR=/workspace) \
 		DIFF_BASE="$(DIFF_BASE)" coverage-in-container
 
 coverage-in-container:
@@ -404,8 +405,7 @@ coverage-in-container:
 
 .PHONY: lint be.lint-in-container
 lint: ## Run Django lint checks, then applicable frontend lint checks
-	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) \
-		make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE) be.lint-in-container
+	$(call RUN_BACKEND_MAKE,--no-deps) be.lint-in-container
 	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.lint
 
 be.lint-in-container:
@@ -414,8 +414,7 @@ be.lint-in-container:
 
 .PHONY: typecheck be.typecheck-in-container
 typecheck: ## Run Django type checks, then applicable frontend type checks
-	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) \
-		make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE) be.typecheck-in-container
+	$(call RUN_BACKEND_MAKE,--no-deps) be.typecheck-in-container
 	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.typecheck
 
 be.typecheck-in-container:
@@ -423,9 +422,7 @@ be.typecheck-in-container:
 
 .PHONY: test test-in-container be.test-in-container
 test: ## Run backend and applicable frontend tests in Docker
-	$(COMPOSE_DEV) run --rm --workdir /workspace/backend --env REPO_DIR=/workspace --env PYTEST_ADDOPTS \
-		$(DEV_APPLICATION_SERVICE) make --no-print-directory -f /workspace/Makefile \
-		SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE) be.test-in-container
+	$(call RUN_BACKEND_MAKE,--env REPO_DIR=/workspace --env PYTEST_ADDOPTS) be.test-in-container
 	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.test
 
 test-in-container: be.test-in-container fe.test-in-container
