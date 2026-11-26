@@ -7,7 +7,8 @@ DEV_COMPOSE_FILE := profiles/server-rendered-django/compose.yml
 DEV_COMPOSE_PROJECT_DIR := .
 CONTAINER_PYTHON_PROJECT_DIR := /workspace/profiles/server-rendered-django
 DEV_APPLICATION_SERVICE := app
-RELEASE_PULL ?= $(COMPOSE_PROD) pull app web
+PROD_WEB_SERVICE := web
+RELEASE_COLLECTSTATIC_FLAGS := --clear
 EPHEMERAL_HTTP_PORT ?= 18081
 EPHEMERAL_HTTPS_PORT ?= 18444
 EPHEMERAL_INGRESS_IMAGE ?= local/$(PROJECT_NAME)-ephemeral-ingress:test
@@ -24,7 +25,6 @@ COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 	docker compose --project-directory . -f $(RELEASE_COMPOSE_FILE) \
 	-f $(EPHEMERAL_COMPOSE_FILE) $(EPHEMERAL_BACKUP_FILES) \
 	--env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
-RUN_PROD = $(COMPOSE_PROD) run --rm --no-deps app
 RUN_EPHEMERAL = $(COMPOSE_EPHEMERAL) run --rm --no-deps app
 LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
 	RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) RELEASE_IMAGE_PREFIX=$(RELEASE_IMAGE_PREFIX) \
@@ -133,16 +133,6 @@ push-release-images: ## Publish verified images and record immutable digests
 		'server-rendered-django' '$(RELEASE_REVISION)' '$(RELEASE_IMAGE_PREFIX)' \
 		"$$backend" "$$web" > $(RELEASE_FILE); \
 	echo "Recorded $(RELEASE_FILE)"
-
-.PHONY: initialize-release
-initialize-release: ## Initialize the database and static volume with recorded images
-	@test -f $(RELEASE_FILE) || { echo 'Set RELEASE_FILE to a recorded release manifest'; exit 1; }
-	$(COMPOSE_PROD) config --quiet
-	$(RELEASE_PULL)
-	$(COMPOSE_PROD) up -d --no-build db
-	$(RUN_PROD) python -m app.manage check --deploy
-	$(RUN_PROD) python -m app.manage migrate
-	$(RUN_PROD) python -m app.manage collectstatic --noinput --clear
 
 .PHONY: deploy-release
 deploy-release: initialize-release ## Deploy the digest-pinned server-rendered image set
