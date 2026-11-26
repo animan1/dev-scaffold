@@ -48,6 +48,8 @@ HOST_GID ?= $(shell id -g)
 COMPOSE_DEV = COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) APP_HOST=$(APP_HOST) DEV_HTTP_PORT=$(DEV_HTTP_PORT) \
 	GIT_COMMON_DIR="$(GIT_COMMON_DIR)" HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
 	docker compose --project-directory $(DEV_COMPOSE_PROJECT_DIR) -f $(DEV_COMPOSE_FILE)
+DEV_RUN_BACKEND_MAKE = $(COMPOSE_DEV) run --rm --workdir /workspace/backend --env REPO_DIR=/workspace $(1) \
+	$(DEV_APPLICATION_SERVICE) make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE)
 DJANGO_DEV_MANAGE = $(COMPOSE_DEV) run --rm --workdir $(CONTAINER_PYTHON_PROJECT_DIR) \
 	$(DEV_APPLICATION_SERVICE) $(UV_RUN) python -m app.manage
 
@@ -92,7 +94,7 @@ COMPOSE_EPHEMERAL_INGRESS = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 
 # ---- Paths ----
 PY_DIR := backend
-PYTHON_PROJECT_DIR := $(PY_DIR)
+PYTHON_PROJECT_DIR := backend
 SMOKE_HOME_PATTERN := dev-scaffold\|id="root"
 
 .PHONY: be.bash
@@ -311,17 +313,13 @@ verify: be.verify fe.verify
 .PHONY: be.verify-in-container
 be.verify-in-container:
 	$(UV_RUN) ruff format --config /workspace/backend/pyproject.toml --check .
-	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile be.lint-in-container be.typecheck-in-container coverage
+	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile be.lint-in-container be.typecheck-in-container coverage-in-container
 
 .PHONY: preflight
 preflight: ## Format + lint + typecheck + coverage + precommit
 preflight: format lint typecheck coverage precommit
 	@echo "✅ Preflight complete."
 
-.PHONY: coverage
-coverage: ## Pytest coverage gate (backend)
-	cd $(PY_DIR) && uv run pytest --cov=src --cov-report=term-missing --cov-report=xml
-	cd $(PY_DIR) && uv run diff-cover coverage.xml --config-file pyproject.toml $(if $(DIFF_BASE),--compare-branch=$(DIFF_BASE))
 
 # ---- Pre-commit runner ----
 .PHONY: precommit
@@ -392,12 +390,22 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage
+
+.PHONY: coverage coverage-in-container
+coverage: ## Run backend tests and enforce total and changed-line coverage in Docker
+	$(call DEV_RUN_BACKEND_MAKE) \
+		DIFF_BASE="$(DIFF_BASE)" coverage-in-container
+
+coverage-in-container:
+	cd "$(SCAFFOLD_ROOT)backend" && $(UV_RUN) pytest -c "$(SCAFFOLD_ROOT)$(PYTHON_PROJECT_DIR)/pyproject.toml" \
+		--cov=src --cov-config=pyproject.toml --cov-report=term-missing --cov-report=xml
+	cd "$(SCAFFOLD_ROOT)backend" && $(UV_RUN) diff-cover coverage.xml --config-file pyproject.toml \
+		$(if $(DIFF_BASE),--compare-branch=$(DIFF_BASE))
 
 .PHONY: lint be.lint-in-container
 lint: ## Run Django lint checks, then applicable frontend lint checks
-	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) \
-		make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE) be.lint-in-container
+	$(call DEV_RUN_BACKEND_MAKE,--no-deps) be.lint-in-container
 	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.lint
 
 be.lint-in-container:
@@ -406,8 +414,7 @@ be.lint-in-container:
 
 .PHONY: typecheck be.typecheck-in-container
 typecheck: ## Run Django type checks, then applicable frontend type checks
-	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) \
-		make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE) be.typecheck-in-container
+	$(call DEV_RUN_BACKEND_MAKE,--no-deps) be.typecheck-in-container
 	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.typecheck
 
 be.typecheck-in-container:
@@ -415,9 +422,7 @@ be.typecheck-in-container:
 
 .PHONY: test test-in-container be.test-in-container
 test: ## Run backend and applicable frontend tests in Docker
-	$(COMPOSE_DEV) run --rm --workdir /workspace/backend --env REPO_DIR=/workspace --env PYTEST_ADDOPTS \
-		$(DEV_APPLICATION_SERVICE) make --no-print-directory -f /workspace/Makefile \
-		SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE) be.test-in-container
+	$(call DEV_RUN_BACKEND_MAKE,--env PYTEST_ADDOPTS) be.test-in-container
 	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.test
 
 test-in-container: be.test-in-container fe.test-in-container

@@ -58,7 +58,6 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "lint",
         "typecheck",
         "coverage",
-        "changed-coverage",
         "migrations-check",
         "django-check",
     ):
@@ -317,8 +316,6 @@ def test_server_rendered_help_includes_selected_optional_profiles() -> None:
 
 
 def test_server_rendered_tools_explicitly_load_profile_configuration() -> None:
-    profile_config = "/workspace/profiles/server-rendered-django/pyproject.toml"
-
     assert (
         "ruff check --config /workspace/backend/pyproject.toml"
         in _make("--dry-run", "be.lint-in-container").stdout
@@ -336,15 +333,16 @@ def test_server_rendered_tools_explicitly_load_profile_configuration() -> None:
     assert "be.test-in-container" in host_test
     assert "Makefile fe.test" in host_test
     assert "frontend sh" not in host_test
-    coverage_output = _make("--dry-run", "coverage").stdout
-    assert f"pytest -c {profile_config}" in coverage_output
-    assert f"--cov-config={profile_config}" in coverage_output
+    coverage_output = _make("--dry-run", "coverage-in-container").stdout
+    assert "pytest -c" in coverage_output
+    assert "profiles/server-rendered-django/pyproject.toml" in coverage_output
+    assert "--cov-config=pyproject.toml" in coverage_output
 
 
 def test_changed_coverage_runs_from_backend() -> None:
-    output = _make("--dry-run", "changed-coverage").stdout
+    output = _make("--dry-run", "coverage-in-container").stdout
 
-    assert "cd /workspace/backend" in output
+    assert f'cd "{_repository_root()}/backend"' in output
     assert "diff-cover" in output
     assert "coverage.xml" in output
     assert "backend/coverage.xml" not in output
