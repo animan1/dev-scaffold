@@ -54,8 +54,8 @@ fe.lint: ## No frontend lint checks for this profile
 fe.typecheck: ## No frontend type checks for this profile
 	@:
 
-.PHONY: fe.test-in-container
-fe.test-in-container:
+.PHONY: fe.test-docker fe.test-in-container
+fe.test-docker fe.test-in-container:
 	@:
 
 .PHONY: coverage

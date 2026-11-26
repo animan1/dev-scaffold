@@ -364,7 +364,12 @@ fe.format: ## Prettier write (frontend)
 fe.fmt-check: ## Prettier check (frontend)
 	cd $(FRONTEND_DIR) && pnpm fmt-check
 
-.PHONY: fe.test-in-container
+.PHONY: fe.test-docker fe.test-in-container
+fe.test-docker:
+	$(COMPOSE_DEV) run --rm --no-deps frontend sh -ec 'corepack pnpm install --frozen-lockfile && \
+		make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=react-vite \
+		FRONTEND_DIR=/app COVERAGE=$(COVERAGE) fe.test-in-container'
+
 FE_COVERAGE_ARGS :=
 ifeq ($(COVERAGE),1)
 FE_COVERAGE_ARGS := --coverage
@@ -409,18 +414,13 @@ typecheck: ## Run Django type checks, then applicable frontend type checks
 be.typecheck-in-container:
 	$(UV_RUN) mypy --config-file /workspace/backend/pyproject.toml .
 
-HELP_SHARED_COMMANDS += |test
+HELP_SHARED_COMMANDS := $(HELP_SHARED_COMMANDS)|test
 .PHONY: test test-in-container be.test-in-container
 test: ## Run backend and applicable frontend tests in Docker
 	$(COMPOSE_DEV) run --rm --workdir /workspace/backend --env REPO_DIR=/workspace --env PYTEST_ADDOPTS \
 		$(DEV_APPLICATION_SERVICE) make --no-print-directory -f /workspace/Makefile \
 		SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE) be.test-in-container
-ifdef FRONTEND_DIR
-	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
-		--volume "$(abspath $(FRONTEND_DIR))/node_modules:/app/node_modules" \
-		frontend make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE) \
-		FRONTEND_DIR=/workspace/frontend COVERAGE=$(COVERAGE) fe.test-in-container
-endif
+	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.test-docker
 
 test-in-container: be.test-in-container fe.test-in-container
 
