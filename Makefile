@@ -248,7 +248,7 @@ verify-host-ingress: prepare-ephemeral ## Verify exact images through the loopba
 	$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build db backend
 	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage check
 	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage migrate
-	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage collectstatic --noinput
+	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage collectstatic --noinput --clear
 	$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build
 	$(MAKE) smoke-host-ingress 'COMPOSE=$(COMPOSE_EPHEMERAL_INGRESS)'
 
@@ -398,7 +398,7 @@ initialize-release: ## Initialize the database and static volume with the record
 	$(COMPOSE_PROD) up -d --no-build db
 	$(RUN_PROD) python -m app.manage check --deploy
 	$(RUN_PROD) python -m app.manage migrate
-	$(RUN_PROD) python -m app.manage collectstatic --noinput $(RELEASE_COLLECTSTATIC_FLAGS)
+	$(RUN_PROD) python -m app.manage collectstatic --noinput --clear
 
 .PHONY: coverage coverage-in-container
 coverage: ## Run backend tests and enforce total and changed-line coverage in Docker

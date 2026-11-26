@@ -44,7 +44,7 @@ def test_react_release_path_remains_selected_by_the_react_profile() -> None:
     assert "logs -f --tail=200" in logs
     assert "pull backend nginx" in initialize
     assert "run --rm --no-deps backend python -m app.manage migrate" in initialize
-    assert "collectstatic --noinput --clear" not in initialize
+    assert "collectstatic --noinput --clear" in initialize
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
