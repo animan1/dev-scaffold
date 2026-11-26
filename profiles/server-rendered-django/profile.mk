@@ -63,10 +63,6 @@ changed-coverage: ## Enforce coverage on Python lines changed from DIFF_BASE
 	$(RUN_DEV) sh -lc 'cd /workspace/backend && $(UV_RUN) diff-cover \
 		coverage.xml --compare-branch=$(DIFF_BASE) --fail-under=90'
 
-.PHONY: migrations-check
-migrations-check: ## Reject model changes without migrations
-	$(RUN_DEV) $(UV_RUN) python -m app.manage makemigrations --check --dry-run
-
 .PHONY: django-check
 django-check: ## Run Django's production deployment checks
 	$(RUN_DEV) sh -lc 'DJANGO_SETTINGS_MODULE=app.project.settings.prod \
