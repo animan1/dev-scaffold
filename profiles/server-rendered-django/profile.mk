@@ -52,16 +52,6 @@ fe.typecheck: ## No frontend type checks for this profile
 fe.lint fe.typecheck fe.test fe.test-in-container:
 	@:
 
-.PHONY: coverage
-coverage: ## Run the single coverage-enabled test suite and write coverage.xml
-	$(RUN_DEV) $(UV_RUN) pytest -c $(PROFILE_PROJECT) --cov=src \
-		--cov-config=$(PROFILE_PROJECT) --cov-report=term-missing --cov-report=xml \
-		/workspace/backend
-
-.PHONY: changed-coverage
-changed-coverage: ## Enforce coverage on Python lines changed from DIFF_BASE
-	$(RUN_DEV) sh -lc 'cd /workspace/backend && $(UV_RUN) diff-cover \
-		coverage.xml --compare-branch=$(DIFF_BASE) --fail-under=90'
 
 .PHONY: django-check
 django-check: ## Run Django's production deployment checks
@@ -76,7 +66,6 @@ check: ## Run every non-image quality gate through the shared Docker toolchain
 	$(MAKE) lint
 	$(MAKE) typecheck
 	$(MAKE) coverage
-	$(MAKE) changed-coverage
 	$(MAKE) migrations-check
 	$(MAKE) django-check
 

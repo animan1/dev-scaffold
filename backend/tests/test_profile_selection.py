@@ -62,11 +62,8 @@ def test_changed_coverage_uses_shared_default_and_legacy_branch_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("DIFF_BASE", raising=False)
-    for profile, target in (
-        ("react-vite", "coverage"),
-        ("server-rendered-django", "changed-coverage"),
-    ):
-        selectors = [f"SCAFFOLD_PROFILE={profile}", "--dry-run", target]
+    for profile in ("react-vite", "server-rendered-django"):
+        selectors = [f"SCAFFOLD_PROFILE={profile}", "--dry-run", "coverage-in-container"]
         assert "--compare-branch=origin/main" in _make(*selectors).stdout
         legacy = _make(*selectors, "DIFF_BASE=origin/master").stdout
         assert "--compare-branch=origin/master" in legacy
@@ -170,7 +167,7 @@ def test_backend_verification_uses_explicit_container_boundary_without_overrides
     assert "ruff format --config /workspace/backend/pyproject.toml --check ." in internal
     assert "ruff check --config /workspace/backend/pyproject.toml" in internal
     assert "mypy --config-file /workspace/backend/pyproject.toml" in internal
-    assert "uv run pytest --cov" in internal
+    assert "--cov=src --cov-config=pyproject.toml" in internal
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])

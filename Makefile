@@ -311,17 +311,13 @@ verify: be.verify fe.verify
 .PHONY: be.verify-in-container
 be.verify-in-container:
 	$(UV_RUN) ruff format --config /workspace/backend/pyproject.toml --check .
-	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile be.lint-in-container be.typecheck-in-container coverage
+	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile be.lint-in-container be.typecheck-in-container coverage-in-container
 
 .PHONY: preflight
 preflight: ## Format + lint + typecheck + coverage + precommit
 preflight: format lint typecheck coverage precommit
 	@echo "✅ Preflight complete."
 
-.PHONY: coverage
-coverage: ## Pytest coverage gate (backend)
-	cd $(PY_DIR) && uv run pytest --cov=src --cov-report=term-missing --cov-report=xml
-	cd $(PY_DIR) && uv run diff-cover coverage.xml --config-file pyproject.toml $(if $(DIFF_BASE),--compare-branch=$(DIFF_BASE))
 
 # ---- Pre-commit runner ----
 .PHONY: precommit
@@ -392,7 +388,19 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage
+
+.PHONY: coverage coverage-in-container
+coverage: ## Run backend tests and enforce total and changed-line coverage in Docker
+	$(COMPOSE_DEV) run --rm --workdir /workspace/backend --env REPO_DIR=/workspace $(DEV_APPLICATION_SERVICE) \
+		make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE) \
+		DIFF_BASE="$(DIFF_BASE)" coverage-in-container
+
+coverage-in-container:
+	cd "$(SCAFFOLD_ROOT)backend" && $(UV_RUN) pytest -c "$(SCAFFOLD_ROOT)$(PYTHON_PROJECT_DIR)/pyproject.toml" \
+		--cov=src --cov-config=pyproject.toml --cov-report=term-missing --cov-report=xml
+	cd "$(SCAFFOLD_ROOT)backend" && $(UV_RUN) diff-cover coverage.xml --config-file pyproject.toml \
+		$(if $(DIFF_BASE),--compare-branch=$(DIFF_BASE))
 
 .PHONY: lint be.lint-in-container
 lint: ## Run Django lint checks, then applicable frontend lint checks
