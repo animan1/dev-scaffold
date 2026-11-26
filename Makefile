@@ -392,7 +392,7 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check
 
 .PHONY: lint be.lint-in-container
 lint: ## Run Django lint checks, then applicable frontend lint checks
@@ -572,9 +572,12 @@ prepare-prod: ## Prepare and validate private production inputs without starting
 			{ echo 'Install valid production TLS inputs, or use LOCAL_TLS=1 for the laptop dummy'; exit 1; }; \
 	fi
 
-.PHONY: migrations migrate superuser shell
+.PHONY: migrations migrations-check migrate superuser shell
 migrations: ## Create migrations for intentional model changes
 	$(DJANGO_DEV_MANAGE) makemigrations
+
+migrations-check: ## Reject model changes without migrations
+	$(DJANGO_DEV_MANAGE) makemigrations --check --dry-run
 
 migrate: ## Apply development database migrations
 	$(DJANGO_DEV_MANAGE) migrate
