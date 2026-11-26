@@ -323,7 +323,10 @@ def test_server_rendered_tools_explicitly_load_profile_configuration() -> None:
         "ruff check --config /workspace/backend/pyproject.toml"
         in _make("--dry-run", "be.lint-in-container").stdout
     )
-    assert f"mypy --config-file {profile_config}" in _make("--dry-run", "typecheck").stdout
+    assert (
+        "mypy --config-file /workspace/backend/pyproject.toml"
+        in _make("--dry-run", "be.typecheck-in-container").stdout
+    )
     test_output = _make("--dry-run", "test").stdout
     assert f"pytest -c {profile_config}" in test_output
     coverage_output = _make("--dry-run", "coverage").stdout
