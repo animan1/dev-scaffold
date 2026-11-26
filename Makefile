@@ -48,6 +48,8 @@ HOST_GID ?= $(shell id -g)
 COMPOSE_DEV = COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) APP_HOST=$(APP_HOST) DEV_HTTP_PORT=$(DEV_HTTP_PORT) \
 	GIT_COMMON_DIR="$(GIT_COMMON_DIR)" HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
 	docker compose --project-directory $(DEV_COMPOSE_PROJECT_DIR) -f $(DEV_COMPOSE_FILE)
+DJANGO_DEV_MANAGE = $(COMPOSE_DEV) run --rm --workdir $(CONTAINER_PYTHON_PROJECT_DIR) \
+	$(DEV_APPLICATION_SERVICE) $(UV_RUN) python -m app.manage
 
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 
@@ -282,7 +284,6 @@ rollback-release: ## Deploy a previously recorded RELEASE_FILE
 rollback-release: deploy-release
 
 # ---- Django dev helpers ----
-DJANGO_DEV_MANAGE ?= cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage
 
 .PHONY: be.run
 be.run: ## Run Django dev server (app.settings.dev)

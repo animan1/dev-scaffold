@@ -294,14 +294,14 @@ def test_server_rendered_django_development_helpers_use_docker() -> None:
     assert "fe.run" not in help_output
     assert "be.run" not in help_output
     assert "docker compose" in superuser
-    assert "run --rm app" in superuser
+    assert "run --rm --workdir /workspace/profiles/server-rendered-django app" in superuser
     assert superuser.index("python -m app.manage migrate") < superuser.index(
         "python -m app.manage createsuperuser"
     )
     assert "python -m app.manage createsuperuser" in superuser
     assert "cd backend/src" not in superuser
     assert "docker compose" in shell
-    assert "run --rm app" in shell
+    assert "run --rm --workdir /workspace/profiles/server-rendered-django app" in shell
     assert "python -m app.manage shell" in shell
     assert "cd backend/src" not in shell
 

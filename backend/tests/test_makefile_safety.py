@@ -43,6 +43,8 @@ def test_react_profile_exposes_django_migration_commands() -> None:
 
     assert "python -m app.manage makemigrations" in migrations
     assert "python -m app.manage migrate" in migrate
+    assert "run --rm --workdir /app backend uv run --project /app" in migrate
+    assert "cd backend/src" not in migrate
 
 
 def test_react_profile_exposes_django_development_helpers() -> None:
