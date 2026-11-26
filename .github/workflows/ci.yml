@@ -42,7 +42,7 @@ jobs:
       - name: Verify the downstream profile through its shared Make contract
         env:
           DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
-        run: make verify
+        run: make verify migrate
 
       - name: Exercise ephemeral deployment and local ingress
         run: make build-release-images up-ephemeral verify-ephemeral
@@ -73,7 +73,7 @@ jobs:
       - name: Verify (inside container) via Make
         env:
           DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
-        run: make be.ci fe.ci
+        run: make migrate be.ci fe.ci
 
       - name: Smoke test via Nginx
         run: make smoke
