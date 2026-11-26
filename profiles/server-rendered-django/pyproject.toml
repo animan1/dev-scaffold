@@ -43,14 +43,7 @@ fail_under = 85
 show_missing = true
 
 [tool.ruff]
-line-length = 100
-
-[tool.ruff.lint]
-select = ["B", "C90", "E", "F", "I", "N", "UP"]
-ignore = ["E203", "E266", "E501"]
-
-[tool.ruff.lint.isort]
-known-first-party = ["app"]
+extend = "../../backend/pyproject.toml"
 
 [tool.mypy]
 python_version = "3.12"

@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -53,6 +54,44 @@ def test_unknown_profile_requires_its_own_implementation() -> None:
 
     assert result.returncode != 0
     assert "profiles/missing/profile.mk" in result.stderr
+
+
+def test_format_commands_use_container_tooling_and_one_configuration() -> None:
+    for profile in ("react-vite", "server-rendered-django"):
+        output = _make(f"SCAFFOLD_PROFILE={profile}", "--dry-run", "format", "format-check").stdout
+        commands = output.splitlines()
+        assert len(commands) == 3
+        assert all(
+            "docker compose" in command and "run --rm --no-deps" in command for command in commands
+        )
+        assert all("--config /workspace/backend/pyproject.toml" in command for command in commands)
+        assert "--fix ." in commands[0]
+        assert "--check ." in commands[2]
+
+
+def test_profile_configurations_apply_the_same_ruff_formatting() -> None:
+    results = []
+    for config in ("backend/pyproject.toml", "profiles/server-rendered-django/pyproject.toml"):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "ruff",
+                "format",
+                "--config",
+                config,
+                "--stdin-filename",
+                "example.py",
+                "-",
+            ],
+            cwd=_repository_root(),
+            input="def example( x:int): return x+1\n",
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        results.append(result.stdout)
+    assert results == ["def example(x: int):\n    return x + 1\n"] * 2
 
 
 def test_help_lists_commands_when_optional_makefiles_are_loaded() -> None:

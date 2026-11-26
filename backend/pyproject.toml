@@ -37,6 +37,7 @@ dev = [
 line-length = 100
 lint.select = ["E","F","I","N","UP","B","C90"]
 lint.ignore = ["E203","E266","E501"]
+lint.isort.known-first-party = ["app"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "app.project.settings.dev"

@@ -32,6 +32,7 @@ EPHEMERAL_ENV_FILE ?= $(CURDIR)/.tmp/ephemeral.env
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 
 COMPOSE_DEV = COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) docker compose -f deploy/docker-compose.dev.yml
+RUFF = $(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend backend ruff
 FRONTEND_DIR := frontend
 MONITORING ?= 0
 HOST_INGRESS_HOST ?= app.example.test
@@ -83,7 +84,7 @@ be.ci: ## (Docker) Run backend verify inside dev container
 	$(COMPOSE_DEV) run --rm --workdir /workspace/backend \
 		--env UV_PROJECT_ENVIRONMENT=/app/.venv \
 		--env PYTHONPATH=/workspace/backend/src --env DIFF_BASE \
-		backend bash -lc 'REPO_DIR=/workspace make -f /workspace/Makefile PY_DIR=/workspace/backend be.verify'
+		backend bash -lc 'REPO_DIR=/workspace make -f /workspace/Makefile PY_DIR=/workspace/backend RUFF="uv run ruff" be.verify'
 
 .PHONY: fe.ci
 fe.ci: ## (Docker) Run frontend verify inside dev container
@@ -323,7 +324,7 @@ verify: be.verify fe.verify
 
 .PHONY: be.verify
 be.verify: ## Backend format check + lint + typecheck + tests + coverage
-be.verify: fmt-check lint typecheck coverage
+be.verify: format-check lint typecheck coverage
 
 .PHONY: preflight
 preflight: ## Format + lint + typecheck + coverage + precommit
@@ -338,15 +339,6 @@ no-any: ## Reject explicit typing.Any in backend Python
 lint: ## Ruff lint (backend)
 lint: no-any
 	cd $(PY_DIR) && uv run ruff check .
-
-.PHONY: format
-format: ## Apply Ruff fixes and formatting (backend)
-	cd $(PY_DIR) && uv run ruff check --fix .
-	cd $(PY_DIR) && uv run ruff format .
-
-.PHONY: fmt-check
-fmt-check: ## Check formatting (backend)
-	cd $(PY_DIR) && uv run ruff format --check .
 
 .PHONY: typecheck
 typecheck: ## MyPy type checking (backend)
@@ -421,7 +413,15 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check
+
+.PHONY: format format-check
+format: ## Apply Python lint fixes and formatting in Docker
+	$(RUFF) check --config /workspace/backend/pyproject.toml --fix .
+	$(RUFF) format --config /workspace/backend/pyproject.toml .
+
+format-check: ## Check Python formatting in Docker without source fixes
+	$(RUFF) format --config /workspace/backend/pyproject.toml --check .
 
 .PHONY: help help-verbose
 help: ## List available commands
