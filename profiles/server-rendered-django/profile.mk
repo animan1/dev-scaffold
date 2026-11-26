@@ -46,16 +46,10 @@ build: ## Build the deterministic development application image
 .PHONY: setup
 setup: build ## Prepare Docker development dependencies from the committed lockfile
 
-.PHONY: fe.lint
+.PHONY: fe.lint fe.typecheck fe.test fe.test-in-container
 fe.lint: ## No frontend lint checks for this profile
-	@:
-
-.PHONY: fe.typecheck
 fe.typecheck: ## No frontend type checks for this profile
-	@:
-
-.PHONY: fe.test-docker fe.test-in-container
-fe.test-docker fe.test-in-container:
+fe.lint fe.typecheck fe.test fe.test-in-container:
 	@:
 
 .PHONY: coverage
