@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _repository_root() -> Path:
     configured_root = os.getenv("REPO_DIR")
@@ -54,6 +56,21 @@ def test_unknown_profile_requires_its_own_implementation() -> None:
 
     assert result.returncode != 0
     assert "profiles/missing/profile.mk" in result.stderr
+
+
+def test_changed_coverage_uses_shared_default_and_legacy_branch_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DIFF_BASE", raising=False)
+    for profile, target in (
+        ("react-vite", "coverage"),
+        ("server-rendered-django", "changed-coverage"),
+    ):
+        selectors = [f"SCAFFOLD_PROFILE={profile}", "--dry-run", target]
+        assert "--compare-branch=origin/main" in _make(*selectors).stdout
+        legacy = _make(*selectors, "DIFF_BASE=origin/master").stdout
+        assert "--compare-branch=origin/master" in legacy
+        assert "--compare-branch=origin/main" not in legacy
 
 
 def test_format_commands_use_container_tooling_and_one_configuration() -> None:

@@ -6,7 +6,6 @@ APP_HOST ?= localhost
 URL_ROOT ?= http://127.0.0.1:$(APP_PORT)
 CURL_FLAGS ?= -H 'Host: $(APP_HOST)'
 SMOKE_HOME_PATTERN := <main
-DIFF_BASE ?= origin/main
 PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
 GIT_COMMON_DIR ?= $(shell git rev-parse --path-format=absolute --git-common-dir)
 HOST_UID ?= $(shell id -u)
