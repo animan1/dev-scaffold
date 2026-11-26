@@ -349,6 +349,14 @@ fe.lint: ## ESLint (frontend)
 		--volume "$(abspath $(FRONTEND_DIR))/node_modules:/app/node_modules" \
 		frontend corepack pnpm lint
 
+.PHONY: fe.precommit
+fe.precommit:
+	$(COMPOSE_DEV) run --rm --no-deps \
+		--user "$(HOST_UID):$(HOST_GID)" --env HOME=/tmp \
+		--volume "$(abspath $(FRONTEND_DIR))/node_modules:/app/node_modules" \
+		frontend sh -ec 'corepack pnpm lint --max-warnings 0; \
+		corepack pnpm fmt-check || { corepack pnpm format; exit 1; }'
+
 .PHONY: fe.format
 fe.format: ## Prettier write (frontend)
 	cd $(FRONTEND_DIR) && pnpm format
@@ -391,9 +399,11 @@ HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|mig
 precommit: ## Run repository pre-commit hooks in the Docker toolchain
 	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace \
 		--user "$(HOST_UID):$(HOST_GID)" --env HOME=/tmp \
+		--env SKIP="$${SKIP:+$$SKIP,}fe-eslint,fe-prettier" \
 		--volume "$(GIT_COMMON_DIR):$(GIT_COMMON_DIR):ro" \
 		$(DEV_APPLICATION_SERVICE) $(UV_RUN) --no-sync pre-commit run \
 		--config "$(PRECOMMIT_CONFIG)" --all-files
+	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.precommit
 
 .PHONY: coverage coverage-in-container
 coverage: ## Run backend tests and enforce total and changed-line coverage in Docker
