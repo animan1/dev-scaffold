@@ -330,7 +330,7 @@ verify: be.verify fe.verify
 .PHONY: be.verify-in-container
 be.verify-in-container:
 	$(UV_RUN) ruff format --config /workspace/backend/pyproject.toml --check .
-	$(MAKE) lint typecheck coverage
+	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile lint typecheck coverage
 
 .PHONY: preflight
 preflight: ## Format + lint + typecheck + coverage + precommit

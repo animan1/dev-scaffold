@@ -101,7 +101,22 @@ def test_backend_verification_uses_explicit_container_boundary_without_overrides
     assert "docker compose" in verify
     assert "be.verify-in-container" in verify
     assert "RUFF=" not in verify
-    internal = _make("SCAFFOLD_PROFILE=react-vite", "--dry-run", "be.verify-in-container").stdout
+    internal = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "--dry-run",
+            "-f",
+            str(_repository_root() / "Makefile"),
+            "SCAFFOLD_PROFILE=react-vite",
+            "PY_DIR=.",
+            "be.verify-in-container",
+        ],
+        cwd=_repository_root() / "backend",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
     assert "docker compose" not in internal
     assert "ruff format --config /workspace/backend/pyproject.toml --check ." in internal
     assert "uv run ruff check" in internal
