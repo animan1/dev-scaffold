@@ -169,8 +169,35 @@ def test_backend_verification_uses_explicit_container_boundary_without_overrides
     assert "docker compose" not in internal
     assert "ruff format --config /workspace/backend/pyproject.toml --check ." in internal
     assert "ruff check --config /workspace/backend/pyproject.toml" in internal
-    assert "uv run mypy" in internal
+    assert "mypy --config-file /workspace/backend/pyproject.toml" in internal
     assert "uv run pytest --cov" in internal
+
+
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+@pytest.mark.parametrize("python_fails", [False, True])
+def test_typecheck_runs_frontend_only_when_applicable_and_python_passes(
+    profile: str, python_fails: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log = tmp_path / "typecheck.log"
+    docker = tmp_path / "docker"
+    docker.write_text(
+        '#!/bin/sh\ncase "$*" in *" frontend corepack pnpm typecheck")\n'
+        '  echo frontend >> "$TYPECHECK_LOG"; exit 0 ;;\n'
+        'esac\necho python >> "$TYPECHECK_LOG"\nexit "$PYTHON_TYPECHECK_STATUS"\n'
+    )
+    docker.chmod(0o755)
+    pnpm = tmp_path / "pnpm"
+    pnpm.write_text('#!/bin/sh\necho host-pnpm >> "$TYPECHECK_LOG"\nexit 99\n')
+    pnpm.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    monkeypatch.setenv("TYPECHECK_LOG", str(log))
+    monkeypatch.setenv("PYTHON_TYPECHECK_STATUS", str(int(python_fails)))
+    result = _make(f"SCAFFOLD_PROFILE={profile}", "typecheck", check=False)
+    assert (result.returncode != 0) == python_fails
+    expected = ["python"]
+    if profile == "react-vite" and not python_fails:
+        expected.append("frontend")
+    assert log.read_text().splitlines() == expected
 
 
 def test_help_lists_commands_when_optional_makefiles_are_loaded() -> None:

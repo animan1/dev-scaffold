@@ -311,16 +311,12 @@ verify: be.verify fe.verify
 .PHONY: be.verify-in-container
 be.verify-in-container:
 	$(UV_RUN) ruff format --config /workspace/backend/pyproject.toml --check .
-	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile be.lint-in-container typecheck coverage
+	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile be.lint-in-container be.typecheck-in-container coverage
 
 .PHONY: preflight
 preflight: ## Format + lint + typecheck + coverage + precommit
 preflight: format lint typecheck coverage precommit
 	@echo "✅ Preflight complete."
-
-.PHONY: typecheck
-typecheck: ## MyPy type checking (backend)
-	cd $(PY_DIR) && uv run mypy .
 
 .PHONY: test
 test: ## Pytest (backend)
@@ -382,7 +378,9 @@ fe.test: ## Vitest (frontend)
 
 .PHONY: fe.typecheck
 fe.typecheck: ## TypeScript typecheck (frontend)
-	cd $(FRONTEND_DIR) && pnpm typecheck
+	$(COMPOSE_DEV) run --rm --no-deps \
+		--volume "$(abspath $(FRONTEND_DIR))/node_modules:/app/node_modules" \
+		frontend corepack pnpm typecheck
 
 .PHONY: fe.verify
 fe.verify: ## Frontend lint + typecheck + tests + fmt-check
@@ -404,6 +402,16 @@ lint: ## Run Django lint checks, then applicable frontend lint checks
 be.lint-in-container:
 	$(UV_RUN) python /workspace/backend/scripts/check_no_any.py
 	$(UV_RUN) ruff check --config /workspace/backend/pyproject.toml .
+HELP_SHARED_COMMANDS := $(HELP_SHARED_COMMANDS)|typecheck
+
+.PHONY: typecheck be.typecheck-in-container
+typecheck: ## Run Django type checks, then applicable frontend type checks
+	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) \
+		make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE) be.typecheck-in-container
+	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.typecheck
+
+be.typecheck-in-container:
+	$(UV_RUN) mypy --config-file /workspace/backend/pyproject.toml .
 
 .PHONY: format format-check
 RUFF = $(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) $(UV_RUN) ruff

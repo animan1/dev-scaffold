@@ -50,9 +50,9 @@ setup: build ## Prepare Docker development dependencies from the committed lockf
 fe.lint: ## No frontend lint checks for this profile
 	@:
 
-.PHONY: typecheck
-typecheck: ## Run strict MyPy type checking
-	$(RUN_DEV) $(UV_RUN) mypy --config-file $(PROFILE_PROJECT) .
+.PHONY: fe.typecheck
+fe.typecheck: ## No frontend type checks for this profile
+	@:
 
 .PHONY: test
 test: ## Run backend tests once without the coverage gate

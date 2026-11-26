@@ -44,19 +44,3 @@ show_missing = true
 
 [tool.ruff]
 extend = "../../backend/pyproject.toml"
-
-[tool.mypy]
-python_version = "3.12"
-plugins = ["mypy_django_plugin.main"]
-strict = true
-warn_unused_configs = true
-warn_return_any = true
-warn_unused_ignores = true
-exclude = ["migrations"]
-
-[[tool.mypy.overrides]]
-module = ["environ", "environ.*"]
-ignore_missing_imports = true
-
-[tool.django-stubs]
-django_settings_module = "app.project.settings.dev"
