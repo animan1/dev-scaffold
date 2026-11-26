@@ -122,8 +122,12 @@ def test_common_lint_runs_frontend_only_when_applicable_and_django_passes(
 ) -> None:
     log = tmp_path / "lint.log"
     for tool, body in {
-        "docker": 'echo django >> "$LINT_LOG"\nexit "$DJANGO_LINT_STATUS"\n',
-        "pnpm": 'echo frontend >> "$LINT_LOG"\n',
+        "docker": (
+            'case "$*" in *" frontend corepack pnpm lint")\n'
+            '  echo frontend >> "$LINT_LOG"; exit 0 ;;\n'
+            'esac\necho django >> "$LINT_LOG"\nexit "$DJANGO_LINT_STATUS"\n'
+        ),
+        "pnpm": 'echo host-pnpm >> "$LINT_LOG"\nexit 99\n',
     }.items():
         path = tmp_path / tool
         path.write_text("#!/bin/sh\n" + body)

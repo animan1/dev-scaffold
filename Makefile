@@ -359,7 +359,9 @@ fe.build: ## Build frontend (Vite)
 
 .PHONY: fe.lint
 fe.lint: ## ESLint (frontend)
-	cd $(FRONTEND_DIR) && pnpm lint
+	$(COMPOSE_DEV) run --rm --no-deps \
+		--volume "$(abspath $(FRONTEND_DIR))/node_modules:/app/node_modules" \
+		frontend corepack pnpm lint
 
 .PHONY: fe.format
 fe.format: ## Prettier write (frontend)
