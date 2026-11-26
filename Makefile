@@ -28,10 +28,13 @@ profiles:
 
 HELP_FILES = $(MAKEFILE_LIST)
 EPHEMERAL_ENV_FILE ?= $(CURDIR)/.tmp/ephemeral.env
+UV_RUN = uv run --project $(CONTAINER_PYTHON_PROJECT_DIR)
 
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 
 COMPOSE_DEV = COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) docker compose -f deploy/docker-compose.dev.yml
+DEV_APPLICATION_SERVICE := backend
+CONTAINER_PYTHON_PROJECT_DIR := /app
 FRONTEND_DIR := frontend
 MONITORING ?= 0
 HOST_INGRESS_HOST ?= app.example.test
@@ -80,10 +83,14 @@ be.bash: ## (Docker) Shell into backend container
 
 .PHONY: be.ci
 be.ci: ## (Docker) Run backend verify inside dev container
+be.ci: be.verify
+
+.PHONY: be.verify
+be.verify: ## Run backend verification in the development container
 	$(COMPOSE_DEV) run --rm --workdir /workspace/backend \
-		--env UV_PROJECT_ENVIRONMENT=/app/.venv \
+		--env UV_PROJECT_ENVIRONMENT=$(CONTAINER_PYTHON_PROJECT_DIR)/.venv \
 		--env PYTHONPATH=/workspace/backend/src --env DIFF_BASE \
-		backend bash -lc 'REPO_DIR=/workspace make -f /workspace/Makefile PY_DIR=/workspace/backend be.verify'
+		backend bash -lc 'REPO_DIR=/workspace make -f /workspace/Makefile PY_DIR=/workspace/backend be.verify-in-container'
 
 .PHONY: fe.ci
 fe.ci: ## (Docker) Run frontend verify inside dev container
@@ -91,7 +98,7 @@ fe.ci: ## (Docker) Run frontend verify inside dev container
 		--volume "$(CURDIR)/frontend/node_modules:/app/node_modules" \
 		frontend sh -lc 'apk add --no-cache make >/dev/null 2>&1 || true; corepack enable; git config --global --add safe.directory /workspace; make -f /workspace/Makefile FRONTEND_DIR=/workspace/frontend fe.setup fe.verify'
 	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
-		backend /app/.venv/bin/diff-cover coverage/lcov.info \
+		backend $(CONTAINER_PYTHON_PROJECT_DIR)/.venv/bin/diff-cover coverage/lcov.info \
 		--config-file /workspace/backend/pyproject.toml $(if $(DIFF_BASE),--compare-branch=$(DIFF_BASE))
 
 .PHONY: smoke
@@ -321,9 +328,10 @@ hooks: ## Install pre-commit hooks
 verify: ## Run both backend and frontend verification
 verify: be.verify fe.verify
 
-.PHONY: be.verify
-be.verify: ## Backend format check + lint + typecheck + tests + coverage
-be.verify: fmt-check lint typecheck coverage
+.PHONY: be.verify-in-container
+be.verify-in-container:
+	$(UV_RUN) ruff format --config /workspace/backend/pyproject.toml --check .
+	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile lint typecheck coverage
 
 .PHONY: preflight
 preflight: ## Format + lint + typecheck + coverage + precommit
@@ -338,15 +346,6 @@ no-any: ## Reject explicit typing.Any in backend Python
 lint: ## Ruff lint (backend)
 lint: no-any
 	cd $(PY_DIR) && uv run ruff check .
-
-.PHONY: format
-format: ## Apply Ruff fixes and formatting (backend)
-	cd $(PY_DIR) && uv run ruff check --fix .
-	cd $(PY_DIR) && uv run ruff format .
-
-.PHONY: fmt-check
-fmt-check: ## Check formatting (backend)
-	cd $(PY_DIR) && uv run ruff format --check .
 
 .PHONY: typecheck
 typecheck: ## MyPy type checking (backend)
@@ -421,7 +420,16 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check
+
+.PHONY: format format-check
+RUFF = $(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) $(UV_RUN) ruff
+format: ## Apply Python lint fixes and formatting in Docker
+	$(RUFF) check --config /workspace/backend/pyproject.toml --fix .
+	$(RUFF) format --config /workspace/backend/pyproject.toml .
+
+format-check: ## Check Python formatting in Docker without source fixes
+	$(RUFF) format --config /workspace/backend/pyproject.toml --check .
 
 .PHONY: help help-verbose
 help: ## List available commands

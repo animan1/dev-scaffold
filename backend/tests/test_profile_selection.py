@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -53,6 +54,78 @@ def test_unknown_profile_requires_its_own_implementation() -> None:
 
     assert result.returncode != 0
     assert "profiles/missing/profile.mk" in result.stderr
+
+
+def test_format_commands_use_container_tooling_and_one_configuration() -> None:
+    for profile in ("react-vite", "server-rendered-django"):
+        output = _make(f"SCAFFOLD_PROFILE={profile}", "--dry-run", "format", "format-check").stdout
+        commands = output.splitlines()
+        assert len(commands) == 3
+        assert all(
+            "docker compose" in command and "run --rm --no-deps" in command for command in commands
+        )
+        assert all("--config /workspace/backend/pyproject.toml" in command for command in commands)
+        project = (
+            "/app" if profile == "react-vite" else "/workspace/profiles/server-rendered-django"
+        )
+        assert all(f"uv run --project {project} ruff" in command for command in commands)
+        assert "--fix ." in commands[0]
+        assert "--check ." in commands[2]
+
+
+def test_profile_configurations_apply_the_same_ruff_formatting() -> None:
+    results = []
+    for config in ("backend/pyproject.toml", "profiles/server-rendered-django/pyproject.toml"):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "ruff",
+                "format",
+                "--config",
+                config,
+                "--stdin-filename",
+                "example.py",
+                "-",
+            ],
+            cwd=_repository_root(),
+            input="def example( x:int): return x+1\n",
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        results.append(result.stdout)
+    assert results == ["def example(x: int):\n    return x + 1\n"] * 2
+
+
+def test_backend_verification_uses_explicit_container_boundary_without_overrides() -> None:
+    ci = _make("SCAFFOLD_PROFILE=react-vite", "--dry-run", "be.ci").stdout
+    verify = _make("SCAFFOLD_PROFILE=react-vite", "--dry-run", "be.verify").stdout
+    assert ci == verify
+    assert "docker compose" in verify
+    assert "be.verify-in-container" in verify
+    assert "RUFF=" not in verify
+    internal = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "--dry-run",
+            "-f",
+            str(_repository_root() / "Makefile"),
+            "SCAFFOLD_PROFILE=react-vite",
+            "PY_DIR=.",
+            "be.verify-in-container",
+        ],
+        cwd=_repository_root() / "backend",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "docker compose" not in internal
+    assert "ruff format --config /workspace/backend/pyproject.toml --check ." in internal
+    assert "uv run ruff check" in internal
+    assert "uv run mypy" in internal
+    assert "uv run pytest --cov" in internal
 
 
 def test_help_lists_commands_when_optional_makefiles_are_loaded() -> None:

@@ -16,9 +16,10 @@ COMPOSE_DEV := COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) APP_HOST=$(APP_HOST) 
 	GIT_COMMON_DIR=$(GIT_COMMON_DIR) HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
 	docker compose --project-directory . -f profiles/server-rendered-django/compose.yml
 RUN_DEV := $(COMPOSE_DEV) run --rm app
-UV_RUN := uv run --project /workspace/profiles/server-rendered-django
+CONTAINER_PYTHON_PROJECT_DIR := /workspace/profiles/server-rendered-django
+DEV_APPLICATION_SERVICE := app
 DJANGO_DEV_MANAGE := $(RUN_DEV) $(UV_RUN) python -m app.manage
-PROFILE_PROJECT := /workspace/profiles/server-rendered-django/pyproject.toml
+PROFILE_PROJECT := $(CONTAINER_PYTHON_PROJECT_DIR)/pyproject.toml
 RELEASE_BACKEND_TAG ?= $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG ?= $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
 RELEASE_PULL ?= $(COMPOSE_PROD) pull app web
@@ -55,15 +56,6 @@ build: ## Build the deterministic development application image
 
 .PHONY: setup
 setup: build ## Prepare Docker development dependencies from the committed lockfile
-
-.PHONY: format
-format: ## Apply the single deterministic Python formatter and safe lint fixes
-	$(RUN_DEV) $(UV_RUN) ruff check --config $(PROFILE_PROJECT) --fix .
-	$(RUN_DEV) $(UV_RUN) ruff format --config $(PROFILE_PROJECT) .
-
-.PHONY: format-check
-format-check: ## Check Python formatting without mutation
-	$(RUN_DEV) $(UV_RUN) ruff format --config $(PROFILE_PROJECT) --check .
 
 .PHONY: lint
 lint: ## Run strict Ruff linting
