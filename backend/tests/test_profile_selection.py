@@ -155,7 +155,7 @@ def test_backend_verification_uses_explicit_container_boundary_without_overrides
             "-f",
             str(_repository_root() / "Makefile"),
             "SCAFFOLD_PROFILE=react-vite",
-            "PY_DIR=.",
+            f"PY_DIR={_repository_root() / 'backend'}",
             "be.verify-in-container",
         ],
         cwd=_repository_root() / "backend",
@@ -168,6 +168,7 @@ def test_backend_verification_uses_explicit_container_boundary_without_overrides
     assert "ruff check --config /workspace/backend/pyproject.toml" in internal
     assert "mypy --config-file /workspace/backend/pyproject.toml" in internal
     assert "--cov=src --cov-config=pyproject.toml" in internal
+    assert f'pytest -c "{_repository_root() / "backend/pyproject.toml"}"' in internal
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])

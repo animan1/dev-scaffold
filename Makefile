@@ -94,7 +94,7 @@ COMPOSE_EPHEMERAL_INGRESS = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 
 # ---- Paths ----
 PY_DIR := backend
-PYTHON_PROJECT_DIR := $(PY_DIR)
+PYTHON_PROJECT_DIR := backend
 SMOKE_HOME_PATTERN := dev-scaffold\|id="root"
 
 .PHONY: be.bash
