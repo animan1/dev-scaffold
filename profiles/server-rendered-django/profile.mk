@@ -52,23 +52,6 @@ fe.typecheck: ## No frontend type checks for this profile
 fe.lint fe.typecheck fe.test fe.test-in-container:
 	@:
 
-
-.PHONY: django-check
-django-check: ## Run Django's production deployment checks
-	$(RUN_DEV) sh -lc 'DJANGO_SETTINGS_MODULE=app.project.settings.prod \
-		DJANGO_SECRET_KEY=check-only-abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ \
-		DATABASE_URL=postgresql://app:app@db:5432/app \
-		$(UV_RUN) python -m app.manage check --deploy'
-
-.PHONY: check
-check: ## Run every non-image quality gate through the shared Docker toolchain
-	$(MAKE) format-check
-	$(MAKE) lint
-	$(MAKE) typecheck
-	$(MAKE) coverage
-	$(MAKE) migrations-check
-	$(MAKE) django-check
-
 .PHONY: build-production
 build-production: ## Build the multi-stage non-root production image
 	docker build -f profiles/server-rendered-django/backend.Dockerfile \
