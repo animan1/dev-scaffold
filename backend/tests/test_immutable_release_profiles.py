@@ -146,6 +146,9 @@ def test_shared_lifecycle_commands_select_each_requested_environment(profile: st
     port = 8080 if profile == "react-vite" else 18000
     assert f"http://127.0.0.1:{port}/api/healthz" in default_dev
     assert "http://localhost" not in default_dev
+    if profile == "server-rendered-django":
+        assert "Host: 127.0.0.1" in default_dev
+        assert "Host: localhost" not in default_dev
     dev = _make(profile, "--dry-run", "smoke", "DEV_URL_ROOT=http://dev.example")
     assert "http://dev.example/api/healthz" in dev
     assert "http://dev.example/static/smoketest.txt" in dev
@@ -167,6 +170,7 @@ def test_shared_lifecycle_commands_select_each_requested_environment(profile: st
     assert "COMPOSE_PROJECT_NAME=tenant-prod" in waiting
     assert "tenant-dev" not in waiting
     assert "X-Forwarded-Proto: https" in waiting
+    assert "Host: 127.0.0.1" in waiting
     assert "http://127.0.0.1:18080/api/healthz" in waiting
     assert "http://dev.example" not in waiting
     smoke = _make(

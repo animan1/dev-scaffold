@@ -21,7 +21,7 @@ PROD_CONFIG = $(COMPOSE_PROD)
 HOST_INGRESS ?= 1
 # Capture tenant/operator input before the smoke-test placeholder default.
 PREPARE_PUBLIC_HOST := $(HOST_INGRESS_HOST)
-HOST_INGRESS_HOST ?= localhost
+HOST_INGRESS_HOST ?= 127.0.0.1
 HOST_INGRESS_PORT ?= $(RELEASE_HTTP_PORT)
 export HOST_INGRESS_PORT
 PROD_URL_ROOT ?= http://127.0.0.1:$(HOST_INGRESS_PORT)

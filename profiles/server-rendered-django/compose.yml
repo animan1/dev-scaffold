@@ -32,7 +32,7 @@ services:
     environment:
       DATABASE_URL: postgresql://app:app@db:5432/app
       DEPLOYMENT_ENVIRONMENT: development
-      DJANGO_ALLOWED_HOSTS: "${APP_HOST:-localhost},127.0.0.1"
+      DJANGO_ALLOWED_HOSTS: "${APP_HOST:-127.0.0.1},127.0.0.1,localhost"
       DJANGO_DEBUG: "true"
       DJANGO_SECRET_KEY: development-only
       HOME: /tmp
