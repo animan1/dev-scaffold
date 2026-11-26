@@ -5,8 +5,7 @@ APP_PORT ?= 18000
 APP_HOST ?= localhost
 URL_ROOT ?= http://127.0.0.1:$(APP_PORT)
 CURL_FLAGS ?= -H 'Host: $(APP_HOST)'
-wait-prod: URL_ROOT = http://127.0.0.1:$(RELEASE_HTTP_PORT)
-wait-prod: CURL_FLAGS = -H 'Host: $(APP_HOST)' -H 'X-Forwarded-Proto: https'
+SMOKE_HOME_PATTERN := <main
 DIFF_BASE ?= origin/main
 PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
 GIT_COMMON_DIR ?= $(shell git rev-parse --path-format=absolute --git-common-dir)
@@ -145,7 +144,7 @@ verify-release-images: up-ephemeral ## Smoke-test the exact production image set
 		sh -c "printf 'MEDIA_OK\\n' > /media/release-smoketest.txt"
 	@for attempt in $$(seq 1 60); do \
 		if curl -fsS -H 'Host: localhost' -H 'X-Forwarded-Proto: https' \
-			'http://127.0.0.1:$(RELEASE_HTTP_PORT)/api/healthz' >/dev/null; then \
+			'http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz' >/dev/null; then \
 			echo 'Server-rendered release origin is ready'; break; \
 		fi; \
 		if [[ "$$attempt" = "60" ]]; then \
@@ -154,15 +153,15 @@ verify-release-images: up-ephemeral ## Smoke-test the exact production image set
 		sleep 1; \
 	done
 	curl -fsS -H 'Host: localhost' -H 'X-Forwarded-Proto: https' \
-		'http://127.0.0.1:$(RELEASE_HTTP_PORT)/' | grep -q '<main'
-	curl -fsS 'http://127.0.0.1:$(RELEASE_HTTP_PORT)/static/smoketest.txt' \
+		'http://127.0.0.1:$(HOST_INGRESS_PORT)/' | grep -q '<main'
+	curl -fsS 'http://127.0.0.1:$(HOST_INGRESS_PORT)/static/smoketest.txt' \
 		| grep -q 'STATIC_OK'
-	curl -fsS 'http://127.0.0.1:$(RELEASE_HTTP_PORT)/media/release-smoketest.txt' \
+	curl -fsS 'http://127.0.0.1:$(HOST_INGRESS_PORT)/media/release-smoketest.txt' \
 		| grep -q 'MEDIA_OK'
 	$(COMPOSE_EPHEMERAL) stop app
-	curl -fsS 'http://127.0.0.1:$(RELEASE_HTTP_PORT)/static/smoketest.txt' \
+	curl -fsS 'http://127.0.0.1:$(HOST_INGRESS_PORT)/static/smoketest.txt' \
 		| grep -q 'STATIC_OK'
-	curl -fsS 'http://127.0.0.1:$(RELEASE_HTTP_PORT)/media/release-smoketest.txt' \
+	curl -fsS 'http://127.0.0.1:$(HOST_INGRESS_PORT)/media/release-smoketest.txt' \
 		| grep -q 'MEDIA_OK'
 
 .PHONY: verify-host-ingress
@@ -232,24 +231,9 @@ verify-ephemeral: ## Verify local HTTP redirect, HTTPS customer/admin routes, an
 		'https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/admin/login/' \
 		| grep -Eiq '^set-cookie: csrftoken=.*; secure(;|[[:space:]]*$$)'
 
-.PHONY: smoke-prod
-smoke-prod: ## Check the production origin behind host-managed ingress
-	curl -fsS -H 'Host: $(APP_HOST)' -H 'X-Forwarded-Proto: https' \
-		'http://127.0.0.1:$(RELEASE_HTTP_PORT)/api/healthz' | grep -q '\"status\": \"ok\"'
-	curl -fsS -H 'Host: $(APP_HOST)' -H 'X-Forwarded-Proto: https' \
-		'http://127.0.0.1:$(RELEASE_HTTP_PORT)/' | grep -q '<main'
-
 .PHONY: rollback-release
 rollback-release: ## Deploy a previously recorded release manifest
 rollback-release: deploy-release
-
-.PHONY: smoke
-smoke: ## Smoke-test Django through its configurable loopback route
-	$(MAKE) wait-dev
-	curl -fsS -H 'Host: $(APP_HOST)' \
-		'http://127.0.0.1:$(APP_PORT)/api/healthz' | grep -q '"status": "ok"'
-	curl -fsS -H 'Host: $(APP_HOST)' \
-		'http://127.0.0.1:$(APP_PORT)/' | grep -q '<main'
 
 .PHONY: verify
 verify: ## Run the identical aggregate contract used by developers and CI

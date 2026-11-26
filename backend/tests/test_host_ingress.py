@@ -129,6 +129,11 @@ def test_host_ingress_origin_is_loopback_http_only() -> None:
     assert "ssl_certificate" not in nginx
 
 
+def test_application_tls_redirect_uses_the_configured_https_port() -> None:
+    nginx = (_repo_root() / "deploy/nginx/default.prod.conf").read_text()
+    assert "return 301 https://$host:${PROD_HTTPS_PORT}$request_uri;" in nginx
+
+
 def test_host_ingress_templates_only_the_selected_backend() -> None:
     compose = (_repo_root() / "deploy/docker-compose.host-ingress.yml").read_text()
     nginx = (_repo_root() / "deploy/nginx/default.host-ingress.conf").read_text()

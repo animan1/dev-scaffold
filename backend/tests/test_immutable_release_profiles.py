@@ -68,12 +68,16 @@ def test_environment_namespaces_do_not_inherit_global_compose_project(
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Needs Docker Compose client")
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+@pytest.mark.parametrize("host_ingress", ["0", "1"])
 def test_release_configuration_resolves_production_project_and_volumes(
-    profile: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    profile: str, host_ingress: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("DOCKER_HOST", "unix:///nonexistent")
     private = tmp_path / "production.env"
-    private.write_text("POSTGRES_USER=app\nPOSTGRES_PASSWORD=test-only\nPOSTGRES_DB=app\n")
+    private.write_text(
+        "POSTGRES_USER=app\nPOSTGRES_PASSWORD=test-only\nPOSTGRES_DB=app\n"
+        f"EPHEMERAL_CERTS_PATH={tmp_path}/certs\n"
+    )
     manifest = tmp_path / "release.env"
     manifest.write_text(
         "RELEASE_BACKEND_IMAGE=local/backend:test\nRELEASE_WEB_IMAGE=local/web:test\n"
@@ -88,11 +92,25 @@ def test_release_configuration_resolves_production_project_and_volumes(
                 "PROJECT_NAME=tenant",
                 f"PROD_COMPOSE_PROJECT={project}",
                 "SCAFFOLD_BACKUP_PROFILE=none",
+                f"HOST_INGRESS={host_ingress}",
+                "HOST_INGRESS_PORT=19080",
+                "RELEASE_HTTP_PORT=28080",
+                "PROD_HTTPS_PORT=28043",
                 f"PROD_ENV_FILE={private}",
                 f"RELEASE_FILE={manifest}",
             )
         )
         assert config["name"] == project
+        web = "web" if profile == "server-rendered-django" else "nginx"
+        assert config["services"][web]["ports"][0]["published"] == "19080"
+        if profile == "react-vite" and host_ingress == "0":
+            nginx = config["services"]["nginx"]
+            assert nginx["ports"][1]["published"] == "28043"
+            assert nginx["environment"]["PROD_HTTPS_PORT"] == "28043"
+            assert (
+                nginx["environment"]["NGINX_ENVSUBST_FILTER"].replace("$$", "$")
+                == "^PROD_HTTPS_PORT$"
+            )
         assert all(
             volume["name"].startswith(f"{project}_") for volume in config["volumes"].values()
         )
@@ -104,6 +122,22 @@ def test_release_configuration_resolves_production_project_and_volumes(
                 mount.get("volume", {}).get("nocopy", False)
                 for mount in config["services"]["app"]["volumes"]
             )
+    if profile == "react-vite":
+        ephemeral = json.loads(
+            _make(
+                profile,
+                "-s",
+                "release-bundle-config",
+                "COMPOSE_PROD=$(COMPOSE_EPHEMERAL)",
+                "SCAFFOLD_BACKUP_PROFILE=none",
+                f"EPHEMERAL_ENV_FILE={private}",
+                f"RELEASE_FILE={manifest}",
+                "PROD_HTTPS_PORT=28043",
+                "EPHEMERAL_HTTPS_PORT=28044",
+            )
+        )["services"]["nginx"]
+        assert ephemeral["environment"]["PROD_HTTPS_PORT"] == "28044"
+        assert ephemeral["ports"][1]["published"] == "28044"
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
@@ -125,6 +159,38 @@ def test_shared_lifecycle_commands_select_each_requested_environment(profile: st
     assert "tenant-dev" not in waiting
     assert "X-Forwarded-Proto: https" in waiting
     assert "http://127.0.0.1:18080/api/healthz" in waiting
+    smoke = _make(
+        profile,
+        "--dry-run",
+        "smoke-prod",
+        "HOST_INGRESS_PORT=19080",
+        "RELEASE_HTTP_PORT=28080",
+        "APP_HOST=dev.example",
+        "HOST_INGRESS_HOST=tenant.example",
+    )
+    assert "http://127.0.0.1:19080/api/healthz" in smoke
+    assert "Host: tenant.example" in smoke
+    assert "X-Forwarded-Proto: https" in smoke
+    assert "curl -L " in smoke
+    assert smoke.count("/static/smoketest.txt") == 1
+    assert smoke.count("grep -qi") == 1
+    direct = _make(
+        profile,
+        "--dry-run",
+        "smoke-prod",
+        "HOST_INGRESS=0",
+        "HOST_INGRESS_PORT=19080",
+        "HOST_INGRESS_HOST=tenant.example",
+    )
+    assert "http://127.0.0.1:19080/api/healthz" in direct
+    assert "curl -L " in direct
+    assert "https://localhost" not in direct
+    assert [line for line in direct.splitlines() if line.startswith("curl ")][:3] == [
+        line for line in smoke.splitlines() if line.startswith("curl ")
+    ][:3]
+    if profile == "react-vite":
+        assert "Django admin slash redirect was not routed" in smoke
+        assert "Django admin slash redirect was not routed" not in direct
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
@@ -144,6 +210,54 @@ def test_restart_aborts_before_startup_when_teardown_fails(profile: str) -> None
     assert result.returncode != 0
     assert "false down --remove-orphans" in result.stdout
     assert "up-dev" not in result.stdout
+
+
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+@pytest.mark.parametrize("target", ["smoke", "smoke-prod"])
+@pytest.mark.parametrize("missing_static", [False, True])
+def test_smoke_requires_static_delivery_in_both_profiles(
+    profile: str, target: str, missing_static: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    curl = tmp_path / "curl"
+    log = tmp_path / "requests"
+    curl.write_text(
+        "#!/bin/sh\n"
+        "for url; do :; done\n"
+        'printf "%s\\n" "$url" >> "$REQUEST_LOG"\n'
+        'case "$url" in */static/smoketest.txt)\n'
+        '  if [ "$MISSING_STATIC" = 1 ]; then exit 22; fi ;;\n'
+        "esac\n"
+        'printf "%s\\n" "$HOME_BODY"\n'
+    )
+    curl.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    monkeypatch.setenv("REQUEST_LOG", str(log))
+    monkeypatch.setenv("MISSING_STATIC", str(int(missing_static)))
+    monkeypatch.setenv(
+        "HOME_BODY",
+        "<main>Django</main>" if profile == "server-rendered-django" else '<div id="root"></div>',
+    )
+    result = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            f"SCAFFOLD_PROFILE={profile}",
+            "HOST_INGRESS=0",
+            "URL_ROOT=http://smoke.test",
+            target,
+        ],
+        cwd=_repository_root(),
+        capture_output=True,
+        text=True,
+    )
+    requests = log.read_text().splitlines()
+    assert requests[:3] == [
+        "http://smoke.test/api/healthz",
+        "http://smoke.test/api/healthz",
+        "http://smoke.test/static/smoketest.txt",
+    ]
+    assert (result.returncode != 0) == missing_static
+    assert ("http://smoke.test/" in requests) != missing_static
 
 
 def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> None:

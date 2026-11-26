@@ -10,6 +10,8 @@ RELEASE_REVISION ?= $(shell git rev-parse HEAD)
 RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
 RELEASE_PLATFORM ?=
 RELEASE_HTTP_PORT ?= 18080
+PROD_HTTPS_PORT ?= 18443
+export PROD_HTTPS_PORT
 UV_IMAGE ?= ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
 SCAFFOLD_BACKUP_PROFILE ?= immutable-backup
 CI_BACKUP_PROFILES ?= immutable-backup
@@ -19,6 +21,11 @@ PROD_CONFIG = $(COMPOSE_PROD)
 HOST_INGRESS ?= 1
 # Capture tenant/operator input before the smoke-test placeholder default.
 PREPARE_PUBLIC_HOST := $(HOST_INGRESS_HOST)
+HOST_INGRESS_HOST ?= localhost
+HOST_INGRESS_PORT ?= $(RELEASE_HTTP_PORT)
+export HOST_INGRESS_PORT
+PROD_URL_ROOT ?= http://127.0.0.1:$(HOST_INGRESS_PORT)
+PROD_CURL_FLAGS ?= -L $(if $(wildcard deploy/nginx/certs/server.crt),--cacert deploy/nginx/certs/server.crt) -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https'
 
 .PHONY: profiles
 profiles:
@@ -37,9 +44,7 @@ DEV_APPLICATION_SERVICE := backend
 CONTAINER_PYTHON_PROJECT_DIR := /app
 FRONTEND_DIR := frontend
 MONITORING ?= 0
-HOST_INGRESS_HOST ?= app.example.test
-HOST_INGRESS_PORT ?= 18080
-export HOST_INGRESS_PORT
+EPHEMERAL_HTTPS_PORT ?= 18443
 PROD_COMPOSE_FILES := -f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml
 PROD_COMPOSE_PROFILES :=
 ifeq ($(HOST_INGRESS),1)
@@ -57,13 +62,12 @@ COMPOSE_MONITOR = $(COMPOSE_PROD) -f deploy/docker-compose.external-monitoring.y
 RELEASE_BACKEND_TAG = $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG = $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
 RELEASE_PULL ?= $(COMPOSE_PROD) pull backend nginx
-RELEASE_HTTPS_PORT ?= 18443
 COMPOSE_PROD = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) docker compose \
 	$(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) \
 	--env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
 RUN_PROD = $(COMPOSE_PROD) run --rm --no-deps backend
 COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
-	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) docker compose \
+	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) EPHEMERAL_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) docker compose \
 	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
 	-f deploy/docker-compose.ephemeral.yml $(EPHEMERAL_COMPOSE_FILES) --env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
 COMPOSE_EPHEMERAL_INGRESS = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
@@ -76,6 +80,7 @@ PY_DIR := backend
 PYTHON_PROJECT_DIR := $(PY_DIR)
 URL_ROOT ?= http://localhost:8080
 CURL_FLAGS ?=
+SMOKE_HOME_PATTERN := dev-scaffold\|id="root"
 
 .PHONY: be.bash
 be.bash: ## (Docker) Shell into backend container
@@ -101,14 +106,6 @@ fe.ci: ## (Docker) Run frontend verify inside dev container
 		backend $(CONTAINER_PYTHON_PROJECT_DIR)/.venv/bin/diff-cover coverage/lcov.info \
 		--config-file /workspace/backend/pyproject.toml $(if $(DIFF_BASE),--compare-branch=$(DIFF_BASE))
 
-.PHONY: smoke
-smoke: ## Dev smoketest (API + static + FE root)
-smoke: CURL_CMD = curl $(CURL_FLAGS) -fsS
-smoke:
-	$(CURL_CMD) "$(URL_ROOT)/api/healthz" >/dev/null
-	$(CURL_CMD) "$(URL_ROOT)/static/smoketest.txt" >/dev/null
-	$(CURL_CMD) "$(URL_ROOT)/" | grep -qi 'dev-scaffold\|id="root"'
-
 .PHONY: ci
 ci: ## (Docker) One-shot CI recipe (dev stack + FE/BE verify + smoke)
 ci: up-dev wait-dev be.ci fe.ci smoke
@@ -130,14 +127,8 @@ migrate-prod: ## Run Django migrations in prod
 bash-prod: ## Shell into backend container (prod)
 	$(COMPOSE_PROD) exec backend bash
 
-.PHONY: smoke-prod
-smoke-prod: ## Prod smoketest (API + static + FE root)
 ifeq ($(HOST_INGRESS),1)
 smoke-prod: smoke-host-ingress
-else
-smoke-prod: URL_ROOT := https://localhost
-smoke-prod: CURL_FLAGS := -k
-smoke-prod: smoke
 endif
 
 .PHONY: ops.check-prod
@@ -154,23 +145,10 @@ ops.monitor-prod: ## Follow the unattended production monitor
 
 .PHONY: smoke-host-ingress
 smoke-host-ingress: ## Smoke-test the loopback origin as routed by a host ingress
-smoke-host-ingress:
-	@echo "Waiting for routed backend on http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz ..."
-	@for i in $$(seq 1 60); do \
-		if curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' \
-			-H 'X-Forwarded-Proto: https' \
-			'http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz' >/dev/null; then \
-			echo "Routed backend is up"; break; \
-		fi; \
-		if [ "$$i" = "60" ]; then \
-			echo "Routed backend did not become ready in time"; exit 1; \
-		fi; \
-		sleep 1; \
-	done
-	curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
-		'http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz' >/dev/null
-	curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
-		'http://127.0.0.1:$(HOST_INGRESS_PORT)/static/smoketest.txt' >/dev/null
+smoke-host-ingress: COMPOSE = $(COMPOSE_PROD)
+smoke-host-ingress: URL_ROOT = $(PROD_URL_ROOT)
+smoke-host-ingress: CURL_FLAGS = $(PROD_CURL_FLAGS)
+smoke-host-ingress: smoke
 	@location="$$(curl -fsS -D - -o /dev/null \
 		-H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
 		'http://127.0.0.1:$(HOST_INGRESS_PORT)/admin' \
@@ -187,8 +165,6 @@ smoke-host-ingress:
 		/admin/login/*) ;; \
 		*) echo "Django admin login was not routed (got $$location)"; exit 1 ;; \
 	esac
-	curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
-		'http://127.0.0.1:$(HOST_INGRESS_PORT)/' | grep -qi 'dev-scaffold\|id="root"'
 	@code="$$(curl -sS -o /dev/null -w '%{http_code}' \
 		-H 'Host: $(HOST_INGRESS_HOST)' \
 		'http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz')"; \
@@ -237,8 +213,8 @@ prepare-ephemeral: ## Prepare isolated, non-secret release smoke-test configurat
 .PHONY: verify-ephemeral
 verify-ephemeral: ## Verify the running recorded release in ephemeral
 	@for i in $$(seq 1 60); do \
-		if curl -kfsS https://localhost:$(RELEASE_HTTPS_PORT)/api/healthz >/dev/null; then \
-			curl -kfsS https://localhost:$(RELEASE_HTTPS_PORT)/ >/dev/null; \
+		if curl -kfsS https://localhost:$(EPHEMERAL_HTTPS_PORT)/api/healthz >/dev/null; then \
+			curl -kfsS https://localhost:$(EPHEMERAL_HTTPS_PORT)/ >/dev/null; \
 			echo 'Release images passed smoke tests'; exit 0; \
 		fi; \
 		sleep 1; \
@@ -257,7 +233,7 @@ verify-host-ingress: prepare-ephemeral ## Verify exact images through the loopba
 	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage migrate
 	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage collectstatic --noinput
 	$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build
-	$(MAKE) smoke-host-ingress
+	$(MAKE) smoke-host-ingress 'COMPOSE=$(COMPOSE_EPHEMERAL_INGRESS)'
 
 .PHONY: verify-monitoring-config
 verify-monitoring-config: prepare-ephemeral ## Validate the optional monitoring Compose profile
@@ -293,14 +269,6 @@ deploy-release: initialize-release ## Deploy the recorded images through normal 
 .PHONY: rollback-release
 rollback-release: ## Deploy a previously recorded RELEASE_FILE
 rollback-release: deploy-release
-
-ifeq ($(HOST_INGRESS),1)
-wait-prod: URL_ROOT := http://127.0.0.1:$(HOST_INGRESS_PORT)
-wait-prod: CURL_FLAGS := -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https'
-else
-wait-prod: URL_ROOT := https://localhost
-wait-prod: CURL_FLAGS := -k
-endif
 
 # ---- Django dev helpers ----
 DJANGO_DEV_MANAGE ?= cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage
@@ -420,7 +388,7 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod
 
 .PHONY: format format-check
 RUFF = $(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) $(UV_RUN) ruff
@@ -453,7 +421,9 @@ deps.lock: ## Update the selected profile's Python lockfile with pinned Dockeriz
 COMPOSE ?= $(COMPOSE_DEV)
 ENV ?= dev
 down-dev logs-dev ps-dev wait-dev: COMPOSE = $(COMPOSE_DEV)
-down-prod logs-prod ps-prod wait-prod: COMPOSE = $(COMPOSE_PROD)
+down-prod logs-prod ps-prod wait-prod smoke-prod: COMPOSE = $(COMPOSE_PROD)
+wait-prod smoke-prod: URL_ROOT = $(PROD_URL_ROOT)
+wait-prod smoke-prod: CURL_FLAGS = $(PROD_CURL_FLAGS)
 down-ephemeral logs-ephemeral ps-ephemeral: COMPOSE = $(COMPOSE_EPHEMERAL)
 
 .PHONY: down logs ps wait restart restart-dev restart-prod ps-prod ps-ephemeral wait-dev wait-prod
@@ -480,6 +450,15 @@ wait wait-dev wait-prod:
 
 wait-dev: ## Wait for development health
 wait-prod: ## Wait for production health
+
+.PHONY: smoke smoke-prod
+smoke-prod: smoke ## Check production health, static delivery, and homepage
+smoke: CURL_CMD = curl $(CURL_FLAGS) -fsS
+smoke: wait ## Check application health, static delivery, and homepage
+	$(CURL_CMD) "$(URL_ROOT)/api/healthz" >/dev/null
+	$(CURL_CMD) "$(URL_ROOT)/static/smoketest.txt" >/dev/null
+	$(CURL_CMD) "$(URL_ROOT)/" | grep -qi '$(SMOKE_HOME_PATTERN)'
+
 restart-dev: ENV := dev
 restart-prod: ENV := prod
 restart-dev: ## Restart development services

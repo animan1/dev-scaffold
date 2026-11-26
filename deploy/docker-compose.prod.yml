@@ -63,12 +63,15 @@ services:
     build:
       context: ..
       dockerfile: deploy/nginx/Dockerfile
+    environment:
+      PROD_HTTPS_PORT: "${PROD_HTTPS_PORT:-443}"
+      NGINX_ENVSUBST_FILTER: "^PROD_HTTPS_PORT$"
     ports:
-      - "${RELEASE_BIND_ADDRESS:-0.0.0.0}:${RELEASE_HTTP_PORT:-80}:80"
-      - "${RELEASE_BIND_ADDRESS:-0.0.0.0}:${RELEASE_HTTPS_PORT:-443}:443"
+      - "${RELEASE_BIND_ADDRESS:-0.0.0.0}:${HOST_INGRESS_PORT:-18080}:80"
+      - "${RELEASE_BIND_ADDRESS:-0.0.0.0}:${PROD_HTTPS_PORT:-443}:443"
     volumes:
       - ./nginx/certs:/etc/nginx/certs:ro
-      - ./nginx/default.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/default.prod.conf:/etc/nginx/templates/default.conf.template:ro
       - staticfiles:/static:ro
     depends_on:
       - backend
