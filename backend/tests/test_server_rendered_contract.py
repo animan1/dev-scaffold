@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -220,45 +221,56 @@ def test_server_rendered_django_migration_commands_use_docker() -> None:
 
 
 @pytest.mark.parametrize(
-    "compose_file,service",
+    "profile,service",
     [
-        ("deploy/docker-compose.dev.yml", "backend"),
-        ("profiles/server-rendered-django/compose.yml", "app"),
+        ("react-vite", "backend"),
+        ("server-rendered-django", "app"),
     ],
 )
 def test_development_startup_uses_selected_port_without_migrations(
-    compose_file: str, service: str
+    profile: str, service: str
 ) -> None:
     if not shutil.which("docker"):
         pytest.skip("Needs the Docker Compose client")
     root = _repository_root()
-    result = subprocess.run(
+    wrapper = subprocess.check_output(
         [
-            "docker",
-            "compose",
-            "--project-directory",
-            str(root),
-            "-f",
-            str(root / compose_file),
-            "config",
-            "--format",
-            "json",
+            "make",
+            "--no-print-directory",
+            "--dry-run",
+            "ps-dev",
+            f"SCAFFOLD_PROFILE={profile}",
+            "PROJECT_NAME=tenant",
+            "DEV_HTTP_PORT=18123",
+            "APP_HOST=dev.example",
         ],
+        cwd=root,
+        text=True,
+    )
+    arguments = shlex.split(wrapper)
+    docker = arguments.index("docker")
+    result = subprocess.run(
+        [*arguments[docker:-1], "config", "--format", "json"],
+        cwd=root,
         env={
             **os.environ,
-            "COMPOSE_PROJECT_NAME": "dev-scaffold",
-            "HOST_UID": str(os.getuid()),
-            "HOST_GID": str(os.getgid()),
-            "GIT_COMMON_DIR": str(root / ".git"),
+            **dict(argument.split("=", 1) for argument in arguments[:docker]),
             "DOCKER_HOST": "unix:///nonexistent",
-            "DEV_HTTP_PORT": "18123",
-            "APP_HOST": "dev.example",
         },
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    services = json.loads(result.stdout)["services"]
+    config = json.loads(result.stdout)
+    assert config["name"] == "tenant-dev"
+    services = config["services"]
+    context = root / "backend" if service == "backend" else root
+    assert services[service]["build"]["context"] == str(context)
+    mount = "/app" if service == "backend" else "/workspace/backend"
+    assert any(
+        volume.get("target") == mount and volume.get("source") == str(root / "backend")
+        for volume in services[service]["volumes"]
+    )
     command = services[service]["command"]
     entry = "nginx" if service == "backend" else "app"
     assert services[entry]["ports"][0]["published"] == "18123"

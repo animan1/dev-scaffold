@@ -42,10 +42,17 @@ profiles:
 HELP_FILES = $(MAKEFILE_LIST)
 EPHEMERAL_ENV_FILE ?= $(CURDIR)/.tmp/ephemeral.env
 UV_RUN = uv run --project $(CONTAINER_PYTHON_PROJECT_DIR)
+GIT_COMMON_DIR ?= $(shell git rev-parse --path-format=absolute --git-common-dir)
+HOST_UID ?= $(shell id -u)
+HOST_GID ?= $(shell id -g)
+COMPOSE_DEV = COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) APP_HOST=$(APP_HOST) DEV_HTTP_PORT=$(DEV_HTTP_PORT) \
+	GIT_COMMON_DIR="$(GIT_COMMON_DIR)" HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
+	docker compose --project-directory $(DEV_COMPOSE_PROJECT_DIR) -f $(DEV_COMPOSE_FILE)
 
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 
-COMPOSE_DEV = COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) docker compose -f deploy/docker-compose.dev.yml
+DEV_COMPOSE_FILE := deploy/docker-compose.dev.yml
+DEV_COMPOSE_PROJECT_DIR := deploy
 DEV_APPLICATION_SERVICE := backend
 CONTAINER_PYTHON_PROJECT_DIR := /app
 FRONTEND_DIR := frontend

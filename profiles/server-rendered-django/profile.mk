@@ -3,12 +3,8 @@ HELP_FILES = $(filter-out $(firstword $(MAKEFILE_LIST)),$(MAKEFILE_LIST))
 PYTHON_PROJECT_DIR := profiles/server-rendered-django
 SMOKE_HOME_PATTERN := <main
 PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
-GIT_COMMON_DIR ?= $(shell git rev-parse --path-format=absolute --git-common-dir)
-HOST_UID ?= $(shell id -u)
-HOST_GID ?= $(shell id -g)
-COMPOSE_DEV := COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) APP_HOST=$(APP_HOST) DEV_HTTP_PORT=$(DEV_HTTP_PORT) \
-	GIT_COMMON_DIR=$(GIT_COMMON_DIR) HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
-	docker compose --project-directory . -f profiles/server-rendered-django/compose.yml
+DEV_COMPOSE_FILE := profiles/server-rendered-django/compose.yml
+DEV_COMPOSE_PROJECT_DIR := .
 RUN_DEV := $(COMPOSE_DEV) run --rm app
 CONTAINER_PYTHON_PROJECT_DIR := /workspace/profiles/server-rendered-django
 DEV_APPLICATION_SERVICE := app
