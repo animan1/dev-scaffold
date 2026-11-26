@@ -68,8 +68,9 @@ def test_environment_namespaces_do_not_inherit_global_compose_project(
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Needs Docker Compose client")
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+@pytest.mark.parametrize("host_ingress", ["0", "1"])
 def test_release_configuration_resolves_production_project_and_volumes(
-    profile: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    profile: str, host_ingress: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("DOCKER_HOST", "unix:///nonexistent")
     private = tmp_path / "production.env"
@@ -88,11 +89,25 @@ def test_release_configuration_resolves_production_project_and_volumes(
                 "PROJECT_NAME=tenant",
                 f"PROD_COMPOSE_PROJECT={project}",
                 "SCAFFOLD_BACKUP_PROFILE=none",
+                f"HOST_INGRESS={host_ingress}",
+                "HOST_INGRESS_PORT=19080",
+                "RELEASE_HTTP_PORT=28080",
+                "RELEASE_HTTPS_PORT=28043",
                 f"PROD_ENV_FILE={private}",
                 f"RELEASE_FILE={manifest}",
             )
         )
         assert config["name"] == project
+        web = "web" if profile == "server-rendered-django" else "nginx"
+        assert config["services"][web]["ports"][0]["published"] == "19080"
+        if profile == "react-vite" and host_ingress == "0":
+            nginx = config["services"]["nginx"]
+            assert nginx["ports"][1]["published"] == "28043"
+            assert nginx["environment"]["RELEASE_HTTPS_PORT"] == "28043"
+            assert (
+                nginx["environment"]["NGINX_ENVSUBST_FILTER"].replace("$$", "$")
+                == "^RELEASE_HTTPS_PORT$"
+            )
         assert all(
             volume["name"].startswith(f"{project}_") for volume in config["volumes"].values()
         )
@@ -130,15 +145,30 @@ def test_shared_lifecycle_commands_select_each_requested_environment(profile: st
         "--dry-run",
         "smoke-prod",
         "HOST_INGRESS_PORT=19080",
-        "RELEASE_HTTP_PORT=19080",
-        "APP_HOST=tenant.example",
+        "RELEASE_HTTP_PORT=28080",
+        "APP_HOST=dev.example",
         "HOST_INGRESS_HOST=tenant.example",
     )
     assert "http://127.0.0.1:19080/api/healthz" in smoke
     assert "Host: tenant.example" in smoke
     assert "X-Forwarded-Proto: https" in smoke
+    assert "curl -L " in smoke
     assert smoke.count("/static/smoketest.txt") == 1
     assert smoke.count("grep -qi") == 1
+    direct = _make(
+        profile,
+        "--dry-run",
+        "smoke-prod",
+        "HOST_INGRESS=0",
+        "HOST_INGRESS_PORT=19080",
+        "HOST_INGRESS_HOST=tenant.example",
+    )
+    assert "http://127.0.0.1:19080/api/healthz" in direct
+    assert "curl -L " in direct
+    assert "https://localhost" not in direct
+    assert [line for line in direct.splitlines() if line.startswith("curl ")] == [
+        line for line in smoke.splitlines() if line.startswith("curl ")
+    ]
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])

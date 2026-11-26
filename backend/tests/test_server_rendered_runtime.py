@@ -52,7 +52,7 @@ def test_server_rendered_web_owns_static_and_media_delivery_only() -> None:
     nginx = (profile / "release-nginx.conf").read_text()
     dockerfile = (profile / "release-nginx.Dockerfile").read_text()
 
-    assert '"127.0.0.1:${RELEASE_HTTP_PORT:-18080}:8080"' in compose
+    assert '"127.0.0.1:${HOST_INGRESS_PORT:-18080}:8080"' in compose
     assert "- media:/media" in compose
     assert "/var/run/docker.sock" not in compose
     web = compose.split("  web:", 1)[1].split("\n  monitor:", 1)[0]

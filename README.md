@@ -165,8 +165,8 @@ is an intentional deployment, not ordinary development smoke. Existing
 PostgreSQL volumes remain in place. The development SQLite file remains on
 disk; switching to production PostgreSQL does not migrate SQLite data.
 Port 18080 avoids the laptop's existing Cuplr listener on 8080 and redirects to
-the same Nginx service's HTTPS listener on loopback port 443. The browser health
-URL is `https://127.0.0.1/api/healthz` (`/api/health` is not a route).
+the same Nginx service's configured HTTPS listener (`RELEASE_HTTPS_PORT`). The browser
+health URL includes that port (`/api/health` is not a route).
 `prepare-prod HOST_INGRESS=0 LOCAL_TLS=1` creates or renews a self-signed certificate for
 localhost and 127.0.0.1 without replacing the private env file. A browser needs
 a one-time local certificate trust decision. The smoke command verifies the

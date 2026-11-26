@@ -10,6 +10,8 @@ RELEASE_REVISION ?= $(shell git rev-parse HEAD)
 RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
 RELEASE_PLATFORM ?=
 RELEASE_HTTP_PORT ?= 18080
+RELEASE_HTTPS_PORT ?= 18443
+export RELEASE_HTTPS_PORT
 UV_IMAGE ?= ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
 SCAFFOLD_BACKUP_PROFILE ?= immutable-backup
 CI_BACKUP_PROFILES ?= immutable-backup
@@ -19,6 +21,11 @@ PROD_CONFIG = $(COMPOSE_PROD)
 HOST_INGRESS ?= 1
 # Capture tenant/operator input before the smoke-test placeholder default.
 PREPARE_PUBLIC_HOST := $(HOST_INGRESS_HOST)
+HOST_INGRESS_HOST ?= localhost
+HOST_INGRESS_PORT ?= $(RELEASE_HTTP_PORT)
+export HOST_INGRESS_PORT
+PROD_URL_ROOT ?= http://127.0.0.1:$(HOST_INGRESS_PORT)
+PROD_CURL_FLAGS ?= -L $(if $(wildcard deploy/nginx/certs/server.crt),--cacert deploy/nginx/certs/server.crt) -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https'
 
 .PHONY: profiles
 profiles:
@@ -37,9 +44,6 @@ DEV_APPLICATION_SERVICE := backend
 CONTAINER_PYTHON_PROJECT_DIR := /app
 FRONTEND_DIR := frontend
 MONITORING ?= 0
-HOST_INGRESS_HOST ?= app.example.test
-HOST_INGRESS_PORT ?= 18080
-export HOST_INGRESS_PORT
 PROD_COMPOSE_FILES := -f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml
 PROD_COMPOSE_PROFILES :=
 ifeq ($(HOST_INGRESS),1)
@@ -57,7 +61,6 @@ COMPOSE_MONITOR = $(COMPOSE_PROD) -f deploy/docker-compose.external-monitoring.y
 RELEASE_BACKEND_TAG = $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG = $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
 RELEASE_PULL ?= $(COMPOSE_PROD) pull backend nginx
-RELEASE_HTTPS_PORT ?= 18443
 COMPOSE_PROD = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) docker compose \
 	$(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) \
 	--env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
@@ -123,10 +126,6 @@ migrate-prod: ## Run Django migrations in prod
 bash-prod: ## Shell into backend container (prod)
 	$(COMPOSE_PROD) exec backend bash
 
-ifeq ($(HOST_INGRESS),1)
-smoke-prod: smoke-host-ingress
-endif
-
 .PHONY: ops.check-prod
 ops.check-prod: ## Run operational checks once and report their state
 	$(COMPOSE_PROD) run --rm backend python -m app.manage monitor_operational_integrity
@@ -142,8 +141,8 @@ ops.monitor-prod: ## Follow the unattended production monitor
 .PHONY: smoke-host-ingress
 smoke-host-ingress: ## Smoke-test the loopback origin as routed by a host ingress
 smoke-host-ingress: COMPOSE = $(COMPOSE_PROD)
-smoke-host-ingress: URL_ROOT = http://127.0.0.1:$(HOST_INGRESS_PORT)
-smoke-host-ingress: CURL_FLAGS = -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https'
+smoke-host-ingress: URL_ROOT = $(PROD_URL_ROOT)
+smoke-host-ingress: CURL_FLAGS = $(PROD_CURL_FLAGS)
 smoke-host-ingress: smoke
 	@location="$$(curl -fsS -D - -o /dev/null \
 		-H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
@@ -265,14 +264,6 @@ deploy-release: initialize-release ## Deploy the recorded images through normal 
 .PHONY: rollback-release
 rollback-release: ## Deploy a previously recorded RELEASE_FILE
 rollback-release: deploy-release
-
-ifeq ($(HOST_INGRESS),1)
-PROD_URL_ROOT = http://127.0.0.1:$(HOST_INGRESS_PORT)
-PROD_CURL_FLAGS = -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https'
-else
-PROD_URL_ROOT := https://localhost
-PROD_CURL_FLAGS := -k
-endif
 
 # ---- Django dev helpers ----
 DJANGO_DEV_MANAGE ?= cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage
