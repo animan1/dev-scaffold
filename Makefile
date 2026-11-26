@@ -311,21 +311,12 @@ verify: be.verify fe.verify
 .PHONY: be.verify-in-container
 be.verify-in-container:
 	$(UV_RUN) ruff format --config /workspace/backend/pyproject.toml --check .
-	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile lint typecheck coverage
+	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile be.lint-in-container typecheck coverage
 
 .PHONY: preflight
 preflight: ## Format + lint + typecheck + coverage + precommit
 preflight: format lint typecheck coverage precommit
 	@echo "✅ Preflight complete."
-
-.PHONY: no-any
-no-any: ## Reject explicit typing.Any in backend Python
-	cd $(PY_DIR) && uv run python scripts/check_no_any.py
-
-.PHONY: lint
-lint: ## Ruff lint (backend)
-lint: no-any
-	cd $(PY_DIR) && uv run ruff check .
 
 .PHONY: typecheck
 typecheck: ## MyPy type checking (backend)
@@ -369,7 +360,9 @@ fe.build: ## Build frontend (Vite)
 
 .PHONY: fe.lint
 fe.lint: ## ESLint (frontend)
-	cd $(FRONTEND_DIR) && pnpm lint
+	$(COMPOSE_DEV) run --rm --no-deps \
+		--volume "$(abspath $(FRONTEND_DIR))/node_modules:/app/node_modules" \
+		frontend corepack pnpm lint
 
 .PHONY: fe.format
 fe.format: ## Prettier write (frontend)
@@ -400,7 +393,17 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint
+
+.PHONY: lint be.lint-in-container
+lint: ## Run Django lint checks, then applicable frontend lint checks
+	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) \
+		make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE) be.lint-in-container
+	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.lint
+
+be.lint-in-container:
+	$(UV_RUN) python /workspace/backend/scripts/check_no_any.py
+	$(UV_RUN) ruff check --config /workspace/backend/pyproject.toml .
 
 .PHONY: format format-check
 RUFF = $(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) $(UV_RUN) ruff
