@@ -87,7 +87,7 @@ profiles/server-rendered-django/ephemeral down
 recipes as production, with test inputs and an isolated `<project>-ephemeral`
 database and volumes. A local-only TLS ingress replaces shared host ingress.
 The application origin remains loopback-only. HTTP at
-`http://localhost:18081` redirects to HTTPS at `https://localhost:18444`; the
+`http://127.0.0.1:18081` redirects to HTTPS at `https://127.0.0.1:18444`; the
 locally generated certificate causes the expected browser warning. `smoke`
 accepts that test certificate and verifies the redirect, customer page, admin
 redirect, and secure CSRF cookie. `down` stops the stack while preserving its

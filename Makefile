@@ -78,7 +78,7 @@ COMPOSE_EPHEMERAL_INGRESS = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 # ---- Paths ----
 PY_DIR := backend
 PYTHON_PROJECT_DIR := $(PY_DIR)
-DEV_URL_ROOT ?= http://localhost:8080
+DEV_URL_ROOT ?= http://127.0.0.1:8080
 CURL_FLAGS ?=
 SMOKE_HOME_PATTERN := dev-scaffold\|id="root"
 
@@ -207,14 +207,14 @@ prepare-ephemeral: ## Prepare isolated, non-secret release smoke-test configurat
 			-keyout $(dir $(EPHEMERAL_ENV_FILE))certs/server.key \
 			-out $(dir $(EPHEMERAL_ENV_FILE))certs/server.crt \
 			-days 1 -subj '/CN=localhost' \
-			-addext 'subjectAltName=DNS:localhost'; \
+			-addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'; \
 	fi
 
 .PHONY: verify-ephemeral
 verify-ephemeral: ## Verify the running recorded release in ephemeral
 	@for i in $$(seq 1 60); do \
-		if curl -kfsS https://localhost:$(EPHEMERAL_HTTPS_PORT)/api/healthz >/dev/null; then \
-			curl -kfsS https://localhost:$(EPHEMERAL_HTTPS_PORT)/ >/dev/null; \
+		if curl -kfsS https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/api/healthz >/dev/null; then \
+			curl -kfsS https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/ >/dev/null; \
 			echo 'Release images passed smoke tests'; exit 0; \
 		fi; \
 		sleep 1; \
