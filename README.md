@@ -153,8 +153,8 @@ dummy, use the actual production workflow without a second Compose project:
 ```bash
 make prepare-prod HOST_INGRESS=0 LOCAL_TLS=1 PROD_COMPOSE_PROJECT=dev-scaffold
 make build-release-images RELEASE_PLATFORM=linux/arm64
-make release-bundle-config HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_CONFIG_FILE=.tmp/private-release-compose.json
-make deploy-release HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 RELEASE_HTTPS_PORT=443 RELEASE_PULL=true
+make release-bundle-config HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 PROD_HTTPS_PORT=18443 RELEASE_CONFIG_FILE=.tmp/private-release-compose.json
+make deploy-release HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 PROD_HTTPS_PORT=18443 RELEASE_PULL=true
 make smoke-prod HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold CURL_FLAGS='--cacert deploy/nginx/certs/server.crt'
 ```
 
@@ -165,7 +165,7 @@ is an intentional deployment, not ordinary development smoke. Existing
 PostgreSQL volumes remain in place. The development SQLite file remains on
 disk; switching to production PostgreSQL does not migrate SQLite data.
 Port 18080 avoids the laptop's existing Cuplr listener on 8080 and redirects to
-the same Nginx service's configured HTTPS listener (`RELEASE_HTTPS_PORT`). The browser
+the same Nginx service's configured HTTPS listener (`PROD_HTTPS_PORT`). The browser
 health URL includes that port (`/api/health` is not a route).
 `prepare-prod HOST_INGRESS=0 LOCAL_TLS=1` creates or renews a self-signed certificate for
 localhost and 127.0.0.1 without replacing the private env file. A browser needs

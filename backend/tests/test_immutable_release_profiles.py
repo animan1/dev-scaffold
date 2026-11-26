@@ -74,7 +74,10 @@ def test_release_configuration_resolves_production_project_and_volumes(
 ) -> None:
     monkeypatch.setenv("DOCKER_HOST", "unix:///nonexistent")
     private = tmp_path / "production.env"
-    private.write_text("POSTGRES_USER=app\nPOSTGRES_PASSWORD=test-only\nPOSTGRES_DB=app\n")
+    private.write_text(
+        "POSTGRES_USER=app\nPOSTGRES_PASSWORD=test-only\nPOSTGRES_DB=app\n"
+        f"EPHEMERAL_CERTS_PATH={tmp_path}/certs\n"
+    )
     manifest = tmp_path / "release.env"
     manifest.write_text(
         "RELEASE_BACKEND_IMAGE=local/backend:test\nRELEASE_WEB_IMAGE=local/web:test\n"
@@ -92,7 +95,7 @@ def test_release_configuration_resolves_production_project_and_volumes(
                 f"HOST_INGRESS={host_ingress}",
                 "HOST_INGRESS_PORT=19080",
                 "RELEASE_HTTP_PORT=28080",
-                "RELEASE_HTTPS_PORT=28043",
+                "PROD_HTTPS_PORT=28043",
                 f"PROD_ENV_FILE={private}",
                 f"RELEASE_FILE={manifest}",
             )
@@ -103,10 +106,10 @@ def test_release_configuration_resolves_production_project_and_volumes(
         if profile == "react-vite" and host_ingress == "0":
             nginx = config["services"]["nginx"]
             assert nginx["ports"][1]["published"] == "28043"
-            assert nginx["environment"]["RELEASE_HTTPS_PORT"] == "28043"
+            assert nginx["environment"]["PROD_HTTPS_PORT"] == "28043"
             assert (
                 nginx["environment"]["NGINX_ENVSUBST_FILTER"].replace("$$", "$")
-                == "^RELEASE_HTTPS_PORT$"
+                == "^PROD_HTTPS_PORT$"
             )
         assert all(
             volume["name"].startswith(f"{project}_") for volume in config["volumes"].values()
@@ -119,6 +122,22 @@ def test_release_configuration_resolves_production_project_and_volumes(
                 mount.get("volume", {}).get("nocopy", False)
                 for mount in config["services"]["app"]["volumes"]
             )
+    if profile == "react-vite":
+        ephemeral = json.loads(
+            _make(
+                profile,
+                "-s",
+                "release-bundle-config",
+                "COMPOSE_PROD=$(COMPOSE_EPHEMERAL)",
+                "SCAFFOLD_BACKUP_PROFILE=none",
+                f"EPHEMERAL_ENV_FILE={private}",
+                f"RELEASE_FILE={manifest}",
+                "PROD_HTTPS_PORT=28043",
+                "EPHEMERAL_HTTPS_PORT=28044",
+            )
+        )["services"]["nginx"]
+        assert ephemeral["environment"]["PROD_HTTPS_PORT"] == "28044"
+        assert ephemeral["ports"][1]["published"] == "28044"
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
@@ -166,9 +185,12 @@ def test_shared_lifecycle_commands_select_each_requested_environment(profile: st
     assert "http://127.0.0.1:19080/api/healthz" in direct
     assert "curl -L " in direct
     assert "https://localhost" not in direct
-    assert [line for line in direct.splitlines() if line.startswith("curl ")] == [
+    assert [line for line in direct.splitlines() if line.startswith("curl ")][:3] == [
         line for line in smoke.splitlines() if line.startswith("curl ")
-    ]
+    ][:3]
+    if profile == "react-vite":
+        assert "Django admin slash redirect was not routed" in smoke
+        assert "Django admin slash redirect was not routed" not in direct
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])

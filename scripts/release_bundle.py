@@ -292,7 +292,7 @@ def inputs(path):
                 "MONITORING",
                 "RELEASE_HTTP_PORT",
                 "RELEASE_BIND_ADDRESS",
-                "RELEASE_HTTPS_PORT",
+                "PROD_HTTPS_PORT",
                 "RELEASE_HOST",
                 "PROD_COMPOSE_PROJECT",
                 "PRODUCTION_HTTP_PORT",

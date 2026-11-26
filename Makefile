@@ -10,8 +10,8 @@ RELEASE_REVISION ?= $(shell git rev-parse HEAD)
 RELEASE_FILE ?= deploy/releases/$(RELEASE_REVISION).env
 RELEASE_PLATFORM ?=
 RELEASE_HTTP_PORT ?= 18080
-RELEASE_HTTPS_PORT ?= 18443
-export RELEASE_HTTPS_PORT
+PROD_HTTPS_PORT ?= 18443
+export PROD_HTTPS_PORT
 UV_IMAGE ?= ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
 SCAFFOLD_BACKUP_PROFILE ?= immutable-backup
 CI_BACKUP_PROFILES ?= immutable-backup
@@ -44,6 +44,7 @@ DEV_APPLICATION_SERVICE := backend
 CONTAINER_PYTHON_PROJECT_DIR := /app
 FRONTEND_DIR := frontend
 MONITORING ?= 0
+EPHEMERAL_HTTPS_PORT ?= 18443
 PROD_COMPOSE_FILES := -f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml
 PROD_COMPOSE_PROFILES :=
 ifeq ($(HOST_INGRESS),1)
@@ -66,7 +67,7 @@ COMPOSE_PROD = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) COMPOSE_PROJECT_NAME=$(
 	--env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
 RUN_PROD = $(COMPOSE_PROD) run --rm --no-deps backend
 COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
-	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) docker compose \
+	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) EPHEMERAL_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) docker compose \
 	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
 	-f deploy/docker-compose.ephemeral.yml $(EPHEMERAL_COMPOSE_FILES) --env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
 COMPOSE_EPHEMERAL_INGRESS = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
@@ -125,6 +126,10 @@ migrate-prod: ## Run Django migrations in prod
 .PHONY: bash-prod
 bash-prod: ## Shell into backend container (prod)
 	$(COMPOSE_PROD) exec backend bash
+
+ifeq ($(HOST_INGRESS),1)
+smoke-prod: smoke-host-ingress
+endif
 
 .PHONY: ops.check-prod
 ops.check-prod: ## Run operational checks once and report their state
@@ -208,8 +213,8 @@ prepare-ephemeral: ## Prepare isolated, non-secret release smoke-test configurat
 .PHONY: verify-ephemeral
 verify-ephemeral: ## Verify the running recorded release in ephemeral
 	@for i in $$(seq 1 60); do \
-		if curl -kfsS https://localhost:$(RELEASE_HTTPS_PORT)/api/healthz >/dev/null; then \
-			curl -kfsS https://localhost:$(RELEASE_HTTPS_PORT)/ >/dev/null; \
+		if curl -kfsS https://localhost:$(EPHEMERAL_HTTPS_PORT)/api/healthz >/dev/null; then \
+			curl -kfsS https://localhost:$(EPHEMERAL_HTTPS_PORT)/ >/dev/null; \
 			echo 'Release images passed smoke tests'; exit 0; \
 		fi; \
 		sleep 1; \

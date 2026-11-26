@@ -131,7 +131,7 @@ def test_host_ingress_origin_is_loopback_http_only() -> None:
 
 def test_application_tls_redirect_uses_the_configured_https_port() -> None:
     nginx = (_repo_root() / "deploy/nginx/default.prod.conf").read_text()
-    assert "return 301 https://$host:${RELEASE_HTTPS_PORT}$request_uri;" in nginx
+    assert "return 301 https://$host:${PROD_HTTPS_PORT}$request_uri;" in nginx
 
 
 def test_host_ingress_templates_only_the_selected_backend() -> None:
