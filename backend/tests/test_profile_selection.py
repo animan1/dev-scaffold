@@ -115,6 +115,30 @@ def test_profile_configurations_apply_the_same_ruff_formatting() -> None:
     assert results == ["def example(x: int):\n    return x + 1\n"] * 2
 
 
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+@pytest.mark.parametrize("django_fails", [False, True])
+def test_common_lint_runs_frontend_only_when_applicable_and_django_passes(
+    profile: str, django_fails: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log = tmp_path / "lint.log"
+    for tool, body in {
+        "docker": 'echo django >> "$LINT_LOG"\nexit "$DJANGO_LINT_STATUS"\n',
+        "pnpm": 'echo frontend >> "$LINT_LOG"\n',
+    }.items():
+        path = tmp_path / tool
+        path.write_text("#!/bin/sh\n" + body)
+        path.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    monkeypatch.setenv("LINT_LOG", str(log))
+    monkeypatch.setenv("DJANGO_LINT_STATUS", str(int(django_fails)))
+    result = _make(f"SCAFFOLD_PROFILE={profile}", "lint", check=False)
+    assert (result.returncode != 0) == django_fails
+    expected = ["django"]
+    if profile == "react-vite" and not django_fails:
+        expected.append("frontend")
+    assert log.read_text().splitlines() == expected
+
+
 def test_backend_verification_uses_explicit_container_boundary_without_overrides() -> None:
     ci = _make("SCAFFOLD_PROFILE=react-vite", "--dry-run", "be.ci").stdout
     verify = _make("SCAFFOLD_PROFILE=react-vite", "--dry-run", "be.verify").stdout
@@ -140,7 +164,7 @@ def test_backend_verification_uses_explicit_container_boundary_without_overrides
     ).stdout
     assert "docker compose" not in internal
     assert "ruff format --config /workspace/backend/pyproject.toml --check ." in internal
-    assert "uv run ruff check" in internal
+    assert "ruff check --config /workspace/backend/pyproject.toml" in internal
     assert "uv run mypy" in internal
     assert "uv run pytest --cov" in internal
 

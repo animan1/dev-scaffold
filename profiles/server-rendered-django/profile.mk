@@ -47,9 +47,9 @@ build: ## Build the deterministic development application image
 .PHONY: setup
 setup: build ## Prepare Docker development dependencies from the committed lockfile
 
-.PHONY: lint
-lint: ## Run strict Ruff linting
-	$(RUN_DEV) $(UV_RUN) ruff check --config $(PROFILE_PROJECT) .
+.PHONY: fe.lint
+fe.lint: ## No frontend lint checks for this profile
+	@:
 
 .PHONY: typecheck
 typecheck: ## Run strict MyPy type checking

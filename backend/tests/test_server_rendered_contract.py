@@ -319,7 +319,10 @@ def test_server_rendered_help_includes_selected_optional_profiles() -> None:
 def test_server_rendered_tools_explicitly_load_profile_configuration() -> None:
     profile_config = "/workspace/profiles/server-rendered-django/pyproject.toml"
 
-    assert f"ruff check --config {profile_config}" in _make("--dry-run", "lint").stdout
+    assert (
+        "ruff check --config /workspace/backend/pyproject.toml"
+        in _make("--dry-run", "be.lint-in-container").stdout
+    )
     assert f"mypy --config-file {profile_config}" in _make("--dry-run", "typecheck").stdout
     test_output = _make("--dry-run", "test").stdout
     assert f"pytest -c {profile_config}" in test_output
