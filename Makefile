@@ -78,7 +78,7 @@ COMPOSE_EPHEMERAL_INGRESS = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 # ---- Paths ----
 PY_DIR := backend
 PYTHON_PROJECT_DIR := $(PY_DIR)
-URL_ROOT ?= http://localhost:8080
+DEV_URL_ROOT ?= http://localhost:8080
 CURL_FLAGS ?=
 SMOKE_HOME_PATTERN := dev-scaffold\|id="root"
 
@@ -419,6 +419,7 @@ deps.lock: ## Update the selected profile's Python lockfile with pinned Dockeriz
 		lock --project $(PYTHON_PROJECT_DIR)
 
 COMPOSE ?= $(COMPOSE_DEV)
+URL_ROOT ?= $(DEV_URL_ROOT)
 ENV ?= dev
 down-dev logs-dev ps-dev wait-dev: COMPOSE = $(COMPOSE_DEV)
 down-prod logs-prod ps-prod wait-prod smoke-prod: COMPOSE = $(COMPOSE_PROD)
