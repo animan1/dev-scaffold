@@ -94,6 +94,21 @@ def test_profile_configurations_apply_the_same_ruff_formatting() -> None:
     assert results == ["def example(x: int):\n    return x + 1\n"] * 2
 
 
+def test_backend_verification_uses_explicit_container_boundary_without_overrides() -> None:
+    ci = _make("SCAFFOLD_PROFILE=react-vite", "--dry-run", "be.ci").stdout
+    verify = _make("SCAFFOLD_PROFILE=react-vite", "--dry-run", "be.verify").stdout
+    assert ci == verify
+    assert "docker compose" in verify
+    assert "be.verify-in-container" in verify
+    assert "RUFF=" not in verify
+    internal = _make("SCAFFOLD_PROFILE=react-vite", "--dry-run", "be.verify-in-container").stdout
+    assert "docker compose" not in internal
+    assert "ruff format --config /workspace/backend/pyproject.toml --check ." in internal
+    assert "uv run ruff check" in internal
+    assert "uv run mypy" in internal
+    assert "uv run pytest --cov" in internal
+
+
 def test_help_lists_commands_when_optional_makefiles_are_loaded() -> None:
     for profile in ("react-vite", "server-rendered-django"):
         for backup in ("immutable-backup", "none"):

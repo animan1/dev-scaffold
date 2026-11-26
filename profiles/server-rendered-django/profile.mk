@@ -17,7 +17,7 @@ COMPOSE_DEV := COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) APP_HOST=$(APP_HOST) 
 	docker compose --project-directory . -f profiles/server-rendered-django/compose.yml
 RUN_DEV := $(COMPOSE_DEV) run --rm app
 UV_RUN := uv run --project /workspace/profiles/server-rendered-django
-RUFF = $(COMPOSE_DEV) run --rm --no-deps app $(UV_RUN) ruff
+DEV_APPLICATION_SERVICE := app
 DJANGO_DEV_MANAGE := $(RUN_DEV) $(UV_RUN) python -m app.manage
 PROFILE_PROJECT := /workspace/profiles/server-rendered-django/pyproject.toml
 RELEASE_BACKEND_TAG ?= $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)

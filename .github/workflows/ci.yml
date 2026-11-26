@@ -73,7 +73,7 @@ jobs:
       - name: Verify (inside container) via Make
         env:
           DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
-        run: make format-check be.ci fe.ci
+        run: make be.ci fe.ci
 
       - name: Smoke test via Nginx
         run: make smoke
