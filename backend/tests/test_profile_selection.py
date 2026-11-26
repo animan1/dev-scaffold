@@ -120,7 +120,7 @@ def test_common_lint_runs_frontend_only_when_applicable_and_django_passes(
     log = tmp_path / "lint.log"
     for tool, body in {
         "docker": (
-            'case "$*" in *" frontend corepack pnpm lint")\n'
+            'case "$*" in *" frontend corepack pnpm lint --max-warnings 0")\n'
             '  echo frontend >> "$LINT_LOG"; exit 0 ;;\n'
             'esac\necho django >> "$LINT_LOG"\nexit "$DJANGO_LINT_STATUS"\n'
         ),

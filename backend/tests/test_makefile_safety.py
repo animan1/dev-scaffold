@@ -27,7 +27,8 @@ def test_precommit_runs_as_a_recipe() -> None:
     assert "uv run --project /app --no-sync pre-commit run" in output
     assert '--config ".pre-commit-config.yaml" --all-files' in output
     assert "fe-eslint,fe-prettier" in output
-    assert "frontend sh -ec" in output
+    assert "frontend corepack pnpm lint --max-warnings 0" in output
+    assert "frontend corepack pnpm fmt-check" in output
 
 
 def test_react_profile_dependency_lock_uses_pinned_dockerized_uv() -> None:

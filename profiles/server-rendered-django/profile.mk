@@ -7,7 +7,6 @@ DEV_COMPOSE_FILE := profiles/server-rendered-django/compose.yml
 DEV_COMPOSE_PROJECT_DIR := .
 CONTAINER_PYTHON_PROJECT_DIR := /workspace/profiles/server-rendered-django
 DEV_APPLICATION_SERVICE := app
-PRECOMMIT_CONFIG := $(PYTHON_PROJECT_DIR)/pre-commit-config.yaml
 RELEASE_BACKEND_TAG ?= $(RELEASE_IMAGE_PREFIX)-backend:$(RELEASE_REVISION)
 RELEASE_WEB_TAG ?= $(RELEASE_IMAGE_PREFIX)-web:$(RELEASE_REVISION)
 RELEASE_PULL ?= $(COMPOSE_PROD) pull app web
@@ -45,10 +44,10 @@ build: ## Build the deterministic development application image
 .PHONY: setup
 setup: build ## Prepare Docker development dependencies from the committed lockfile
 
-.PHONY: fe.lint fe.typecheck fe.test fe.test-in-container fe.precommit
+.PHONY: fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check
 fe.lint: ## No frontend lint checks for this profile
 fe.typecheck: ## No frontend type checks for this profile
-fe.lint fe.typecheck fe.test fe.test-in-container fe.precommit:
+fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check:
 	@:
 
 .PHONY: build-production
