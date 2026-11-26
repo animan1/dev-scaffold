@@ -24,7 +24,8 @@ def _make(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[st
 
 def test_precommit_runs_as_a_recipe() -> None:
     output = _make("--dry-run", "precommit").stdout
-    assert "uv run --extra dev pre-commit run --all-files" in output
+    assert "uv run --project /app --no-sync pre-commit run" in output
+    assert '--config ".pre-commit-config.yaml" --all-files' in output
 
 
 def test_react_profile_dependency_lock_uses_pinned_dockerized_uv() -> None:

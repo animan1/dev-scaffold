@@ -2,6 +2,7 @@
 ARG PYTHON_IMAGE=python:3.12.11-slim-bookworm
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
 FROM ${UV_IMAGE} AS uv
+FROM node:20 AS node
 FROM ${PYTHON_IMAGE} AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -19,6 +20,10 @@ ENV PYTHONPATH="/app/src"
 
 # ---- dev image ----
 FROM base AS dev
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules/corepack /usr/local/lib/node_modules/corepack
+RUN ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack \
+    && corepack enable pnpm
 # Source preparation and production builds both honor the committed lock.
 RUN uv sync --frozen --all-extras
 # COPY src ./src
