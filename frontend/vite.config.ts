@@ -17,9 +17,10 @@ export default defineConfig(({ mode }) => {
       host: "0.0.0.0",
       port: 5173,
       strictPort: true,
+      allowedHosts: [process.env.APP_HOST || env.APP_HOST || "127.0.0.1"],
       hmr: {
         protocol: "ws",
-        clientPort: 8080,
+        clientPort: Number(process.env.DEV_HTTP_PORT || env.DEV_HTTP_PORT || 8080),
       },
       ...(proxyTarget
         ? {

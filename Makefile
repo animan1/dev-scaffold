@@ -22,6 +22,11 @@ HOST_INGRESS ?= 1
 # Capture tenant/operator input before the smoke-test placeholder default.
 PREPARE_PUBLIC_HOST := $(HOST_INGRESS_HOST)
 HOST_INGRESS_HOST ?= 127.0.0.1
+APP_HOST ?= 127.0.0.1
+DEV_HTTP_PORT ?= 8080
+export DEV_HTTP_PORT
+DEV_URL_ROOT ?= http://127.0.0.1:$(DEV_HTTP_PORT)
+CURL_FLAGS ?= -H 'Host: $(APP_HOST)'
 HOST_INGRESS_PORT ?= $(RELEASE_HTTP_PORT)
 export HOST_INGRESS_PORT
 PROD_URL_ROOT ?= http://127.0.0.1:$(HOST_INGRESS_PORT)
@@ -78,8 +83,6 @@ COMPOSE_EPHEMERAL_INGRESS = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 # ---- Paths ----
 PY_DIR := backend
 PYTHON_PROJECT_DIR := $(PY_DIR)
-DEV_URL_ROOT ?= http://127.0.0.1:8080
-CURL_FLAGS ?=
 SMOKE_HOME_PATTERN := dev-scaffold\|id="root"
 
 .PHONY: be.bash
@@ -206,8 +209,8 @@ prepare-ephemeral: ## Prepare isolated, non-secret release smoke-test configurat
 		openssl req -x509 -nodes -newkey rsa:2048 \
 			-keyout $(dir $(EPHEMERAL_ENV_FILE))certs/server.key \
 			-out $(dir $(EPHEMERAL_ENV_FILE))certs/server.crt \
-			-days 1 -subj '/CN=localhost' \
-			-addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'; \
+			-days 1 -subj '/CN=$(HOST_INGRESS_HOST)' \
+			-addext 'subjectAltName=DNS:$(HOST_INGRESS_HOST),IP:127.0.0.1,DNS:localhost'; \
 	fi
 
 .PHONY: verify-ephemeral
@@ -527,10 +530,10 @@ prepare-prod: ## Prepare and validate private production inputs without starting
 			umask 077; mkdir -p deploy/nginx/certs; \
 			openssl req -x509 -nodes -newkey rsa:2048 \
 				-keyout deploy/nginx/certs/server.key -out deploy/nginx/certs/server.crt \
-				-days 365 -subj '/CN=localhost' \
-				-addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' || exit 1; \
+				-days 365 -subj '/CN=$(HOST_INGRESS_HOST)' \
+				-addext 'subjectAltName=DNS:$(HOST_INGRESS_HOST),IP:127.0.0.1,DNS:localhost' || exit 1; \
 		fi; \
-		echo 'Local TLS certificate ready for localhost and 127.0.0.1'; \
+		echo 'Local TLS certificate ready for $(HOST_INGRESS_HOST), localhost and 127.0.0.1'; \
 	else \
 		test -f deploy/nginx/certs/server.key && \
 			openssl x509 -in deploy/nginx/certs/server.crt -noout -checkend 0 >/dev/null || \

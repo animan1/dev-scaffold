@@ -143,8 +143,7 @@ def test_release_configuration_resolves_production_project_and_volumes(
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
 def test_shared_lifecycle_commands_select_each_requested_environment(profile: str) -> None:
     default_dev = _make(profile, "--dry-run", "smoke")
-    port = 8080 if profile == "react-vite" else 18000
-    assert f"http://127.0.0.1:{port}/api/healthz" in default_dev
+    assert "http://127.0.0.1:8080/api/healthz" in default_dev
     assert "http://localhost" not in default_dev
     if profile == "server-rendered-django":
         assert "Host: 127.0.0.1" in default_dev
@@ -152,6 +151,11 @@ def test_shared_lifecycle_commands_select_each_requested_environment(profile: st
     dev = _make(profile, "--dry-run", "smoke", "DEV_URL_ROOT=http://dev.example")
     assert "http://dev.example/api/healthz" in dev
     assert "http://dev.example/static/smoketest.txt" in dev
+    custom_port = _make(
+        profile, "--dry-run", "smoke", "DEV_HTTP_PORT=18123", "APP_HOST=dev.example"
+    )
+    assert "http://127.0.0.1:18123/api/healthz" in custom_port
+    assert "Host: dev.example" in custom_port
     for command in ("down", "logs", "ps"):
         output = _make(
             profile,

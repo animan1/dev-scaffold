@@ -1,17 +1,13 @@
 HELP_FILES = $(filter-out $(firstword $(MAKEFILE_LIST)),$(MAKEFILE_LIST))
 
 PYTHON_PROJECT_DIR := profiles/server-rendered-django
-APP_PORT ?= 18000
-APP_HOST ?= 127.0.0.1
-DEV_URL_ROOT ?= http://127.0.0.1:$(APP_PORT)
-CURL_FLAGS ?= -H 'Host: $(APP_HOST)'
 SMOKE_HOME_PATTERN := <main
 DIFF_BASE ?= origin/main
 PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
 GIT_COMMON_DIR ?= $(shell git rev-parse --path-format=absolute --git-common-dir)
 HOST_UID ?= $(shell id -u)
 HOST_GID ?= $(shell id -g)
-COMPOSE_DEV := COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) APP_HOST=$(APP_HOST) APP_PORT=$(APP_PORT) \
+COMPOSE_DEV := COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) APP_HOST=$(APP_HOST) DEV_HTTP_PORT=$(DEV_HTTP_PORT) \
 	GIT_COMMON_DIR=$(GIT_COMMON_DIR) HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
 	docker compose --project-directory . -f profiles/server-rendered-django/compose.yml
 RUN_DEV := $(COMPOSE_DEV) run --rm app
@@ -127,8 +123,8 @@ prepare-ephemeral: ## Prepare isolated, non-secret server-rendered release confi
 	@chmod 2770 $(dir $(EPHEMERAL_ENV_FILE))publication
 	@printf '%s\n' \
 		'DJANGO_SECRET_KEY=release-ci-only-abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ' \
-		'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1' \
-		'DJANGO_CSRF_TRUSTED_ORIGINS=https://127.0.0.1' \
+		'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,$(HOST_INGRESS_HOST)' \
+		'DJANGO_CSRF_TRUSTED_ORIGINS=https://$(HOST_INGRESS_HOST)' \
 		'POSTGRES_USER=app' \
 		'POSTGRES_PASSWORD=release-ci-only' \
 		'POSTGRES_DB=app' \
@@ -143,7 +139,7 @@ verify-release-images: up-ephemeral ## Smoke-test the exact production image set
 	$(RUN_EPHEMERAL) \
 		sh -c "printf 'MEDIA_OK\\n' > /media/release-smoketest.txt"
 	@for attempt in $$(seq 1 60); do \
-		if curl -fsS -H 'Host: 127.0.0.1' -H 'X-Forwarded-Proto: https' \
+		if curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
 			'http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz' >/dev/null; then \
 			echo 'Server-rendered release origin is ready'; break; \
 		fi; \
@@ -152,7 +148,7 @@ verify-release-images: up-ephemeral ## Smoke-test the exact production image set
 		fi; \
 		sleep 1; \
 	done
-	curl -fsS -H 'Host: 127.0.0.1' -H 'X-Forwarded-Proto: https' \
+	curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
 		'http://127.0.0.1:$(HOST_INGRESS_PORT)/' | grep -q '<main'
 	curl -fsS 'http://127.0.0.1:$(HOST_INGRESS_PORT)/static/smoketest.txt' \
 		| grep -q 'STATIC_OK'
@@ -205,12 +201,13 @@ prepare-ephemeral: build-ephemeral-ingress
 .PHONY: build-ephemeral-ingress
 build-ephemeral-ingress: ## Build the local-only TLS ingress image
 	docker build -f profiles/server-rendered-django/ephemeral-ingress.Dockerfile \
+		--build-arg EPHEMERAL_HOST=$(HOST_INGRESS_HOST) \
 		-t $(EPHEMERAL_INGRESS_IMAGE) .
 
 .PHONY: verify-ephemeral
 verify-ephemeral: ## Verify local HTTP redirect, HTTPS customer/admin routes, and secure cookies
 	@for attempt in $$(seq 1 60); do \
-		if curl -kfsS -H 'Host: 127.0.0.1' \
+		if curl -kfsS -H 'Host: $(HOST_INGRESS_HOST)' \
 			'https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/api/healthz' >/dev/null; then \
 			break; \
 		fi; \
@@ -219,15 +216,15 @@ verify-ephemeral: ## Verify local HTTP redirect, HTTPS customer/admin routes, an
 		fi; \
 		sleep 1; \
 	done
-	@curl -fsSI -H 'Host: 127.0.0.1' \
+	@curl -fsSI -H 'Host: $(HOST_INGRESS_HOST)' \
 		'http://127.0.0.1:$(EPHEMERAL_HTTP_PORT)/' \
-		| grep -Eiq '^location: https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/'
-	curl -kfsS -H 'Host: 127.0.0.1' \
+		| grep -Eiq '^location: https://$(HOST_INGRESS_HOST):$(EPHEMERAL_HTTPS_PORT)/'
+	curl -kfsS -H 'Host: $(HOST_INGRESS_HOST)' \
 		'https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/' | grep -q '<main'
-	curl -kfsS -D - -o /dev/null -H 'Host: 127.0.0.1' \
+	curl -kfsS -D - -o /dev/null -H 'Host: $(HOST_INGRESS_HOST)' \
 		'https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/admin/' \
 		| grep -Eiq '^location: /admin/login/\?next=/admin/'
-	curl -kfsS -D - -o /dev/null -H 'Host: 127.0.0.1' \
+	curl -kfsS -D - -o /dev/null -H 'Host: $(HOST_INGRESS_HOST)' \
 		'https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/admin/login/' \
 		| grep -Eiq '^set-cookie: csrftoken=.*; secure(;|[[:space:]]*$$)'
 

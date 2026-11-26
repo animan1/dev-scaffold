@@ -139,10 +139,10 @@ Set a unique project name and unused port when the directory defaults are not
 suitable:
 
 ```bash
-make up-dev PROJECT_NAME=example-site APP_PORT=18123
-make migrate PROJECT_NAME=example-site APP_PORT=18123
-make smoke PROJECT_NAME=example-site APP_PORT=18123
-make down-dev PROJECT_NAME=example-site APP_PORT=18123
+make up-dev PROJECT_NAME=example-site DEV_HTTP_PORT=18123
+make migrate PROJECT_NAME=example-site DEV_HTTP_PORT=18123
+make smoke PROJECT_NAME=example-site DEV_HTTP_PORT=18123
+make down-dev PROJECT_NAME=example-site DEV_HTTP_PORT=18123
 ```
 
 ## Downstream boundary

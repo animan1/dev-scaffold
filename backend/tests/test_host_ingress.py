@@ -190,7 +190,7 @@ def test_local_tls_preparation_requires_opt_in_and_covers_browser_hosts(
     private_env = tmp_path / "deploy/.env.prod"
     existing = (
         "DJANGO_SECRET_KEY=existing-private-configuration\n"
-        "DJANGO_ALLOWED_HOSTS=localhost\nPOSTGRES_USER=app\n"
+        "DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,tenant.example\nPOSTGRES_USER=app\n"
         "POSTGRES_PASSWORD=existing-password\nPOSTGRES_DB=app\n"
         "DATABASE_URL=postgresql://app:existing-password@db:5432/app\n"
     )
@@ -205,6 +205,7 @@ def test_local_tls_preparation_requires_opt_in_and_covers_browser_hosts(
         "SCAFFOLD_BACKUP_PROFILE=none",
         "DOCKER_HOST=unix:///nonexistent",
         "HOST_INGRESS=0",
+        "HOST_INGRESS_HOST=tenant.example",
         "prepare-prod",
     ]
     rejected = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
@@ -230,6 +231,7 @@ def test_local_tls_preparation_requires_opt_in_and_covers_browser_hosts(
     )
     assert "DNS:localhost" in inspected.stdout
     assert "IP Address:127.0.0.1" in inspected.stdout
+    assert "DNS:tenant.example" in inspected.stdout
     subprocess.run(command, cwd=tmp_path, capture_output=True, check=True)
     assert private_env.read_text() == existing
     assert private_env.stat().st_mode & 0o077 == 0

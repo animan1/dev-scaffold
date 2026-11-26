@@ -31,7 +31,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; request = urllib.request.Request('http://127.0.0.1:8000/api/healthz', headers={'Host': '127.0.0.1', 'X-Forwarded-Proto': 'https'}); urllib.request.urlopen(request, timeout=2)",
+          "import urllib.request; request = urllib.request.Request('http://127.0.0.1:8000/api/healthz', headers={'Host': '${HOST_INGRESS_HOST:-127.0.0.1}', 'X-Forwarded-Proto': 'https'}); urllib.request.urlopen(request, timeout=2)",
         ]
       interval: 2s
       timeout: 3s
