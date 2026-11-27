@@ -101,7 +101,9 @@ and separate loopback ports.
 ### Immutable releases
 
 Local builds and registry releases use the same recorded-image deployment path.
-`up-prod` uses production inputs; `up-ephemeral` uses test inputs and local ingress.
+`up-prod` uses production inputs; `up-ephemeral` uses test inputs and the selected
+`HOST_INGRESS` mode. `verify-ephemeral` checks the loopback HTTP origin in host
+ingress mode and checks local HTTPS with `HOST_INGRESS=0`.
 Neither startup command rebuilds the application images.
 
 CI reads the committed scaffold selector and waits for that profile's

@@ -31,9 +31,9 @@ def _make(profile: str, *arguments: str) -> str:
 
 def test_react_release_path_remains_selected_by_the_react_profile() -> None:
     build = _make("react-vite", "--dry-run", "build")
-    verify = _make("react-vite", "--dry-run", "up-ephemeral", "verify-ephemeral")
-    integration = _make("react-vite", "--dry-run", "integration-test-ephemeral")
-    logs = _make("react-vite", "--dry-run", "logs-ephemeral")
+    verify = _make("react-vite", "--dry-run", "up-ephemeral", "verify-ephemeral", "HOST_INGRESS=0")
+    integration = _make("react-vite", "--dry-run", "integration-test-ephemeral", "HOST_INGRESS=0")
+    logs = _make("react-vite", "--dry-run", "logs-ephemeral", "HOST_INGRESS=0")
     initialize = _make("react-vite", "--dry-run", "initialize-release")
 
     assert 'backend/Dockerfile" --target prod' in build
@@ -66,11 +66,8 @@ def test_environment_namespaces_do_not_inherit_global_compose_project(
         projects = re.findall(r"COMPOSE_PROJECT_NAME=([^\s]+)", output)
         assert projects
         assert set(projects) == {f"tenant-{suffix}"}
-    verification = _make(profile, "--dry-run", "verify-ephemeral")
-    if profile == "react-vite":
-        assert "docker compose" in verification and " logs || true" in verification
-    else:
-        assert "docker " not in verification
+    verification = _make(profile, "--dry-run", "verify-ephemeral", "HOST_INGRESS=0")
+    assert "docker compose" in verification and " logs || true" in verification
     assert "migrate" not in verification
     stopped = _make(profile, "--dry-run", "down-ephemeral")
     removed = _make(profile, "--dry-run", "rm-ephemeral")
@@ -161,11 +158,18 @@ def test_release_configuration_resolves_production_project_and_volumes(
             "EPHEMERAL_HTTP_PORT=28081",
             "EPHEMERAL_HTTPS_PORT=28044",
             "PROD_HTTPS_PORT=28043",
-            "HOST_INGRESS=0",
+            f"HOST_INGRESS={host_ingress}",
         )
     )
     assert ephemeral["name"] == "tenant-ephemeral"
     assert ephemeral["services"]["db"]["environment"]["POSTGRES_PASSWORD"] == "test-only"
+    if host_ingress == "1":
+        assert "ingress" not in ephemeral["services"]
+        origin = ephemeral["services"]["web" if profile == "server-rendered-django" else "nginx"]
+        assert [(port["host_ip"], port["published"]) for port in origin["ports"]] == [
+            ("127.0.0.1", "28081"),
+        ]
+        return
     if profile == "server-rendered-django":
         assert not ephemeral["services"]["web"].get("ports")
         ingress = ephemeral["services"]["ingress"]
@@ -252,10 +256,16 @@ def test_shared_lifecycle_commands_select_each_requested_environment(profile: st
     assert "X-Forwarded-Proto" not in direct
     assert "curl -k" not in direct
     assert "X-Forwarded-Proto" not in smoke
-    if profile == "react-vite":
-        origin = _make(profile, "--dry-run", "verify-host-ingress")
-        assert "Django admin slash redirect was not routed" in origin
-        assert "X-Forwarded-Proto: https" in origin
+    origin = _make(
+        profile, "--dry-run", "verify-ephemeral", "HOST_INGRESS=1", "EPHEMERAL_HTTP_PORT=28081"
+    )
+    assert "http://127.0.0.1:28081/api/healthz" in origin
+    assert "Django admin slash redirect was not routed" in origin
+    assert "X-Forwarded-Proto: https" in origin
+    assert "config --format json" in origin
+    assert "--host-ingress" in origin
+    assert "migrate" not in origin
+    assert "up -d" not in origin
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
@@ -353,7 +363,7 @@ def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> Non
     assert "up -d --no-build db app" not in verify
     assert "exec -T app python -m app.manage migrate" not in verify
     assert "/static/smoketest.txt" in smoke
-    assert "docker compose" not in smoke
+    assert " logs || true" in smoke
     before_stop, after_stop = integration.split("stop app", 1)
     assert "/media/release-smoketest.txt" in before_stop
     assert "start app" in after_stop

@@ -88,7 +88,8 @@ EPHEMERAL_HTTP_PORT ?= $(RELEASE_HTTP_PORT)
 EPHEMERAL_HTTPS_PORT ?= 18443
 RELEASE_COMPOSE_FILES := -f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml
 PROD_COMPOSE_FILES := $(RELEASE_COMPOSE_FILES)
-EPHEMERAL_COMPOSE_FILES := $(RELEASE_COMPOSE_FILES) -f deploy/docker-compose.ephemeral.yml
+EPHEMERAL_COMPOSE_FILES = $(RELEASE_COMPOSE_FILES) \
+	-f $(if $(filter 1,$(HOST_INGRESS)),deploy/docker-compose.host-ingress.yml,deploy/docker-compose.ephemeral.yml)
 PROD_COMPOSE_PROFILES :=
 ifeq ($(HOST_INGRESS),1)
 PROD_COMPOSE_FILES += -f deploy/docker-compose.host-ingress.yml
@@ -99,10 +100,6 @@ PROD_COMPOSE_PROFILES += --profile monitoring
 endif
 COMPOSE_MONITOR = $(COMPOSE_PROD) -f deploy/docker-compose.external-monitoring.yml --profile monitoring
 PROD_WEB_SERVICE := nginx
-COMPOSE_EPHEMERAL_INGRESS = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
-	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) docker compose \
-	$(RELEASE_COMPOSE_FILES) \
-	-f deploy/docker-compose.host-ingress.yml --env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
 
 # ---- Paths ----
 PY_DIR := backend
@@ -140,53 +137,6 @@ ops.check-external-prod: ## Run checks once through the external monitoring prof
 .PHONY: ops.monitor-prod
 ops.monitor-prod: ## Follow the unattended production monitor
 	$(COMPOSE_MONITOR) logs -f monitor
-
-.PHONY: smoke-host-ingress
-smoke-host-ingress: ## Smoke-test the loopback origin as routed by a host ingress
-smoke-host-ingress: COMPOSE = $(COMPOSE_PROD)
-smoke-host-ingress: URL_ROOT = http://127.0.0.1:$(HOST_INGRESS_PORT)
-smoke-host-ingress: CURL_CMD = curl -fsS -L -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https'
-smoke-host-ingress: smoke
-	@location="$$(curl -fsS -D - -o /dev/null \
-		-H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
-		'http://127.0.0.1:$(HOST_INGRESS_PORT)/admin' \
-		| awk 'tolower($$1) == "location:" {sub(/\r$$/, "", $$2); print $$2}')"; \
-	test "$$location" = '/admin/' || { \
-		echo "Django admin slash redirect was not routed (got $$location)"; \
-		exit 1; \
-	}
-	@location="$$(curl -fsS -D - -o /dev/null \
-		-H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
-		'http://127.0.0.1:$(HOST_INGRESS_PORT)/admin/' \
-		| awk 'tolower($$1) == "location:" {sub(/\r$$/, "", $$2); print $$2}')"; \
-	case "$$location" in \
-		/admin/login/*) ;; \
-		*) echo "Django admin login was not routed (got $$location)"; exit 1 ;; \
-	esac
-	@code="$$(curl -sS -o /dev/null -w '%{http_code}' \
-		-H 'Host: $(HOST_INGRESS_HOST)' \
-		'http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz')"; \
-	test "$$code" = "301" || { \
-		echo "Origin must require the trusted ingress scheme header (got $$code)"; \
-		exit 1; \
-	}
-
-# Optional immutable-release profile
-.PHONY: verify-ephemeral
-verify-ephemeral: COMPOSE = $(COMPOSE_EPHEMERAL)
-verify-ephemeral: URL_ROOT = $(EPHEMERAL_HTTPS_URL)
-verify-ephemeral: CURL_CMD = $(EPHEMERAL_CURL)
-verify-ephemeral: smoke ## Verify the running recorded release in ephemeral
-
-.PHONY: verify-host-ingress
-verify-host-ingress: prepare-ephemeral ## Verify exact images through the loopback ingress boundary
-	$(COMPOSE_EPHEMERAL_INGRESS) config --quiet
-	$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build db $(APPLICATION_SERVICE)
-	$(COMPOSE_EPHEMERAL_INGRESS) exec -T $(APPLICATION_SERVICE) python -m app.manage check
-	$(COMPOSE_EPHEMERAL_INGRESS) exec -T $(APPLICATION_SERVICE) python -m app.manage migrate
-	$(COMPOSE_EPHEMERAL_INGRESS) exec -T $(APPLICATION_SERVICE) python -m app.manage collectstatic --noinput --clear
-	$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build
-	$(MAKE) smoke-host-ingress 'COMPOSE=$(COMPOSE_EPHEMERAL_INGRESS)'
 
 .PHONY: verify-monitoring-config
 verify-monitoring-config: prepare-ephemeral ## Validate the optional monitoring Compose profile
@@ -352,9 +302,12 @@ ci-ephemeral: ## Check source and exercise the recorded release in disposable Co
 	@trap 'status=$$?; $(MAKE) rm-ephemeral HOST_INGRESS=0 || { if [ "$$status" -eq 0 ]; then exit 1; fi; }; exit "$$status"' EXIT; \
 		$(MAKE) up-ephemeral HOST_INGRESS=0 && \
 		$(MAKE) verify-ephemeral HOST_INGRESS=0 && \
-		$(MAKE) integration-test-ephemeral HOST_INGRESS=0
+		$(MAKE) integration-test-ephemeral HOST_INGRESS=0 && \
+		$(MAKE) down-ephemeral HOST_INGRESS=0 && \
+		$(MAKE) up-ephemeral HOST_INGRESS=1 && \
+		$(MAKE) verify-ephemeral HOST_INGRESS=1
 
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|build|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|build|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|verify-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release
 
 .PHONY: precommit be.precommit
 precommit: be.precommit ## Run repository pre-commit hooks in the Docker toolchain
@@ -534,16 +487,56 @@ logs-prod: ## Follow recent production logs
 .PHONY: initialize-ephemeral up-ephemeral down-ephemeral rm-ephemeral logs-ephemeral
 EPHEMERAL_CERTS_PATH := $(dir $(abspath $(EPHEMERAL_ENV_FILE)))certs
 EPHEMERAL_HTTPS_URL = https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)
-EPHEMERAL_CURL = curl -fsS --cacert "$(EPHEMERAL_CERTS_PATH)/server.crt"
+EPHEMERAL_CURL = curl -fsS --cacert "$(EPHEMERAL_CERTS_PATH)/server.crt" -H 'Host: $(HOST_INGRESS_HOST)'
+
+.PHONY: verify-ephemeral
+verify-ephemeral: COMPOSE = $(COMPOSE_EPHEMERAL)
+verify-ephemeral: URL_ROOT = $(EPHEMERAL_URL_ROOT)
+verify-ephemeral: CURL_CMD = $(EPHEMERAL_CURL_CMD)
+verify-ephemeral: smoke ## Verify the running ephemeral release in its selected ingress mode
+
+ifeq ($(HOST_INGRESS),1)
+EPHEMERAL_URL_ROOT = http://127.0.0.1:$(EPHEMERAL_HTTP_PORT)
+EPHEMERAL_CURL_CMD = curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https'
+verify-ephemeral:
+	@set -o pipefail; $(COMPOSE_EPHEMERAL) config --format json | \
+		HOST_INGRESS_HOST="$(HOST_INGRESS_HOST)" python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" --host-ingress $(APPLICATION_SERVICE)
+	@location="$$(curl -fsS -D - -o /dev/null \
+		-H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
+		'$(URL_ROOT)/admin' \
+		| awk 'tolower($$1) == "location:" {sub(/\r$$/, "", $$2); print $$2}')"; \
+	test "$$location" = '/admin/' || { \
+		echo "Django admin slash redirect was not routed (got $$location)"; \
+		exit 1; \
+	}
+	@location="$$(curl -fsS -D - -o /dev/null \
+		-H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
+		'$(URL_ROOT)/admin/' \
+		| awk 'tolower($$1) == "location:" {sub(/\r$$/, "", $$2); print $$2}')"; \
+	case "$$location" in \
+		/admin/login/*) ;; \
+		*) echo "Django admin login was not routed (got $$location)"; exit 1 ;; \
+	esac
+	@code="$$(curl -sS -o /dev/null -w '%{http_code}' \
+		-H 'Host: $(HOST_INGRESS_HOST)' \
+		'$(URL_ROOT)/api/healthz')"; \
+	test "$$code" = "301" || { \
+		echo "Origin must require the trusted ingress scheme header (got $$code)"; \
+		exit 1; \
+	}
+else
+EPHEMERAL_URL_ROOT = $(EPHEMERAL_HTTPS_URL)
+EPHEMERAL_CURL_CMD = $(EPHEMERAL_CURL)
+endif
 
 .PHONY: integration-test-ephemeral
 integration-test-ephemeral: ## Check file delivery with the ephemeral application stopped
 	@set -eo pipefail; \
 		$(COMPOSE_EPHEMERAL) stop $(APPLICATION_SERVICE); \
 		trap '$(COMPOSE_EPHEMERAL) start $(APPLICATION_SERVICE)' EXIT; \
-		$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/static/smoketest.txt' | grep -q 'STATIC_OK'; \
+		$(EPHEMERAL_CURL_CMD) '$(EPHEMERAL_URL_ROOT)/static/smoketest.txt' | grep -q 'STATIC_OK'; \
 		if [ -n "$(EPHEMERAL_MEDIA_SMOKE)" ]; then \
-			$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)$(EPHEMERAL_MEDIA_SMOKE)' | grep -q 'MEDIA_OK'; \
+			$(EPHEMERAL_CURL_CMD) '$(EPHEMERAL_URL_ROOT)$(EPHEMERAL_MEDIA_SMOKE)' | grep -q 'MEDIA_OK'; \
 		fi
 
 .PHONY: prepare-ephemeral

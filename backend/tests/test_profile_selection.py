@@ -158,6 +158,8 @@ def test_ci_checks_source_without_starting_dev_services(profile: str) -> None:
     assert ("frontend corepack pnpm fmt-check" in output) == (profile == "react-vite")
     assert "up-ephemeral HOST_INGRESS=0" in output
     assert "verify-ephemeral HOST_INGRESS=0" in output
+    assert "up-ephemeral HOST_INGRESS=1" in output
+    assert "verify-ephemeral HOST_INGRESS=1" in output
     assert "down -v --remove-orphans" in output
 
 
@@ -184,6 +186,8 @@ def test_ci_cleans_up_release_validation_and_reports_failure(
             expected.append("verify-ephemeral")
             if failure != "verify-ephemeral":
                 expected.append("integration-test-ephemeral")
+                if failure != "integration-test-ephemeral":
+                    expected.extend(["down-ephemeral", "up-ephemeral", "verify-ephemeral"])
         expected.append("rm-ephemeral")
     assert log.read_text().splitlines() == expected
     assert (result.returncode != 0) == bool(failure)
