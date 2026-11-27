@@ -62,7 +62,10 @@ def test_environment_namespaces_do_not_inherit_global_compose_project(
         assert projects
         assert set(projects) == {f"tenant-{suffix}"}
     verification = _make(profile, "--dry-run", "verify-ephemeral")
-    assert "docker " not in verification
+    if profile == "react-vite":
+        assert "docker compose" in verification and " logs || true" in verification
+    else:
+        assert "docker " not in verification
     assert "migrate" not in verification
     stopped = _make(profile, "--dry-run", "down-ephemeral")
     removed = _make(profile, "--dry-run", "rm-ephemeral")
@@ -471,9 +474,7 @@ def test_server_rendered_only_selector_runs_the_shared_release_publication() -> 
     ]
     release_job = workflow.split("  immutable-release:", 1)[1]
 
-    assert "make build-release-images verify-release-images" in server_job
-    assert "selected-profile != 'server-rendered-django'" in server_job
-    assert "make down-dev rm-ephemeral" in server_job
+    assert "make ci-ephemeral" in server_job
     assert "needs: [profile-selection, server-rendered-profile, backend]" in gate_job
     assert "scripts/check-immutable-release-gate" in gate_job
     assert "--react-result '${{ needs.backend.result }}'" in gate_job

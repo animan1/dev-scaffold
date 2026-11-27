@@ -164,7 +164,7 @@ def _configuration(directory: Path, sharing: str) -> dict[str, object]:
     }
 
 
-@pytest.mark.skipif(os.geteuid() != 0, reason="Fixed service UID ownership runs in make be.ci")
+@pytest.mark.skipif(os.geteuid() != 0, reason="Fixed service UID ownership requires root")
 @pytest.mark.parametrize("sharing", ["", "read", "write", "supplementary"])
 def test_prepared_paths_preserve_host_owner_and_share_with_fixed_service_uid(
     tmp_path: Path,

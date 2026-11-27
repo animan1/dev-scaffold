@@ -31,10 +31,10 @@ PROD_CONFIG = $(LOCAL_RELEASE_IMAGES) COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJEC
 	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory . \
 	$(PROD_COMPOSE_FILES) --env-file $(PROD_ENV_FILE)
 
-.PHONY: fe.setup fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check
+.PHONY: fe.setup fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check fe.coverage
 fe.lint: ## No frontend lint checks for this profile
 fe.typecheck: ## No frontend type checks for this profile
-fe.setup fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check:
+fe.setup fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check fe.coverage:
 	@:
 
 .PHONY: build-production
@@ -129,11 +129,3 @@ verify-ephemeral: ## Verify local HTTP redirect, HTTPS customer/admin routes, an
 .PHONY: rollback-release
 rollback-release: ## Deploy a previously recorded release manifest
 rollback-release: deploy-release
-
-.PHONY: verify
-verify: ## Run the identical aggregate contract used by developers and CI
-	$(MAKE) setup
-	$(MAKE) up-dev
-	$(MAKE) check
-	$(MAKE) build-production
-	$(MAKE) smoke

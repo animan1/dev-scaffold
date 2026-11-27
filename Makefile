@@ -60,7 +60,7 @@ COMPOSE_DEV = COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) APP_HOST=$(APP_HOST) D
 	docker compose --project-directory $(DEV_COMPOSE_PROJECT_DIR) -f $(DEV_COMPOSE_FILE)
 DEV_RUN_BACKEND_MAKE = $(COMPOSE_DEV) run --rm --workdir /workspace/backend --env REPO_DIR=/workspace $(1) \
 	$(DEV_APPLICATION_SERVICE) make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE)
-DJANGO_DEV_MANAGE = $(COMPOSE_DEV) run --rm --workdir $(CONTAINER_PYTHON_PROJECT_DIR) \
+DJANGO_DEV_MANAGE = $(COMPOSE_DEV) run --rm$(if $(1), $(1)) --workdir $(CONTAINER_PYTHON_PROJECT_DIR) \
 	$(DEV_APPLICATION_SERVICE) $(UV_RUN) python -m app.manage
 
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
@@ -107,31 +107,6 @@ SMOKE_HOME_PATTERN := dev-scaffold\|id="root"
 .PHONY: be.bash
 be.bash: ## (Docker) Shell into backend container
 	$(COMPOSE_DEV) exec backend bash
-
-.PHONY: be.ci
-be.ci: ## (Docker) Run backend verify inside dev container
-be.ci: be.verify
-
-.PHONY: be.verify
-be.verify: ## Run backend verification in the development container
-	$(COMPOSE_DEV) run --rm --workdir /workspace/backend \
-		--env UV_PROJECT_ENVIRONMENT=$(CONTAINER_PYTHON_PROJECT_DIR)/.venv \
-		--env PYTHONPATH=/workspace/backend/src --env DIFF_BASE \
-		backend bash -lc 'REPO_DIR=/workspace make -f /workspace/Makefile PY_DIR=/workspace/backend be.verify-in-container'
-
-.PHONY: fe.ci
-fe.ci: ## (Docker) Run frontend verify inside dev container
-	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
-		--volume "$(CURDIR)/frontend/node_modules:/app/node_modules" \
-		frontend sh -lc 'apk add --no-cache make >/dev/null 2>&1 || true; corepack enable; git config --global --add safe.directory /workspace; make -f /workspace/Makefile SCAFFOLD_PROFILE=react-vite FRONTEND_DIR=/workspace/frontend fe.setup-in-container fe.verify'
-	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
-		backend $(CONTAINER_PYTHON_PROJECT_DIR)/.venv/bin/diff-cover coverage/lcov.info \
-		--config-file /workspace/backend/pyproject.toml $(if $(DIFF_BASE),--compare-branch=$(DIFF_BASE))
-
-.PHONY: ci
-ci: ## (Docker) One-shot CI recipe (dev stack + FE/BE verify + smoke)
-ci: up-dev wait-dev be.ci fe.ci smoke
-	@echo "CI checks passed"
 
 # Prod
 .PHONY: bootstrap-prod
@@ -204,15 +179,10 @@ build-release-images: ## Build SHA-tagged production images once
 		$(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) --output $(RELEASE_FILE)
 
 .PHONY: verify-ephemeral
-verify-ephemeral: ## Verify the running recorded release in ephemeral
-	@for i in $$(seq 1 60); do \
-		if curl -kfsS https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/api/healthz >/dev/null; then \
-			curl -kfsS https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/ >/dev/null; \
-			echo 'Release images passed smoke tests'; exit 0; \
-		fi; \
-		sleep 1; \
-	done; \
-	echo 'Release images did not become ready'; exit 1
+verify-ephemeral: COMPOSE = $(COMPOSE_EPHEMERAL)
+verify-ephemeral: URL_ROOT = https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)
+verify-ephemeral: CURL_CMD = curl -fsS --cacert "$(EPHEMERAL_CERTS_PATH)/server.crt"
+verify-ephemeral: smoke ## Verify the running recorded release in ephemeral
 
 .PHONY: verify-release-images
 verify-release-images: up-ephemeral ## Verify and smoke-test the exact recorded images
@@ -265,15 +235,6 @@ hooks: ## Install pre-commit hooks
 	cd $(PY_DIR) && uv run pre-commit install
 
 # ---- Quality gates ----
-.PHONY: verify
-verify: ## Run both backend and frontend verification
-verify: be.verify fe.verify
-
-.PHONY: be.verify-in-container
-be.verify-in-container:
-	$(UV_RUN) ruff format --config /workspace/backend/pyproject.toml --check .
-	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile be.lint-in-container be.typecheck-in-container coverage-in-container
-
 .PHONY: preflight
 preflight: ## Format + lint + typecheck + coverage + precommit
 preflight: format lint typecheck coverage precommit
@@ -342,9 +303,15 @@ fe.typecheck: ## TypeScript typecheck (frontend)
 		--volume "$(abspath $(FRONTEND_DIR))/node_modules:/app/node_modules" \
 		frontend corepack pnpm typecheck
 
-.PHONY: fe.verify
-fe.verify: ## Frontend lint + typecheck + tests + fmt-check
-	cd $(FRONTEND_DIR) && pnpm verify
+.PHONY: fe.coverage
+fe.coverage:
+	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
+		frontend make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=react-vite \
+		FRONTEND_DIR=/workspace/frontend COVERAGE=1 fe.setup-in-container fe.test-in-container
+	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
+		--volume "$(GIT_COMMON_DIR):$(GIT_COMMON_DIR):ro" \
+		backend $(CONTAINER_PYTHON_PROJECT_DIR)/.venv/bin/diff-cover coverage/lcov.info \
+		--config-file /workspace/backend/pyproject.toml $(if $(DIFF_BASE),--compare-branch=$(DIFF_BASE))
 
 else
 include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
@@ -356,7 +323,15 @@ setup: ## Prepare Docker development dependencies from committed lockfiles
 	$(COMPOSE_DEV) build $(DEV_APPLICATION_SERVICE)
 	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.setup
 
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release
+.PHONY: ci-ephemeral
+ci-ephemeral: ## Check source and exercise the recorded release in disposable Compose
+	$(MAKE) setup
+	$(MAKE) check
+	$(MAKE) build-release-images
+	@trap 'status=$$?; $(MAKE) rm-ephemeral HOST_INGRESS=0 || { if [ "$$status" -eq 0 ]; then exit 1; fi; }; exit "$$status"' EXIT; \
+		$(MAKE) verify-release-images HOST_INGRESS=0
+
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release
 
 .PHONY: precommit
 precommit: ## Run repository pre-commit hooks in the Docker toolchain
@@ -379,8 +354,10 @@ initialize-release: ## Initialize the database and static volume with the record
 	$(RUN_PROD) python -m app.manage collectstatic --noinput --clear
 
 .PHONY: coverage coverage-in-container
+# Source checks use Django's fallback settings without the Compose dev database.
+SOURCE_CHECK_ARGS := --no-deps --env DATABASE_URL=
 coverage: ## Run backend tests and enforce total and changed-line coverage in Docker
-	$(call DEV_RUN_BACKEND_MAKE) \
+	$(call DEV_RUN_BACKEND_MAKE,$(SOURCE_CHECK_ARGS)) \
 		DIFF_BASE="$(DIFF_BASE)" coverage-in-container
 
 coverage-in-container:
@@ -391,10 +368,10 @@ coverage-in-container:
 
 .PHONY: check django-check
 check: ## Run source quality gates through the development toolchain
-	$(MAKE) format-check
+	$(MAKE) format-check fe.fmt-check
 	$(MAKE) lint
 	$(MAKE) typecheck
-	$(MAKE) coverage
+	$(MAKE) coverage fe.coverage
 	$(MAKE) migrations-check
 	$(MAKE) django-check
 
@@ -612,7 +589,7 @@ migrations: ## Create migrations for intentional model changes
 	$(DJANGO_DEV_MANAGE) makemigrations
 
 migrations-check: ## Reject model changes without migrations
-	$(DJANGO_DEV_MANAGE) makemigrations --check --dry-run
+	$(call DJANGO_DEV_MANAGE,$(SOURCE_CHECK_ARGS)) makemigrations --check --dry-run
 
 migrate: ## Apply development database migrations
 	$(DJANGO_DEV_MANAGE) migrate

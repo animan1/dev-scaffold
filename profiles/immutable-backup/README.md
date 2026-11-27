@@ -103,8 +103,8 @@ existing publication repository's chunker settings; its historical snapshots
 stay in place. Stop the old worker before changing these mappings so it cannot
 continue pruning the publication directory.
 
-When selected, the normal `make verify` contract includes exact backup-image
-verification. The component-maintenance and focused exercise commands are:
+CI verifies the exact backup image in the immutable-backup profile job.
+The component-maintenance and focused exercise commands are:
 
 ```sh
 make backup-images-digests

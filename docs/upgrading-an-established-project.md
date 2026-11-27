@@ -90,7 +90,7 @@ Use the project's committed profile selection, not a one-off environment
 override:
 
 ```bash
-make verify
+make ci-ephemeral
 make precommit
 git diff --check
 ```

@@ -44,7 +44,7 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "test",
         "coverage",
         "check",
-        "verify",
+        "ci-ephemeral",
         "precommit",
         "build-production",
         "up-prod",

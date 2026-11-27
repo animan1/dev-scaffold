@@ -222,5 +222,3 @@ restore-prod: ## Replace the configured database from BACKUP_SNAPSHOT; requires 
 		-e BACKUP_RESTORE_CONFIRMATION=$(BACKUP_RESTORE_CONFIRM_VALUE) \
 		-e BACKUP_RESTORE_SNAPSHOT=$(BACKUP_SNAPSHOT) $(BACKUP_SERVICE) restore
 	@echo "Database restore complete; run the consuming project's migration, startup, and smoke procedures."
-
-verify: verify-backup-image verify-backup-compose
