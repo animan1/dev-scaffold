@@ -135,6 +135,14 @@ def test_application_tls_redirect_uses_the_configured_https_port() -> None:
     assert "return 301 https://$host:${PROD_HTTPS_PORT}$request_uri;" in nginx
 
 
+def test_react_standalone_tls_routes_admin_to_django() -> None:
+    nginx = (_repo_root() / "deploy/nginx/default.prod.conf").read_text()
+    routes = nginx.split("location ~ ^/(api|admin)/ {", 1)[1].split("}", 1)[0]
+    assert "proxy_pass http://backend:8000;" in routes
+    assert "proxy_set_header Host $http_host;" in routes
+    assert "proxy_set_header X-Forwarded-Proto $scheme;" in routes
+
+
 def test_host_ingress_templates_only_the_selected_backend() -> None:
     compose = (_repo_root() / "deploy/docker-compose.host-ingress.yml").read_text()
     nginx = (_repo_root() / "deploy/nginx/default.host-ingress.conf").read_text()

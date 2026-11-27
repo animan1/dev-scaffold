@@ -26,16 +26,3 @@ integration-test-ephemeral: seed-ephemeral-media
 seed-ephemeral-media:
 	$(COMPOSE_EPHEMERAL) exec -T $(APPLICATION_SERVICE) \
 		sh -c "printf 'MEDIA_OK\\n' > $(EPHEMERAL_MEDIA_SMOKE)"
-
-ifneq ($(HOST_INGRESS),1)
-verify-ephemeral:
-	@curl -fsSI -H 'Host: $(HOST_INGRESS_HOST)' \
-		'http://127.0.0.1:$(EPHEMERAL_HTTP_PORT)/' \
-		| grep -Eiq '^location: https://$(HOST_INGRESS_HOST):$(EPHEMERAL_HTTPS_PORT)/'
-	$(EPHEMERAL_CURL) -D - -o /dev/null \
-		'$(EPHEMERAL_HTTPS_URL)/admin/' \
-		| grep -Eiq '^location: /admin/login/\?next=/admin/'
-	$(EPHEMERAL_CURL) -D - -o /dev/null \
-		'$(EPHEMERAL_HTTPS_URL)/admin/login/' \
-		| grep -Eiq '^set-cookie: csrftoken=.*; secure(;|[[:space:]]*$$)'
-endif

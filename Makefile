@@ -521,6 +521,16 @@ verify-ephemeral:
 else
 EPHEMERAL_URL_ROOT = $(EPHEMERAL_HTTPS_URL)
 EPHEMERAL_CURL_CMD = $(EPHEMERAL_CURL)
+verify-ephemeral:
+	@curl -fsSI -H 'Host: $(HOST_INGRESS_HOST)' \
+		'http://127.0.0.1:$(EPHEMERAL_HTTP_PORT)/' \
+		| grep -Eiq '^location: https://$(HOST_INGRESS_HOST):$(EPHEMERAL_HTTPS_PORT)/'
+	$(CURL_CMD) -D - -o /dev/null \
+		'$(URL_ROOT)/admin/' \
+		| grep -Eiq '^location: /admin/login/\?next=/admin/'
+	$(CURL_CMD) -D - -o /dev/null \
+		'$(URL_ROOT)/admin/login/' \
+		| grep -Eiq '^set-cookie: csrftoken=.*; secure(;|[[:space:]]*$$)'
 endif
 
 .PHONY: verify-monitoring-config
