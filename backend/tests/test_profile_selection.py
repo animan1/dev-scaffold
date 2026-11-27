@@ -73,7 +73,7 @@ def test_changed_coverage_uses_shared_default_and_legacy_branch_override(
 def test_format_commands_use_container_tooling_and_one_configuration() -> None:
     for profile in ("react-vite", "server-rendered-django"):
         output = _make(f"SCAFFOLD_PROFILE={profile}", "--dry-run", "format", "format-check").stdout
-        commands = output.splitlines()
+        commands = [line for line in output.splitlines() if " ruff " in line]
         assert len(commands) == 3
         assert all(
             "docker compose" in command and "run --rm --no-deps" in command for command in commands
@@ -85,6 +85,7 @@ def test_format_commands_use_container_tooling_and_one_configuration() -> None:
         assert all(f"uv run --project {project} ruff" in command for command in commands)
         assert "--fix ." in commands[0]
         assert "--check ." in commands[2]
+        assert ("frontend corepack pnpm fmt-check" in output) == (profile == "react-vite")
 
 
 def test_profile_configurations_apply_the_same_ruff_formatting() -> None:
@@ -229,6 +230,24 @@ def test_react_setup_and_ci_share_the_container_install() -> None:
 
     assert "COVERAGE=1 fe.setup-in-container fe.test-in-container" in ci
     assert install.strip() == "corepack pnpm install --frozen-lockfile"
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "fe.setup",
+        "fe.lint",
+        "fe.typecheck",
+        "fe.test",
+        "fe.test-in-container",
+        "fe.fmt-check",
+        "fe.coverage",
+    ],
+)
+def test_server_rendered_profile_does_not_define_frontend_targets(target: str) -> None:
+    result = _make("SCAFFOLD_PROFILE=server-rendered-django", "--dry-run", target, check=False)
+    assert result.returncode != 0
+    assert "No rule to make target" in result.stderr
 
 
 def test_help_lists_commands_when_optional_makefiles_are_loaded() -> None:

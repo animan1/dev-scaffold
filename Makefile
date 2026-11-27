@@ -66,7 +66,26 @@ DEV_RUN_BACKEND_MAKE = $(COMPOSE_DEV) run --rm --workdir /workspace/backend --en
 DJANGO_DEV_MANAGE = $(COMPOSE_DEV) run --rm$(if $(1), $(1)) --workdir $(CONTAINER_PYTHON_PROJECT_DIR) \
 	$(DEV_APPLICATION_SERVICE) $(UV_RUN) python -m app.manage
 
+.PHONY: setup precommit lint typecheck test test-in-container format-check coverage
+setup: be.setup ## Prepare Docker development dependencies from committed lockfiles
+precommit: be.precommit ## Run repository pre-commit hooks in the Docker toolchain
+lint: be.lint ## Run lint checks in Docker
+typecheck: be.typecheck ## Run type checks in Docker
+test: be.test ## Run tests in Docker
+test-in-container: be.test-in-container
+format-check: be.format-check ## Check formatting in Docker without source fixes
+coverage: be.coverage ## Run tests and enforce coverage in Docker
+
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
+
+setup: fe.setup
+precommit: fe.lint fe.fmt-check
+lint: fe.lint
+typecheck: fe.typecheck
+test: fe.test
+test-in-container: fe.test-in-container
+format-check: fe.fmt-check
+coverage: fe.coverage
 
 DEV_COMPOSE_FILE := deploy/docker-compose.dev.yml
 COMPOSE_PROJECT_DIR := deploy
@@ -314,10 +333,9 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-.PHONY: setup
-setup: ## Prepare Docker development dependencies from committed lockfiles
+.PHONY: be.setup
+be.setup:
 	$(COMPOSE_DEV) build $(DEV_APPLICATION_SERVICE)
-	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.setup
 
 .PHONY: ci-ephemeral
 ci-ephemeral: ## Check source and exercise the recorded release in disposable Compose
@@ -331,15 +349,14 @@ ci-ephemeral: ## Check source and exercise the recorded release in disposable Co
 
 HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release
 
-.PHONY: precommit
-precommit: ## Run repository pre-commit hooks in the Docker toolchain
+.PHONY: be.precommit
+be.precommit:
 	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace \
 		--user "$(HOST_UID):$(HOST_GID)" --env HOME=/tmp \
 		--env SKIP="$${SKIP:+$$SKIP,}fe-eslint,fe-prettier" \
 		--volume "$(GIT_COMMON_DIR):$(GIT_COMMON_DIR):ro" \
 		$(DEV_APPLICATION_SERVICE) $(UV_RUN) --no-sync pre-commit run \
 		--config "$(PRECOMMIT_CONFIG)" --all-files
-	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.lint fe.fmt-check
 
 .PHONY: initialize-release
 initialize-release: ## Initialize the database and static volume with the recorded backend image
@@ -351,10 +368,10 @@ initialize-release: ## Initialize the database and static volume with the record
 	$(RUN_PROD) python -m app.manage migrate
 	$(RUN_PROD) python -m app.manage collectstatic --noinput --clear
 
-.PHONY: coverage coverage-in-container
+.PHONY: be.coverage coverage-in-container
 # Source checks use Django's fallback settings without the Compose dev database.
 SOURCE_CHECK_ARGS := --no-deps --env DATABASE_URL=
-coverage: ## Run backend tests and enforce total and changed-line coverage in Docker
+be.coverage:
 	$(call DEV_RUN_BACKEND_MAKE,$(SOURCE_CHECK_ARGS)) \
 		DIFF_BASE="$(DIFF_BASE)" coverage-in-container
 
@@ -366,10 +383,10 @@ coverage-in-container:
 
 .PHONY: check django-check
 check: ## Run source quality gates through the development toolchain
-	$(MAKE) format-check fe.fmt-check
+	$(MAKE) format-check
 	$(MAKE) lint
 	$(MAKE) typecheck
-	$(MAKE) coverage fe.coverage
+	$(MAKE) coverage
 	$(MAKE) migrations-check
 	$(MAKE) django-check
 
@@ -380,40 +397,35 @@ django-check: ## Run Django's production deployment checks
 		--env DATABASE_URL=postgresql://app:app@db:5432/app \
 		$(DEV_APPLICATION_SERVICE) $(UV_RUN) python -m app.manage check --deploy
 
-.PHONY: lint be.lint-in-container
-lint: ## Run Django lint checks, then applicable frontend lint checks
+.PHONY: be.lint be.lint-in-container
+be.lint:
 	$(call DEV_RUN_BACKEND_MAKE,--no-deps) be.lint-in-container
-	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.lint
 
 be.lint-in-container:
 	$(UV_RUN) python /workspace/backend/scripts/check_no_any.py
 	$(UV_RUN) ruff check --config /workspace/backend/pyproject.toml .
 
-.PHONY: typecheck be.typecheck-in-container
-typecheck: ## Run Django type checks, then applicable frontend type checks
+.PHONY: be.typecheck be.typecheck-in-container
+be.typecheck:
 	$(call DEV_RUN_BACKEND_MAKE,--no-deps) be.typecheck-in-container
-	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.typecheck
 
 be.typecheck-in-container:
 	$(UV_RUN) mypy --config-file /workspace/backend/pyproject.toml .
 
-.PHONY: test test-in-container be.test-in-container
-test: ## Run backend and applicable frontend tests in Docker
+.PHONY: be.test be.test-in-container
+be.test:
 	$(call DEV_RUN_BACKEND_MAKE,--env PYTEST_ADDOPTS) be.test-in-container
-	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.test
-
-test-in-container: be.test-in-container fe.test-in-container
 
 be.test-in-container:
 	cd "$(SCAFFOLD_ROOT)backend" && $(UV_RUN) pytest -q -c "$(SCAFFOLD_ROOT)$(PYTHON_PROJECT_DIR)/pyproject.toml"
 
-.PHONY: format format-check
+.PHONY: format be.format-check
 RUFF = $(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) $(UV_RUN) ruff
 format: ## Apply Python lint fixes and formatting in Docker
 	$(RUFF) check --config /workspace/backend/pyproject.toml --fix .
 	$(RUFF) format --config /workspace/backend/pyproject.toml .
 
-format-check: ## Check Python formatting in Docker without source fixes
+be.format-check:
 	$(RUFF) format --config /workspace/backend/pyproject.toml --check .
 
 .PHONY: help help-verbose

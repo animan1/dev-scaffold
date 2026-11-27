@@ -27,12 +27,6 @@ PROD_CONFIG = $(LOCAL_RELEASE_IMAGES) COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJEC
 	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory $(COMPOSE_PROJECT_DIR) \
 	$(PROD_COMPOSE_FILES) --env-file $(PROD_ENV_FILE)
 
-.PHONY: fe.setup fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check fe.coverage
-fe.lint: ## No frontend lint checks for this profile
-fe.typecheck: ## No frontend type checks for this profile
-fe.setup fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check fe.coverage:
-	@:
-
 .PHONY: build-production
 build-production: ## Build the multi-stage non-root production image
 	docker build -f profiles/server-rendered-django/backend.Dockerfile \
