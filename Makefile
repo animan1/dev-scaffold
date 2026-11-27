@@ -66,26 +66,7 @@ DEV_RUN_BACKEND_MAKE = $(COMPOSE_DEV) run --rm --workdir /workspace/backend --en
 DJANGO_DEV_MANAGE = $(COMPOSE_DEV) run --rm$(if $(1), $(1)) --workdir $(CONTAINER_PYTHON_PROJECT_DIR) \
 	$(DEV_APPLICATION_SERVICE) $(UV_RUN) python -m app.manage
 
-.PHONY: setup precommit lint typecheck test test-in-container format-check coverage
-setup: be.setup ## Prepare Docker development dependencies from committed lockfiles
-precommit: be.precommit ## Run repository pre-commit hooks in the Docker toolchain
-lint: be.lint ## Run lint checks in Docker
-typecheck: be.typecheck ## Run type checks in Docker
-test: be.test ## Run tests in Docker
-test-in-container: be.test-in-container
-format-check: be.format-check ## Check formatting in Docker without source fixes
-coverage: be.coverage ## Run tests and enforce coverage in Docker
-
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
-
-setup: fe.setup
-precommit: fe.lint fe.fmt-check
-lint: fe.lint
-typecheck: fe.typecheck
-test: fe.test
-test-in-container: fe.test-in-container
-format-check: fe.fmt-check
-coverage: fe.coverage
 
 DEV_COMPOSE_FILE := deploy/docker-compose.dev.yml
 COMPOSE_PROJECT_DIR := deploy
@@ -264,7 +245,9 @@ clean: ## Remove caches and build artifacts
 	rm -rf $(PY_DIR)/.pytest_cache $(PY_DIR)/.mypy_cache
 
 # ---- Frontend (Vite/React/TS) ----
+# List backend prerequisites first to preserve serial execution order.
 .PHONY: fe.setup fe.setup-in-container
+setup: be.setup fe.setup
 fe.setup: ## Install locked frontend dependencies in Docker
 	@mkdir -p "$(FRONTEND_DIR)/node_modules"
 	$(COMPOSE_DEV) run --rm --no-deps --user "$$(id -u):$$(id -g)" \
@@ -284,6 +267,8 @@ fe.build: ## Build frontend (Vite)
 	cd $(FRONTEND_DIR) && pnpm build
 
 .PHONY: fe.lint
+precommit: be.precommit fe.lint fe.fmt-check
+lint: be.lint fe.lint
 fe.lint: ## ESLint (frontend)
 	$(COMPOSE_DEV) run --rm --no-deps \
 		--volume "$(abspath $(FRONTEND_DIR))/node_modules:/app/node_modules" \
@@ -294,12 +279,15 @@ fe.format: ## Prettier write (frontend)
 	cd $(FRONTEND_DIR) && pnpm format
 
 .PHONY: fe.fmt-check
+format-check: be.format-check fe.fmt-check
 fe.fmt-check: ## Prettier check (frontend)
 	$(COMPOSE_DEV) run --rm --no-deps \
 		--volume "$(abspath $(FRONTEND_DIR))/node_modules:/app/node_modules" \
 		frontend corepack pnpm fmt-check
 
 .PHONY: fe.test fe.test-in-container
+test: be.test fe.test
+test-in-container: be.test-in-container fe.test-in-container
 fe.test: ## Run frontend tests in Docker
 	$(COMPOSE_DEV) run --rm --no-deps frontend sh -ec 'corepack pnpm install --frozen-lockfile && \
 		make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=react-vite \
@@ -313,12 +301,14 @@ fe.test-in-container:
 	cd $(FRONTEND_DIR) && corepack pnpm run test $(FE_COVERAGE_ARGS)
 
 .PHONY: fe.typecheck
+typecheck: be.typecheck fe.typecheck
 fe.typecheck: ## TypeScript typecheck (frontend)
 	$(COMPOSE_DEV) run --rm --no-deps \
 		--volume "$(abspath $(FRONTEND_DIR))/node_modules:/app/node_modules" \
 		frontend corepack pnpm typecheck
 
 .PHONY: fe.coverage
+coverage: be.coverage fe.coverage
 fe.coverage:
 	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
 		frontend make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=react-vite \
@@ -333,7 +323,8 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-.PHONY: be.setup
+.PHONY: setup be.setup
+setup: be.setup ## Prepare Docker development dependencies from committed lockfiles
 be.setup:
 	$(COMPOSE_DEV) build $(DEV_APPLICATION_SERVICE)
 
@@ -349,7 +340,8 @@ ci-ephemeral: ## Check source and exercise the recorded release in disposable Co
 
 HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release
 
-.PHONY: be.precommit
+.PHONY: precommit be.precommit
+precommit: be.precommit ## Run repository pre-commit hooks in the Docker toolchain
 be.precommit:
 	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace \
 		--user "$(HOST_UID):$(HOST_GID)" --env HOME=/tmp \
@@ -368,9 +360,10 @@ initialize-release: ## Initialize the database and static volume with the record
 	$(RUN_PROD) python -m app.manage migrate
 	$(RUN_PROD) python -m app.manage collectstatic --noinput --clear
 
-.PHONY: be.coverage coverage-in-container
+.PHONY: coverage be.coverage coverage-in-container
 # Source checks use Django's fallback settings without the Compose dev database.
 SOURCE_CHECK_ARGS := --no-deps --env DATABASE_URL=
+coverage: be.coverage ## Run tests and enforce coverage in Docker
 be.coverage:
 	$(call DEV_RUN_BACKEND_MAKE,$(SOURCE_CHECK_ARGS)) \
 		DIFF_BASE="$(DIFF_BASE)" coverage-in-container
@@ -397,7 +390,8 @@ django-check: ## Run Django's production deployment checks
 		--env DATABASE_URL=postgresql://app:app@db:5432/app \
 		$(DEV_APPLICATION_SERVICE) $(UV_RUN) python -m app.manage check --deploy
 
-.PHONY: be.lint be.lint-in-container
+.PHONY: lint be.lint be.lint-in-container
+lint: be.lint ## Run lint checks in Docker
 be.lint:
 	$(call DEV_RUN_BACKEND_MAKE,--no-deps) be.lint-in-container
 
@@ -405,26 +399,30 @@ be.lint-in-container:
 	$(UV_RUN) python /workspace/backend/scripts/check_no_any.py
 	$(UV_RUN) ruff check --config /workspace/backend/pyproject.toml .
 
-.PHONY: be.typecheck be.typecheck-in-container
+.PHONY: typecheck be.typecheck be.typecheck-in-container
+typecheck: be.typecheck ## Run type checks in Docker
 be.typecheck:
 	$(call DEV_RUN_BACKEND_MAKE,--no-deps) be.typecheck-in-container
 
 be.typecheck-in-container:
 	$(UV_RUN) mypy --config-file /workspace/backend/pyproject.toml .
 
-.PHONY: be.test be.test-in-container
+.PHONY: test test-in-container be.test be.test-in-container
+test: be.test ## Run tests in Docker
 be.test:
 	$(call DEV_RUN_BACKEND_MAKE,--env PYTEST_ADDOPTS) be.test-in-container
 
+test-in-container: be.test-in-container
 be.test-in-container:
 	cd "$(SCAFFOLD_ROOT)backend" && $(UV_RUN) pytest -q -c "$(SCAFFOLD_ROOT)$(PYTHON_PROJECT_DIR)/pyproject.toml"
 
-.PHONY: format be.format-check
+.PHONY: format format-check be.format-check
 RUFF = $(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) $(UV_RUN) ruff
 format: ## Apply Python lint fixes and formatting in Docker
 	$(RUFF) check --config /workspace/backend/pyproject.toml --fix .
 	$(RUFF) format --config /workspace/backend/pyproject.toml .
 
+format-check: be.format-check ## Check formatting in Docker without source fixes
 be.format-check:
 	$(RUFF) format --config /workspace/backend/pyproject.toml --check .
 
