@@ -31,19 +31,6 @@ seed-ephemeral-media:
 verify-monitoring-config: prepare-ephemeral ## Validate the optional release monitor
 	$(COMPOSE_EPHEMERAL) --profile monitoring config --quiet
 
-.PHONY: push-release-images
-push-release-images: ## Publish verified images and record immutable digests
-	docker push $(RELEASE_BACKEND_TAG)
-	docker push $(RELEASE_WEB_TAG)
-	@mkdir -p $(dir $(RELEASE_FILE))
-	@backend="$$(docker image inspect --format='{{index .RepoDigests 0}}' $(RELEASE_BACKEND_TAG))"; \
-	web="$$(docker image inspect --format='{{index .RepoDigests 0}}' $(RELEASE_WEB_TAG))"; \
-	test -n "$$backend"; test -n "$$web"; \
-	printf 'SCAFFOLD_PROFILE=%s\nRELEASE_REVISION=%s\nRELEASE_IMAGE_PREFIX=%s\nRELEASE_BACKEND_IMAGE=%s\nRELEASE_WEB_IMAGE=%s\n' \
-		'server-rendered-django' '$(RELEASE_REVISION)' '$(RELEASE_IMAGE_PREFIX)' \
-		"$$backend" "$$web" > $(RELEASE_FILE); \
-	echo "Recorded $(RELEASE_FILE)"
-
 .PHONY: deploy-release
 deploy-release: initialize-release ## Deploy the digest-pinned server-rendered image set
 	$(COMPOSE_PROD) up -d --no-build

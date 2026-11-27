@@ -139,6 +139,65 @@ def test_runtime_inventory_includes_optional_services(profile: str) -> None:
     assert "PROD_ENV_FILE=/tmp/private-production.env" in output
 
 
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+@pytest.mark.parametrize("missing_digest", [False, True])
+def test_push_records_both_digests_and_selected_profile(
+    profile: str, missing_digest: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    docker = tmp_path / "docker"
+    docker.write_text(
+        "#!/bin/sh\n"
+        'case "$1" in\n'
+        '  push) printf "%s\\n" "$2" >> "$PUSH_LOG" ;;\n'
+        '  image) case "$4" in\n'
+        '    *-web:*) [ "$MISSING_DIGEST" = 0 ] || exit 0 ;;\n'
+        '  esac; printf "%s@sha256:%s\\n" "$(echo "$4" | cut -d: -f1)" "$DIGEST" ;;\n'
+        "  *) exit 1 ;;\nesac\n"
+    )
+    docker.chmod(0o755)
+    log = tmp_path / "pushes"
+    manifest = tmp_path / "release.env"
+    manifest.write_text("previous manifest\n")
+    digest = "b" * 64
+    revision = "a" * 40
+    prefix = "registry.example/tenant"
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    monkeypatch.setenv("PUSH_LOG", str(log))
+    monkeypatch.setenv("MISSING_DIGEST", str(int(missing_digest)))
+    monkeypatch.setenv("DIGEST", digest)
+
+    result = subprocess.run(
+        [
+            "make",
+            "push-release-images",
+            f"SCAFFOLD_PROFILE={profile}",
+            f"RELEASE_REVISION={revision}",
+            f"RELEASE_IMAGE_PREFIX={prefix}",
+            f"RELEASE_FILE={manifest}",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert log.read_text().splitlines() == [
+        f"{prefix}-backend:{revision}",
+        f"{prefix}-web:{revision}",
+    ]
+    assert (result.returncode != 0) is missing_digest
+    expected = (
+        "previous manifest\n"
+        if missing_digest
+        else (
+            f"SCAFFOLD_PROFILE={profile}\n"
+            f"RELEASE_REVISION={revision}\n"
+            f"RELEASE_IMAGE_PREFIX={prefix}\n"
+            f"RELEASE_BACKEND_IMAGE={prefix}-backend@sha256:{digest}\n"
+            f"RELEASE_WEB_IMAGE={prefix}-web@sha256:{digest}\n"
+        )
+    )
+    assert manifest.read_text() == expected
+
+
 @pytest.mark.parametrize("failure", [None, "revision", "platform", "user"])
 def test_local_manifest_pins_verified_images_or_preserves_previous_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None
