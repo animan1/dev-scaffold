@@ -16,12 +16,6 @@ PROD_COMPOSE_FILES = -f $(RELEASE_COMPOSE_FILE) \
 EPHEMERAL_COMPOSE_FILES = $(PROD_COMPOSE_FILES)
 PROD_APPLICATION_SERVICE := app
 
-.PHONY: fe.setup fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check fe.coverage
-fe.lint: ## No frontend lint checks for this profile
-fe.typecheck: ## No frontend type checks for this profile
-fe.setup fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check fe.coverage:
-	@:
-
 .PHONY: build-production
 build-production: ## Build the multi-stage non-root production image
 	docker build -f profiles/server-rendered-django/backend.Dockerfile \
