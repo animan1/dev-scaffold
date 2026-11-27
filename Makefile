@@ -24,6 +24,11 @@ COMPOSE_PROD_BASE = COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory $(COMPOSE_PROJECT_DIR) \
 	$(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file $(PROD_ENV_FILE)
 COMPOSE_PROD = $(COMPOSE_PROD_BASE) --env-file $(RELEASE_FILE)
+COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
+	PROD_ENV_FILE=$(abspath $(EPHEMERAL_ENV_FILE)) HOST_INGRESS_PORT=$(EPHEMERAL_HTTP_PORT) \
+	PROD_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) INGRESS_CERTS_PATH="$(EPHEMERAL_CERTS_PATH)" \
+	docker compose --project-directory $(COMPOSE_PROJECT_DIR) $(EPHEMERAL_COMPOSE_FILES) \
+	--env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
 RELEASE_PULL ?= $(COMPOSE_PROD) pull $(PROD_APPLICATION_SERVICE) $(PROD_WEB_SERVICE)
 RUN_PROD = $(COMPOSE_PROD) run --rm --no-deps $(PROD_APPLICATION_SERVICE)
 # Resolve production configuration before a release manifest or its images exist.
@@ -77,8 +82,11 @@ DEV_APPLICATION_SERVICE := backend
 CONTAINER_PYTHON_PROJECT_DIR := /app
 FRONTEND_DIR := frontend
 MONITORING ?= 0
+EPHEMERAL_HTTP_PORT ?= $(RELEASE_HTTP_PORT)
 EPHEMERAL_HTTPS_PORT ?= 18443
-PROD_COMPOSE_FILES := -f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml
+RELEASE_COMPOSE_FILES := -f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml
+PROD_COMPOSE_FILES := $(RELEASE_COMPOSE_FILES)
+EPHEMERAL_COMPOSE_FILES := $(RELEASE_COMPOSE_FILES) -f deploy/docker-compose.ephemeral.yml
 PROD_COMPOSE_PROFILES :=
 ifeq ($(HOST_INGRESS),1)
 PROD_COMPOSE_FILES += -f deploy/docker-compose.host-ingress.yml
@@ -89,13 +97,9 @@ PROD_COMPOSE_PROFILES += --profile monitoring
 endif
 COMPOSE_MONITOR = $(COMPOSE_PROD) -f deploy/docker-compose.external-monitoring.yml --profile monitoring
 PROD_WEB_SERVICE := nginx
-COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
-	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) EPHEMERAL_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) docker compose \
-	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
-	-f deploy/docker-compose.ephemeral.yml $(EPHEMERAL_COMPOSE_FILES) --env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
 COMPOSE_EPHEMERAL_INGRESS = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) docker compose \
-	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
+	$(RELEASE_COMPOSE_FILES) \
 	-f deploy/docker-compose.host-ingress.yml --env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
 
 # ---- Paths ----
@@ -534,7 +538,6 @@ prepare-ephemeral: ## Prepare isolated, non-secret release smoke-test configurat
 		'BACKUP_PASSWORD=ephemeral-only' \
 		'BACKUP_PUBLICATION_PATH=$(dir $(EPHEMERAL_ENV_FILE))publication' \
 		'BACKUP_RUNTIME_GID=$(shell id -g)' \
-		'EPHEMERAL_CERTS_PATH=$(EPHEMERAL_CERTS_PATH)' \
 		> "$(EPHEMERAL_ENV_FILE)"
 	@if [ ! -f "$(EPHEMERAL_CERTS_PATH)/server.key" ] || \
 		! openssl x509 -in "$(EPHEMERAL_CERTS_PATH)/server.crt" -noout -checkend 3600 >/dev/null 2>&1; then \

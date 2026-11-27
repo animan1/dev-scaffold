@@ -13,11 +13,7 @@ EPHEMERAL_HTTPS_PORT ?= 18444
 RELEASE_COMPOSE_FILE := profiles/server-rendered-django/release.compose.yml
 PROD_COMPOSE_FILES = -f $(RELEASE_COMPOSE_FILE) \
 	$(if $(filter 0,$(HOST_INGRESS)),-f profiles/server-rendered-django/standalone.compose.yml)
-COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
-	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) HOST_INGRESS_PORT=$(EPHEMERAL_HTTP_PORT) \
-	PROD_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) INGRESS_CERTS_PATH="$(EPHEMERAL_CERTS_PATH)" \
-	docker compose --project-directory $(COMPOSE_PROJECT_DIR) $(PROD_COMPOSE_FILES) \
-	--env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
+EPHEMERAL_COMPOSE_FILES = $(PROD_COMPOSE_FILES)
 PROD_APPLICATION_SERVICE := app
 
 .PHONY: fe.setup fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check fe.coverage

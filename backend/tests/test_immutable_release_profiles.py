@@ -86,10 +86,7 @@ def test_release_configuration_resolves_production_project_and_volumes(
 ) -> None:
     monkeypatch.setenv("DOCKER_HOST", "unix:///nonexistent")
     private = tmp_path / "production.env"
-    private.write_text(
-        "POSTGRES_USER=app\nPOSTGRES_PASSWORD=test-only\nPOSTGRES_DB=app\n"
-        f"EPHEMERAL_CERTS_PATH={tmp_path}/certs\n"
-    )
+    private.write_text("POSTGRES_USER=app\nPOSTGRES_PASSWORD=test-only\nPOSTGRES_DB=app\n")
     manifest = tmp_path / "release.env"
     manifest.write_text(
         "RELEASE_BACKEND_IMAGE=local/backend:test\nRELEASE_WEB_IMAGE=local/web:test\n"
@@ -151,44 +148,39 @@ def test_release_configuration_resolves_production_project_and_volumes(
                 mount.get("volume", {}).get("nocopy", False)
                 for mount in config["services"]["app"]["volumes"]
             )
-    if profile == "react-vite":
-        ephemeral = json.loads(
-            _make(
-                profile,
-                "-s",
-                "release-bundle-config",
-                "COMPOSE_PROD=$(COMPOSE_EPHEMERAL)",
-                "SCAFFOLD_BACKUP_PROFILE=none",
-                f"EPHEMERAL_ENV_FILE={private}",
-                f"RELEASE_FILE={manifest}",
-                "PROD_HTTPS_PORT=28043",
-                "EPHEMERAL_HTTPS_PORT=28044",
-            )
-        )["services"]["nginx"]
-        assert ephemeral["environment"]["PROD_HTTPS_PORT"] == "28044"
-        assert ephemeral["ports"][1]["published"] == "28044"
-    else:
-        ephemeral = json.loads(
-            _make(
-                profile,
-                "-s",
-                "release-bundle-config",
-                "COMPOSE_PROD=$(COMPOSE_EPHEMERAL)",
-                "SCAFFOLD_BACKUP_PROFILE=none",
-                f"EPHEMERAL_ENV_FILE={private}",
-                f"RELEASE_FILE={manifest}",
-                "EPHEMERAL_HTTP_PORT=28081",
-                "EPHEMERAL_HTTPS_PORT=28044",
-                "HOST_INGRESS=0",
-            )
+    ephemeral = json.loads(
+        _make(
+            profile,
+            "-s",
+            "release-bundle-config",
+            "COMPOSE_PROD=$(COMPOSE_EPHEMERAL)",
+            "SCAFFOLD_BACKUP_PROFILE=none",
+            "EPHEMERAL_COMPOSE_PROJECT=tenant-ephemeral",
+            f"EPHEMERAL_ENV_FILE={os.path.relpath(private, _repository_root())}",
+            f"RELEASE_FILE={manifest}",
+            "EPHEMERAL_HTTP_PORT=28081",
+            "EPHEMERAL_HTTPS_PORT=28044",
+            "PROD_HTTPS_PORT=28043",
+            "HOST_INGRESS=0",
         )
+    )
+    assert ephemeral["name"] == "tenant-ephemeral"
+    assert ephemeral["services"]["db"]["environment"]["POSTGRES_PASSWORD"] == "test-only"
+    if profile == "server-rendered-django":
         assert not ephemeral["services"]["web"].get("ports")
         ingress = ephemeral["services"]["ingress"]
-        assert [port["published"] for port in ingress["ports"]] == ["28081", "28044"]
-        assert any(
-            mount["source"] == str(tmp_path / "certs") and mount["read_only"]
-            for mount in ingress["volumes"]
-        )
+        assert ingress["environment"]["INGRESS_HTTPS_PORT"] == "28044"
+    else:
+        ingress = ephemeral["services"]["nginx"]
+        assert ingress["environment"]["PROD_HTTPS_PORT"] == "28044"
+    assert [(port["host_ip"], port["published"]) for port in ingress["ports"]] == [
+        ("127.0.0.1", "28081"),
+        ("127.0.0.1", "28044"),
+    ]
+    assert any(
+        mount["source"] == str(tmp_path / "certs") and mount["read_only"]
+        for mount in ingress["volumes"]
+    )
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
