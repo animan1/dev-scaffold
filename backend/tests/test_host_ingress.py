@@ -33,6 +33,7 @@ def _production_checkout(tmp_path: Path) -> str:
         "deploy/docker-compose.release.yml",
         "deploy/docker-compose.host-ingress.yml",
         "profiles/server-rendered-django/release.compose.yml",
+        "profiles/server-rendered-django/standalone.compose.yml",
         "profiles/immutable-backup/compose.yml",
     ):
         destination = tmp_path / name

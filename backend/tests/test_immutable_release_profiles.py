@@ -106,7 +106,21 @@ def test_release_configuration_resolves_production_project_and_volumes(
         )
         assert config["name"] == project
         web = "web" if profile == "server-rendered-django" else "nginx"
-        assert config["services"][web]["ports"][0]["published"] == "19080"
+        if profile == "server-rendered-django" and host_ingress == "0":
+            assert not config["services"][web].get("ports")
+            ingress = config["services"]["ingress"]
+            ports = [
+                (port["host_ip"], port["published"], port["target"]) for port in ingress["ports"]
+            ]
+            assert ports == [
+                ("127.0.0.1", "19080", 80),
+                ("127.0.0.1", "28043", 443),
+            ]
+            assert ingress["environment"]["INGRESS_HTTPS_PORT"] == "28043"
+            assert all(mount["read_only"] for mount in ingress["volumes"])
+        else:
+            assert "ingress" not in config["services"]
+            assert config["services"][web]["ports"][0]["published"] == "19080"
         if profile == "react-vite" and host_ingress == "0":
             nginx = config["services"]["nginx"]
             assert nginx["ports"][1]["published"] == "28043"
@@ -142,6 +156,28 @@ def test_release_configuration_resolves_production_project_and_volumes(
         )["services"]["nginx"]
         assert ephemeral["environment"]["PROD_HTTPS_PORT"] == "28044"
         assert ephemeral["ports"][1]["published"] == "28044"
+    else:
+        ephemeral = json.loads(
+            _make(
+                profile,
+                "-s",
+                "release-bundle-config",
+                "COMPOSE_PROD=$(COMPOSE_EPHEMERAL)",
+                "SCAFFOLD_BACKUP_PROFILE=none",
+                f"EPHEMERAL_ENV_FILE={private}",
+                f"RELEASE_FILE={manifest}",
+                "EPHEMERAL_HTTP_PORT=28081",
+                "EPHEMERAL_HTTPS_PORT=28044",
+                "HOST_INGRESS=0",
+            )
+        )
+        assert not ephemeral["services"]["web"].get("ports")
+        ingress = ephemeral["services"]["ingress"]
+        assert [port["published"] for port in ingress["ports"]] == ["28081", "28044"]
+        assert any(
+            mount["source"] == str(tmp_path / "certs") and mount["read_only"]
+            for mount in ingress["volumes"]
+        )
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
@@ -173,13 +209,17 @@ def test_shared_lifecycle_commands_select_each_requested_environment(profile: st
             "tenant-ephemeral",
         ]
     waiting = _make(
-        profile, "--dry-run", "PROJECT_NAME=tenant", "wait-prod", "DEV_URL_ROOT=http://dev.example"
+        profile,
+        "--dry-run",
+        "PROJECT_NAME=tenant",
+        "wait-prod",
+        "DEV_URL_ROOT=http://dev.example",
+        "PROD_HTTPS_URL=https://tenant.example:9443",
     )
     assert "COMPOSE_PROJECT_NAME=tenant-prod" in waiting
     assert "tenant-dev" not in waiting
-    assert "X-Forwarded-Proto: https" in waiting
-    assert "Host: 127.0.0.1" in waiting
-    assert "http://127.0.0.1:18080/api/healthz" in waiting
+    assert "X-Forwarded-Proto" not in waiting
+    assert "https://tenant.example:9443/api/healthz" in waiting
     assert "http://dev.example" not in waiting
     smoke = _make(
         profile,
@@ -190,10 +230,9 @@ def test_shared_lifecycle_commands_select_each_requested_environment(profile: st
         "APP_HOST=dev.example",
         "HOST_INGRESS_HOST=tenant.example",
     )
-    assert "http://127.0.0.1:19080/api/healthz" in smoke
-    assert "Host: tenant.example" in smoke
-    assert "X-Forwarded-Proto: https" in smoke
-    assert "curl -L " in smoke
+    assert "https://tenant.example/api/healthz" in smoke
+    assert "Waiting for backend on https://tenant.example/api/healthz" in smoke
+    assert "--proto '=https' --proto-redir '=https' -L" in smoke
     assert smoke.count("/static/smoketest.txt") == 1
     assert smoke.count("grep -qi") == 1
     direct = _make(
@@ -203,16 +242,17 @@ def test_shared_lifecycle_commands_select_each_requested_environment(profile: st
         "HOST_INGRESS=0",
         "HOST_INGRESS_PORT=19080",
         "HOST_INGRESS_HOST=tenant.example",
+        "CURL_FLAGS=-k",
     )
-    assert "http://127.0.0.1:19080/api/healthz" in direct
-    assert "curl -L " in direct
-    assert "https://localhost" not in direct
-    assert [line for line in direct.splitlines() if line.startswith("curl ")][:3] == [
-        line for line in smoke.splitlines() if line.startswith("curl ")
-    ][:3]
+    assert "https://127.0.0.1:18443/api/healthz" in direct
+    assert "--cacert 'deploy/nginx/certs/server.crt'" in direct
+    assert "X-Forwarded-Proto" not in direct
+    assert "curl -k" not in direct
+    assert "X-Forwarded-Proto" not in smoke
     if profile == "react-vite":
-        assert "Django admin slash redirect was not routed" in smoke
-        assert "Django admin slash redirect was not routed" not in direct
+        origin = _make(profile, "--dry-run", "verify-host-ingress")
+        assert "Django admin slash redirect was not routed" in origin
+        assert "X-Forwarded-Proto: https" in origin
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
@@ -242,6 +282,9 @@ def test_smoke_requires_static_delivery_in_both_profiles(
 ) -> None:
     curl = tmp_path / "curl"
     log = tmp_path / "requests"
+    scheme = "https" if target == "smoke-prod" else "http"
+    url_root = f"{scheme}://smoke.test"
+    url_variable = "PROD_HTTPS_URL" if target == "smoke-prod" else "DEV_URL_ROOT"
     curl.write_text(
         "#!/bin/sh\n"
         "for url; do :; done\n"
@@ -265,7 +308,7 @@ def test_smoke_requires_static_delivery_in_both_profiles(
             "--no-print-directory",
             f"SCAFFOLD_PROFILE={profile}",
             "HOST_INGRESS=0",
-            f"{'PROD' if target == 'smoke-prod' else 'DEV'}_URL_ROOT=http://smoke.test",
+            f"{url_variable}={url_root}",
             target,
         ],
         cwd=_repository_root(),
@@ -274,17 +317,17 @@ def test_smoke_requires_static_delivery_in_both_profiles(
     )
     requests = log.read_text().splitlines()
     assert requests[:3] == [
-        "http://smoke.test/api/healthz",
-        "http://smoke.test/api/healthz",
-        "http://smoke.test/static/smoketest.txt",
+        f"{url_root}/api/healthz",
+        f"{url_root}/api/healthz",
+        f"{url_root}/static/smoketest.txt",
     ]
     assert (result.returncode != 0) == missing_static
-    assert ("http://smoke.test/" in requests) != missing_static
+    assert (f"{url_root}/" in requests) != missing_static
 
 
 def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> None:
     build = _make("server-rendered-django", "--dry-run", "build-release-images")
-    verify = _make("server-rendered-django", "--dry-run", "verify-release-images")
+    verify = _make("server-rendered-django", "--dry-run", "verify-release-images", "HOST_INGRESS=0")
     logs = _make("server-rendered-django", "--dry-run", "logs-ephemeral")
 
     assert "profiles/server-rendered-django/backend.Dockerfile" in build
@@ -303,9 +346,11 @@ def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> Non
     assert verify.count("run --rm --no-deps app") == 4
     assert "up -d --no-build db app" not in verify
     assert "exec -T app python -m app.manage migrate" not in verify
-    assert "/static/smoketest.txt" in verify
-    assert "/media/release-smoketest.txt" in verify
-    assert "stop app" in verify
+    before_stop, after_stop = verify.split("stop app", 1)
+    for path in ("static/smoketest.txt", "media/release-smoketest.txt"):
+        url = f"https://127.0.0.1:18444/{path}"
+        assert url in before_stop
+        assert url in after_stop
     assert "profiles/server-rendered-django/release.compose.yml" in logs
     assert "logs -f --tail=200" in logs
 

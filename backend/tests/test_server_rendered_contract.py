@@ -102,7 +102,7 @@ def test_server_rendered_precommit_is_a_recipe() -> None:
 def test_prod_and_ephemeral_use_the_same_recorded_release_workflow() -> None:
     project_name = _repository_root().name
     production = _make("--dry-run", "up-prod").stdout
-    ephemeral = _make("--dry-run", "up-ephemeral").stdout
+    ephemeral = _make("--dry-run", "up-ephemeral", "HOST_INGRESS=0").stdout
     for suffix, output in (("prod", production), ("ephemeral", ephemeral)):
         assert f"COMPOSE_PROJECT_NAME={project_name}-{suffix}" in output
         assert "profiles/server-rendered-django/backend.Dockerfile" not in output
@@ -114,10 +114,10 @@ def test_prod_and_ephemeral_use_the_same_recorded_release_workflow() -> None:
         static_collection = output.index("python -m app.manage collectstatic --noinput --clear")
         application_start = output.index("up -d --no-build\n")
         assert database_start < production_check < migration < static_collection < application_start
-    assert "ephemeral-ingress" not in production
+    assert "standalone.compose.yml" not in production
     assert "release-ci-only" not in production
     assert "pull app web" in production
-    assert "ephemeral-ingress" in ephemeral
+    assert "standalone.compose.yml" in ephemeral
     assert "release-ci-only" in ephemeral
     assert "pull app web" not in ephemeral
     assert "deploy/.env.prod" not in ephemeral
@@ -130,26 +130,30 @@ def test_prod_and_ephemeral_use_the_same_recorded_release_workflow() -> None:
 
 def test_server_rendered_ephemeral_uses_local_tls_ingress() -> None:
     root = _repository_root()
-    overlay = (root / "profiles/server-rendered-django/ephemeral.compose.yml").read_text()
-    ingress = (root / "profiles/server-rendered-django/ephemeral-ingress.conf.template").read_text()
-    release = (root / "profiles/server-rendered-django/release.compose.yml").read_text()
+    ingress = (root / "profiles/server-rendered-django/ingress.conf.template").read_text()
+    web = (root / "profiles/server-rendered-django/release-nginx.conf").read_text()
     smoke = _make("--dry-run", "verify-ephemeral").stdout
 
-    assert "127.0.0.1:${EPHEMERAL_HTTP_PORT:-18081}:80" in overlay
-    assert "127.0.0.1:${EPHEMERAL_HTTPS_PORT:-18444}:443" in overlay
-    assert "ephemeral-ingress" not in release
-    assert "return 308 https://$host:${EPHEMERAL_HTTPS_PORT}$request_uri" in ingress
+    assert "return 308 https://$host:${INGRESS_HTTPS_PORT}$request_uri" in ingress
     assert "proxy_pass http://web:8080" in ingress
     assert "proxy_set_header Host $http_host" in ingress
+    assert "proxy_set_header Host $http_host" in web
     assert "proxy_set_header X-Forwarded-Proto https" in ingress
     assert "http://127.0.0.1:18081/" in smoke
     assert "https://127.0.0.1:18444/" in smoke
     assert "/admin/login/\\?next=/admin/" in smoke
     assert "set-cookie: csrftoken=.*; secure" in smoke
     custom = _make(
-        "--dry-run", "up-ephemeral", "verify-ephemeral", "HOST_INGRESS_HOST=tenant.example"
+        "--dry-run",
+        "up-ephemeral",
+        "verify-ephemeral",
+        "HOST_INGRESS_HOST=tenant.example",
+        "SCAFFOLD_BACKUP_PROFILE=none",
+        "HOST_INGRESS=0",
     ).stdout
-    assert "--build-arg EPHEMERAL_HOST=tenant.example" in custom
+    assert "-subj '/CN=tenant.example'" in custom
+    assert "docker build" not in custom
+    assert '--cacert "' in custom
     assert "DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,tenant.example" in custom
     assert "DJANGO_CSRF_TRUSTED_ORIGINS=https://tenant.example" in custom
     assert "Host: tenant.example" in custom
@@ -187,7 +191,7 @@ def test_server_rendered_ephemeral_wrapper_selects_the_profile() -> None:
         text=True,
     ).stdout
 
-    assert "profiles/server-rendered-django/ephemeral-ingress.Dockerfile" in output
+    assert "profiles/server-rendered-django/standalone.compose.yml" in output
     assert f"COMPOSE_PROJECT_NAME={project_name}-ephemeral" in output
     assert "deploy/docker-compose.prod.yml" not in output
 

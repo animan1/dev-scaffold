@@ -87,10 +87,16 @@ ingress is configured; otherwise the next startup changes the exposed ports.
 ```bash
 make prepare-prod HOST_INGRESS=0 LOCAL_TLS=1
 make build-release-images     # build once and record this commit's images
-make up-prod HOST_INGRESS=0     # initialize and start the recorded release
-make smoke-prod HOST_INGRESS=0  # run API, static, and FE smokes
+HOST_INGRESS=0 make up-prod RELEASE_PULL=true  # start the locally built release
+HOST_INGRESS=0 make smoke-prod                 # verify TLS, health, static, and homepage
 make down-prod HOST_INGRESS=0   # stop stack
 ```
+
+For server-rendered Django, Compose provides the TLS proxy in this mode.
+By default, `http://127.0.0.1:18080` redirects to `https://127.0.0.1:18443`.
+`smoke-prod` verifies the certificate using `deploy/nginx/certs/server.crt`.
+The ephemeral release checks use the same proxy with disposable TLS inputs
+and separate loopback ports.
 
 ### Immutable releases
 
@@ -155,7 +161,7 @@ make prepare-prod HOST_INGRESS=0 LOCAL_TLS=1 PROD_COMPOSE_PROJECT=dev-scaffold
 make build-release-images RELEASE_PLATFORM=linux/arm64
 make release-bundle-config HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 PROD_HTTPS_PORT=18443 RELEASE_CONFIG_FILE=.tmp/private-release-compose.json
 make deploy-release HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 PROD_HTTPS_PORT=18443 RELEASE_PULL=true
-make smoke-prod HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold CURL_FLAGS='--cacert deploy/nginx/certs/server.crt'
+make smoke-prod HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold
 ```
 
 Run from the existing `dev-scaffold` checkout, with its private `deploy/.env.prod`
@@ -236,10 +242,14 @@ delivery remain inside the application's Compose boundary.
 
 ```bash
 make up-prod HOST_INGRESS=1 HOST_INGRESS_PORT=18080
-make smoke-host-ingress HOST_INGRESS_PORT=18080 \
+make smoke-prod HOST_INGRESS_PORT=18080 \
   HOST_INGRESS_HOST=app.example.com
 make down-prod HOST_INGRESS=1 HOST_INGRESS_PORT=18080
 ```
+
+`wait-prod` and `smoke-prod` connect to `https://$(HOST_INGRESS_HOST)` on port 443
+with normal certificate verification. Set `PROD_HTTPS_URL` for a custom HTTPS
+endpoint or port.
 
 Digest-pinned deployments use the same opt-in flag:
 

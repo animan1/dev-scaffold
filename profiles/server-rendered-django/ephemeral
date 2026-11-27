@@ -11,7 +11,7 @@ case "${action}" in
     target="${action}-ephemeral"
     [ "${action}" != smoke ] || target=verify-ephemeral
     exec make --no-print-directory --directory="${repository_root}" \
-      SCAFFOLD_PROFILE=server-rendered-django "${target}" "$@"
+      SCAFFOLD_PROFILE=server-rendered-django HOST_INGRESS=0 "${target}" "$@"
     ;;
   *)
     echo "Usage: profiles/server-rendered-django/ephemeral {up|smoke|down} [make arguments...]" >&2

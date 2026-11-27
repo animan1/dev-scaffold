@@ -1,0 +1,20 @@
+services:
+  web:
+    ports: !reset []
+
+  ingress:
+    image: nginx:1.27.5-alpine
+    depends_on:
+      web:
+        condition: service_started
+        restart: true
+    environment:
+      INGRESS_HTTPS_PORT: "${PROD_HTTPS_PORT:-18443}"
+      NGINX_ENVSUBST_FILTER: "^INGRESS_HTTPS_PORT$"
+    ports:
+      - "127.0.0.1:${HOST_INGRESS_PORT:-18080}:80"
+      - "127.0.0.1:${PROD_HTTPS_PORT:-18443}:443"
+    volumes:
+      - ./profiles/server-rendered-django/ingress.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - "${INGRESS_CERTS_PATH:-./deploy/nginx/certs}:/etc/nginx/certs:ro"
+    restart: unless-stopped

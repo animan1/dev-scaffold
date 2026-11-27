@@ -95,9 +95,10 @@ database, static, and media volumes. Override `EPHEMERAL_HTTP_PORT` and
 `EPHEMERAL_HTTPS_PORT` when those loopback ports are occupied.
 
 In a downstream repository that selects this profile, the equivalent commands
-are `make up-ephemeral`, `make verify-ephemeral`, and `make down-ephemeral`. The local ingress is
-test infrastructure in `ephemeral.compose.yml`; it is not part of the deployable
-application topology. `make rm-ephemeral` removes disposable test volumes.
+are `make up-ephemeral HOST_INGRESS=0`, `make verify-ephemeral HOST_INGRESS=0`,
+and `make down-ephemeral HOST_INGRESS=0`. These use the production standalone
+ingress with disposable certificates and separate ports. `make rm-ephemeral
+HOST_INGRESS=0` removes disposable test volumes.
 `make up-prod` uses the same recorded deployment with production configuration.
 
 ## Select the profile

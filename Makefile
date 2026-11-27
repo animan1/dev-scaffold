@@ -34,8 +34,13 @@ DEV_URL_ROOT ?= http://127.0.0.1:$(DEV_HTTP_PORT)
 CURL_FLAGS ?= -H 'Host: $(APP_HOST)'
 HOST_INGRESS_PORT ?= $(RELEASE_HTTP_PORT)
 export HOST_INGRESS_PORT
-PROD_URL_ROOT ?= http://127.0.0.1:$(HOST_INGRESS_PORT)
-PROD_CURL_FLAGS ?= -L $(if $(wildcard deploy/nginx/certs/server.crt),--cacert deploy/nginx/certs/server.crt) -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https'
+ifeq ($(HOST_INGRESS),1)
+PROD_HTTPS_URL ?= https://$(HOST_INGRESS_HOST)
+else
+PROD_HTTPS_URL ?= https://127.0.0.1:$(PROD_HTTPS_PORT)
+PROD_HTTPS_CA ?= deploy/nginx/certs/server.crt
+endif
+PROD_HTTPS_CURL_FLAGS = --proto '=https' --proto-redir '=https' -L $(if $(PROD_HTTPS_CA),--cacert '$(PROD_HTTPS_CA)')
 
 .PHONY: profiles
 profiles:
@@ -144,10 +149,6 @@ migrate-prod: ## Run Django migrations in prod
 bash-prod: ## Shell into backend container (prod)
 	$(COMPOSE_PROD) exec backend bash
 
-ifeq ($(HOST_INGRESS),1)
-smoke-prod: smoke-host-ingress
-endif
-
 .PHONY: ops.check-prod
 ops.check-prod: ## Run operational checks once and report their state
 	$(COMPOSE_PROD) run --rm backend python -m app.manage monitor_operational_integrity
@@ -163,8 +164,8 @@ ops.monitor-prod: ## Follow the unattended production monitor
 .PHONY: smoke-host-ingress
 smoke-host-ingress: ## Smoke-test the loopback origin as routed by a host ingress
 smoke-host-ingress: COMPOSE = $(COMPOSE_PROD)
-smoke-host-ingress: URL_ROOT = $(PROD_URL_ROOT)
-smoke-host-ingress: CURL_FLAGS = $(PROD_CURL_FLAGS)
+smoke-host-ingress: URL_ROOT = http://127.0.0.1:$(HOST_INGRESS_PORT)
+smoke-host-ingress: CURL_CMD = curl -fsS -L -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https'
 smoke-host-ingress: smoke
 	@location="$$(curl -fsS -D - -o /dev/null \
 		-H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
@@ -201,31 +202,6 @@ build-release-images: ## Build SHA-tagged production images once
 		--profile $(SCAFFOLD_PROFILE) --prefix $(RELEASE_IMAGE_PREFIX) \
 		--backend $(RELEASE_BACKEND_TAG) --web $(RELEASE_WEB_TAG) \
 		$(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) --output $(RELEASE_FILE)
-
-.PHONY: prepare-ephemeral
-prepare-ephemeral: ## Prepare isolated, non-secret release smoke-test configuration
-	@mkdir -p $(dir $(EPHEMERAL_ENV_FILE))publication $(dir $(EPHEMERAL_ENV_FILE))certs
-	@chmod 2770 $(dir $(EPHEMERAL_ENV_FILE))publication
-	@printf '%s\n' \
-		'DJANGO_SECRET_KEY=release-ci-only' \
-		'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,$(HOST_INGRESS_HOST)' \
-		'DJANGO_CSRF_TRUSTED_ORIGINS=https://$(HOST_INGRESS_HOST)' \
-		'POSTGRES_USER=app' \
-		'POSTGRES_PASSWORD=release-ci-only' \
-		'POSTGRES_DB=app' \
-		'DATABASE_URL=postgresql://app:release-ci-only@db:5432/app' \
-		'BACKUP_PASSWORD=ephemeral-only' \
-		'BACKUP_PUBLICATION_PATH=$(dir $(EPHEMERAL_ENV_FILE))publication' \
-		'BACKUP_RUNTIME_GID=$(shell id -g)' \
-		'EPHEMERAL_CERTS_PATH=$(dir $(EPHEMERAL_ENV_FILE))certs' \
-		> $(EPHEMERAL_ENV_FILE)
-	@if [ ! -f $(dir $(EPHEMERAL_ENV_FILE))certs/server.crt ] || [ ! -f $(dir $(EPHEMERAL_ENV_FILE))certs/server.key ]; then \
-		openssl req -x509 -nodes -newkey rsa:2048 \
-			-keyout $(dir $(EPHEMERAL_ENV_FILE))certs/server.key \
-			-out $(dir $(EPHEMERAL_ENV_FILE))certs/server.crt \
-			-days 1 -subj '/CN=$(HOST_INGRESS_HOST)' \
-			-addext 'subjectAltName=DNS:$(HOST_INGRESS_HOST),IP:127.0.0.1,DNS:localhost'; \
-	fi
 
 .PHONY: verify-ephemeral
 verify-ephemeral: ## Verify the running recorded release in ephemeral
@@ -486,11 +462,12 @@ deps.lock: ## Update the selected profile's Python lockfile with pinned Dockeriz
 
 COMPOSE ?= $(COMPOSE_DEV)
 URL_ROOT ?= $(DEV_URL_ROOT)
+CURL_CMD = curl $(CURL_FLAGS) -fsS
 ENV ?= dev
 down-dev logs-dev ps-dev wait-dev: COMPOSE = $(COMPOSE_DEV)
 down-prod logs-prod ps-prod wait-prod smoke-prod: COMPOSE = $(COMPOSE_PROD)
-wait-prod smoke-prod: URL_ROOT = $(PROD_URL_ROOT)
-wait-prod smoke-prod: CURL_FLAGS = $(PROD_CURL_FLAGS)
+wait-prod smoke-prod: URL_ROOT = $(PROD_HTTPS_URL)
+wait-prod smoke-prod: CURL_CMD = curl $(PROD_HTTPS_CURL_FLAGS) -fsS
 down-ephemeral logs-ephemeral ps-ephemeral: COMPOSE = $(COMPOSE_EPHEMERAL)
 
 .PHONY: down logs ps wait restart restart-dev restart-prod ps-prod ps-ephemeral wait-dev wait-prod
@@ -503,10 +480,10 @@ logs logs-dev logs-prod logs-ephemeral:
 ps ps-dev ps-prod ps-ephemeral:
 	$(COMPOSE) ps
 
-wait wait-dev wait-prod:
+wait:
 	@echo "Waiting for backend on $(URL_ROOT)/api/healthz ..."
 	@for i in $$(seq 1 60); do \
-		if curl -fsS $(CURL_FLAGS) $(URL_ROOT)/api/healthz >/dev/null; then \
+		if $(CURL_CMD) "$(URL_ROOT)/api/healthz" >/dev/null; then \
 			echo "Backend is up"; exit 0; \
 		fi; \
 		sleep 1; \
@@ -515,12 +492,11 @@ wait wait-dev wait-prod:
 	$(COMPOSE) logs || true; \
 	exit 1
 
-wait-dev: ## Wait for development health
-wait-prod: ## Wait for production health
+wait-dev: wait ## Wait for development health
+wait-prod: wait ## Wait for production health
 
 .PHONY: smoke smoke-prod
-smoke-prod: smoke ## Check production health, static delivery, and homepage
-smoke: CURL_CMD = curl $(CURL_FLAGS) -fsS
+smoke-prod: smoke ## Check production health, static delivery, and homepage over HTTPS
 smoke: wait ## Check application health, static delivery, and homepage
 	$(CURL_CMD) "$(URL_ROOT)/api/healthz" >/dev/null
 	$(CURL_CMD) "$(URL_ROOT)/static/smoketest.txt" >/dev/null
@@ -555,6 +531,34 @@ down-prod: ## Stop production services while preserving volumes
 logs-prod: ## Follow recent production logs
 
 .PHONY: initialize-ephemeral up-ephemeral down-ephemeral rm-ephemeral logs-ephemeral
+EPHEMERAL_CERTS_PATH := $(dir $(abspath $(EPHEMERAL_ENV_FILE)))certs
+
+.PHONY: prepare-ephemeral
+prepare-ephemeral: ## Prepare isolated, non-secret release smoke-test configuration
+	@mkdir -p "$(dir $(EPHEMERAL_ENV_FILE))publication" "$(EPHEMERAL_CERTS_PATH)"
+	@chmod 2770 "$(dir $(EPHEMERAL_ENV_FILE))publication"
+	@printf '%s\n' \
+		'DJANGO_SECRET_KEY=release-ci-only-abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ' \
+		'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,$(HOST_INGRESS_HOST)' \
+		'DJANGO_CSRF_TRUSTED_ORIGINS=https://$(HOST_INGRESS_HOST)' \
+		'POSTGRES_USER=app' \
+		'POSTGRES_PASSWORD=release-ci-only' \
+		'POSTGRES_DB=app' \
+		'DATABASE_URL=postgresql://app:release-ci-only@db:5432/app' \
+		'BACKUP_PASSWORD=ephemeral-only' \
+		'BACKUP_PUBLICATION_PATH=$(dir $(EPHEMERAL_ENV_FILE))publication' \
+		'BACKUP_RUNTIME_GID=$(shell id -g)' \
+		'EPHEMERAL_CERTS_PATH=$(EPHEMERAL_CERTS_PATH)' \
+		> "$(EPHEMERAL_ENV_FILE)"
+	@if [ ! -f "$(EPHEMERAL_CERTS_PATH)/server.key" ] || \
+		! openssl x509 -in "$(EPHEMERAL_CERTS_PATH)/server.crt" -noout -checkend 3600 >/dev/null 2>&1; then \
+		openssl req -x509 -nodes -newkey rsa:2048 \
+			-keyout "$(EPHEMERAL_CERTS_PATH)/server.key" \
+			-out "$(EPHEMERAL_CERTS_PATH)/server.crt" \
+			-days 1 -subj '/CN=$(HOST_INGRESS_HOST)' \
+			-addext 'subjectAltName=DNS:$(HOST_INGRESS_HOST),IP:127.0.0.1,DNS:localhost'; \
+	fi
+
 initialize-ephemeral: prepare-ephemeral ## Initialize test data through the recorded-release workflow
 	$(MAKE) initialize-release 'COMPOSE_PROD=$(COMPOSE_EPHEMERAL)' RELEASE_PULL=true
 

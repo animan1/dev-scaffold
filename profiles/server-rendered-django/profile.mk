@@ -10,19 +10,16 @@ DEV_APPLICATION_SERVICE := app
 PROD_WEB_SERVICE := web
 EPHEMERAL_HTTP_PORT ?= 18081
 EPHEMERAL_HTTPS_PORT ?= 18444
-EPHEMERAL_INGRESS_IMAGE ?= local/$(PROJECT_NAME)-ephemeral-ingress:test
-EPHEMERAL_COMPOSE_FILE := profiles/server-rendered-django/ephemeral.compose.yml
 RELEASE_COMPOSE_FILE := profiles/server-rendered-django/release.compose.yml
-PROD_COMPOSE_FILES := -f $(RELEASE_COMPOSE_FILE)
+PROD_COMPOSE_FILES = -f $(RELEASE_COMPOSE_FILE) \
+	$(if $(filter 0,$(HOST_INGRESS)),-f profiles/server-rendered-django/standalone.compose.yml)
 COMPOSE_PROD = COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(PROD_ENV_FILE) docker compose --project-directory . \
 	$(PROD_COMPOSE_FILES) --env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
 COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
-	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) EPHEMERAL_HTTP_PORT=$(EPHEMERAL_HTTP_PORT) \
-	EPHEMERAL_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) \
-	EPHEMERAL_INGRESS_IMAGE=$(EPHEMERAL_INGRESS_IMAGE) \
-	docker compose --project-directory . -f $(RELEASE_COMPOSE_FILE) \
-	-f $(EPHEMERAL_COMPOSE_FILE) $(EPHEMERAL_BACKUP_FILES) \
+	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) HOST_INGRESS_PORT=$(EPHEMERAL_HTTP_PORT) \
+	PROD_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) INGRESS_CERTS_PATH="$(EPHEMERAL_CERTS_PATH)" \
+	docker compose --project-directory . $(PROD_COMPOSE_FILES) \
 	--env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
 RUN_EPHEMERAL = $(COMPOSE_EPHEMERAL) run --rm --no-deps app
 LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
@@ -61,50 +58,25 @@ build-release-images: ## Build commit-addressed Django and application Nginx ima
 		--backend $(RELEASE_BACKEND_TAG) --web $(RELEASE_WEB_TAG) \
 		$(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) --output $(RELEASE_FILE)
 
-.PHONY: prepare-ephemeral
-prepare-ephemeral: ## Prepare isolated, non-secret server-rendered release configuration
-	@mkdir -p $(dir $(EPHEMERAL_ENV_FILE))publication
-	@chmod 2770 $(dir $(EPHEMERAL_ENV_FILE))publication
-	@printf '%s\n' \
-		'DJANGO_SECRET_KEY=release-ci-only-abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ' \
-		'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,$(HOST_INGRESS_HOST)' \
-		'DJANGO_CSRF_TRUSTED_ORIGINS=https://$(HOST_INGRESS_HOST)' \
-		'POSTGRES_USER=app' \
-		'POSTGRES_PASSWORD=release-ci-only' \
-		'POSTGRES_DB=app' \
-		'DATABASE_URL=postgresql://app:release-ci-only@db:5432/app' \
-		'BACKUP_PASSWORD=ephemeral-only' \
-		'BACKUP_PUBLICATION_PATH=$(dir $(EPHEMERAL_ENV_FILE))publication' \
-		'BACKUP_RUNTIME_GID=$(shell id -g)' \
-		> $(EPHEMERAL_ENV_FILE)
-
+EPHEMERAL_HTTPS_URL = https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)
+EPHEMERAL_CURL = curl -fsS --cacert "$(EPHEMERAL_CERTS_PATH)/server.crt"
 .PHONY: verify-release-images
 verify-release-images: up-ephemeral ## Smoke-test the exact production image set
 	$(RUN_EPHEMERAL) \
 		sh -c "printf 'MEDIA_OK\\n' > /media/release-smoketest.txt"
-	@for attempt in $$(seq 1 60); do \
-		if curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
-			'http://127.0.0.1:$(HOST_INGRESS_PORT)/api/healthz' >/dev/null; then \
-			echo 'Server-rendered release origin is ready'; break; \
-		fi; \
-		if [[ "$$attempt" = "60" ]]; then \
-			echo 'Server-rendered release origin did not become ready'; exit 1; \
-		fi; \
-		sleep 1; \
-	done
-	curl -fsS -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
-		'http://127.0.0.1:$(HOST_INGRESS_PORT)/' | grep -q '<main'
-	curl -fsS 'http://127.0.0.1:$(HOST_INGRESS_PORT)/static/smoketest.txt' \
+	$(MAKE) verify-ephemeral
+	$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/static/smoketest.txt' \
 		| grep -q 'STATIC_OK'
-	curl -fsS 'http://127.0.0.1:$(HOST_INGRESS_PORT)/media/release-smoketest.txt' \
+	$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/media/release-smoketest.txt' \
 		| grep -q 'MEDIA_OK'
 	$(COMPOSE_EPHEMERAL) stop app
-	curl -fsS 'http://127.0.0.1:$(HOST_INGRESS_PORT)/static/smoketest.txt' \
+	$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/static/smoketest.txt' \
 		| grep -q 'STATIC_OK'
-	curl -fsS 'http://127.0.0.1:$(HOST_INGRESS_PORT)/media/release-smoketest.txt' \
+	$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/media/release-smoketest.txt' \
 		| grep -q 'MEDIA_OK'
 
 .PHONY: verify-host-ingress
+verify-host-ingress: HOST_INGRESS := 1
 verify-host-ingress: prepare-ephemeral ## Verify the loopback-only application origin boundary
 	@$(COMPOSE_EPHEMERAL) config \
 		| grep -q 'host_ip: 127.0.0.1'
@@ -130,19 +102,11 @@ push-release-images: ## Publish verified images and record immutable digests
 deploy-release: initialize-release ## Deploy the digest-pinned server-rendered image set
 	$(COMPOSE_PROD) up -d --no-build
 
-prepare-ephemeral: build-ephemeral-ingress
-
-.PHONY: build-ephemeral-ingress
-build-ephemeral-ingress: ## Build the local-only TLS ingress image
-	docker build -f profiles/server-rendered-django/ephemeral-ingress.Dockerfile \
-		--build-arg EPHEMERAL_HOST=$(HOST_INGRESS_HOST) \
-		-t $(EPHEMERAL_INGRESS_IMAGE) .
-
 .PHONY: verify-ephemeral
 verify-ephemeral: ## Verify local HTTP redirect, HTTPS customer/admin routes, and secure cookies
 	@for attempt in $$(seq 1 60); do \
-		if curl -kfsS -H 'Host: $(HOST_INGRESS_HOST)' \
-			'https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/api/healthz' >/dev/null; then \
+		if $(EPHEMERAL_CURL) -H 'Host: $(HOST_INGRESS_HOST)' \
+			'$(EPHEMERAL_HTTPS_URL)/api/healthz' >/dev/null; then \
 			break; \
 		fi; \
 		if [[ "$$attempt" = "60" ]]; then \
@@ -153,13 +117,13 @@ verify-ephemeral: ## Verify local HTTP redirect, HTTPS customer/admin routes, an
 	@curl -fsSI -H 'Host: $(HOST_INGRESS_HOST)' \
 		'http://127.0.0.1:$(EPHEMERAL_HTTP_PORT)/' \
 		| grep -Eiq '^location: https://$(HOST_INGRESS_HOST):$(EPHEMERAL_HTTPS_PORT)/'
-	curl -kfsS -H 'Host: $(HOST_INGRESS_HOST)' \
-		'https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/' | grep -q '<main'
-	curl -kfsS -D - -o /dev/null -H 'Host: $(HOST_INGRESS_HOST)' \
-		'https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/admin/' \
+	$(EPHEMERAL_CURL) -H 'Host: $(HOST_INGRESS_HOST)' \
+		'$(EPHEMERAL_HTTPS_URL)/' | grep -q '<main'
+	$(EPHEMERAL_CURL) -D - -o /dev/null -H 'Host: $(HOST_INGRESS_HOST)' \
+		'$(EPHEMERAL_HTTPS_URL)/admin/' \
 		| grep -Eiq '^location: /admin/login/\?next=/admin/'
-	curl -kfsS -D - -o /dev/null -H 'Host: $(HOST_INGRESS_HOST)' \
-		'https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)/admin/login/' \
+	$(EPHEMERAL_CURL) -D - -o /dev/null -H 'Host: $(HOST_INGRESS_HOST)' \
+		'$(EPHEMERAL_HTTPS_URL)/admin/login/' \
 		| grep -Eiq '^set-cookie: csrftoken=.*; secure(;|[[:space:]]*$$)'
 
 .PHONY: rollback-release
