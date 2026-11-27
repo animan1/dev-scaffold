@@ -19,7 +19,6 @@ UV_IMAGE ?= ghcr.io/astral-sh/uv:0.8.17-python3.12-bookworm-slim
 SCAFFOLD_BACKUP_PROFILE ?= immutable-backup
 CI_BACKUP_PROFILES ?= immutable-backup
 PROD_ENV_FILE ?= deploy/.env.prod
-PROD_APPLICATION_SERVICE ?= backend
 COMPOSE_PROD_BASE = COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory $(COMPOSE_PROJECT_DIR) \
 	$(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file $(PROD_ENV_FILE)
@@ -29,8 +28,8 @@ COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 	PROD_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) INGRESS_CERTS_PATH="$(EPHEMERAL_CERTS_PATH)" \
 	docker compose --project-directory $(COMPOSE_PROJECT_DIR) $(EPHEMERAL_COMPOSE_FILES) \
 	--env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
-RELEASE_PULL ?= $(COMPOSE_PROD) pull $(PROD_APPLICATION_SERVICE) $(PROD_WEB_SERVICE)
-RUN_PROD = $(COMPOSE_PROD) run --rm --no-deps $(PROD_APPLICATION_SERVICE)
+RELEASE_PULL ?= $(COMPOSE_PROD) pull $(APPLICATION_SERVICE) $(PROD_WEB_SERVICE)
+RUN_PROD = $(COMPOSE_PROD) run --rm --no-deps $(APPLICATION_SERVICE)
 # Resolve production configuration before a release manifest or its images exist.
 PROD_CONFIG = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) \
 	RELEASE_IMAGE_PREFIX=$(RELEASE_IMAGE_PREFIX) RELEASE_REVISION=$(RELEASE_REVISION) $(COMPOSE_PROD_BASE)
@@ -70,15 +69,15 @@ COMPOSE_DEV = COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) APP_HOST=$(APP_HOST) D
 	GIT_COMMON_DIR="$(GIT_COMMON_DIR)" HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
 	docker compose --project-directory $(COMPOSE_PROJECT_DIR) -f $(DEV_COMPOSE_FILE)
 DEV_RUN_BACKEND_MAKE = $(COMPOSE_DEV) run --rm --workdir /workspace/backend --env REPO_DIR=/workspace $(1) \
-	$(DEV_APPLICATION_SERVICE) make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE)
+	$(APPLICATION_SERVICE) make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE)
 DJANGO_DEV_MANAGE = $(COMPOSE_DEV) run --rm$(if $(1), $(1)) --workdir $(CONTAINER_PYTHON_PROJECT_DIR) \
-	$(DEV_APPLICATION_SERVICE) $(UV_RUN) python -m app.manage
+	$(APPLICATION_SERVICE) $(UV_RUN) python -m app.manage
 
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 
 DEV_COMPOSE_FILE := deploy/docker-compose.dev.yml
 COMPOSE_PROJECT_DIR := deploy
-DEV_APPLICATION_SERVICE := backend
+APPLICATION_SERVICE := backend
 CONTAINER_PYTHON_PROJECT_DIR := /app
 FRONTEND_DIR := frontend
 MONITORING ?= 0
@@ -109,7 +108,7 @@ SMOKE_HOME_PATTERN := dev-scaffold\|id="root"
 
 .PHONY: be.bash
 be.bash: ## (Docker) Shell into backend container
-	$(COMPOSE_DEV) exec backend bash
+	$(COMPOSE_DEV) exec $(APPLICATION_SERVICE) bash
 
 # Prod
 .PHONY: bootstrap-prod
@@ -121,15 +120,15 @@ bootstrap-prod: prepare-prod ## Prepare inputs and start the production stack
 
 .PHONY: migrate-prod
 migrate-prod: ## Run Django migrations in prod
-	$(COMPOSE_PROD) run --rm backend bash -lc "cd /app && python -m app.manage migrate"
+	$(COMPOSE_PROD) run --rm $(APPLICATION_SERVICE) bash -lc "cd /app && python -m app.manage migrate"
 
 .PHONY: bash-prod
 bash-prod: ## Shell into backend container (prod)
-	$(COMPOSE_PROD) exec backend bash
+	$(COMPOSE_PROD) exec $(APPLICATION_SERVICE) bash
 
 .PHONY: ops.check-prod
 ops.check-prod: ## Run operational checks once and report their state
-	$(COMPOSE_PROD) run --rm backend python -m app.manage monitor_operational_integrity
+	$(COMPOSE_PROD) run --rm $(APPLICATION_SERVICE) python -m app.manage monitor_operational_integrity
 
 .PHONY: ops.check-external-prod
 ops.check-external-prod: ## Run checks once through the external monitoring profile
@@ -190,10 +189,10 @@ verify-ephemeral: smoke ## Verify the running recorded release in ephemeral
 .PHONY: verify-host-ingress
 verify-host-ingress: prepare-ephemeral ## Verify exact images through the loopback ingress boundary
 	$(COMPOSE_EPHEMERAL_INGRESS) config --quiet
-	$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build db backend
-	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage check
-	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage migrate
-	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage collectstatic --noinput --clear
+	$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build db $(APPLICATION_SERVICE)
+	$(COMPOSE_EPHEMERAL_INGRESS) exec -T $(APPLICATION_SERVICE) python -m app.manage check
+	$(COMPOSE_EPHEMERAL_INGRESS) exec -T $(APPLICATION_SERVICE) python -m app.manage migrate
+	$(COMPOSE_EPHEMERAL_INGRESS) exec -T $(APPLICATION_SERVICE) python -m app.manage collectstatic --noinput --clear
 	$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build
 	$(MAKE) smoke-host-ingress 'COMPOSE=$(COMPOSE_EPHEMERAL_INGRESS)'
 
@@ -318,7 +317,7 @@ fe.coverage:
 		FRONTEND_DIR=/workspace/frontend COVERAGE=1 fe.setup-in-container fe.test-in-container
 	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
 		--volume "$(GIT_COMMON_DIR):$(GIT_COMMON_DIR):ro" \
-		backend $(CONTAINER_PYTHON_PROJECT_DIR)/.venv/bin/diff-cover coverage/lcov.info \
+		$(APPLICATION_SERVICE) $(CONTAINER_PYTHON_PROJECT_DIR)/.venv/bin/diff-cover coverage/lcov.info \
 		--config-file /workspace/backend/pyproject.toml $(if $(DIFF_BASE),--compare-branch=$(DIFF_BASE))
 
 else
@@ -329,7 +328,7 @@ endif
 .PHONY: setup be.setup
 setup: be.setup ## Prepare Docker development dependencies from committed lockfiles
 be.setup:
-	$(COMPOSE_DEV) build $(DEV_APPLICATION_SERVICE)
+	$(COMPOSE_DEV) build $(APPLICATION_SERVICE)
 
 .PHONY: ci-ephemeral
 ci-ephemeral: ## Check source and exercise the recorded release in disposable Compose
@@ -350,7 +349,7 @@ be.precommit:
 		--user "$(HOST_UID):$(HOST_GID)" --env HOME=/tmp \
 		--env SKIP="$${SKIP:+$$SKIP,}fe-eslint,fe-prettier" \
 		--volume "$(GIT_COMMON_DIR):$(GIT_COMMON_DIR):ro" \
-		$(DEV_APPLICATION_SERVICE) $(UV_RUN) --no-sync pre-commit run \
+		$(APPLICATION_SERVICE) $(UV_RUN) --no-sync pre-commit run \
 		--config "$(PRECOMMIT_CONFIG)" --all-files
 
 .PHONY: initialize-release
@@ -391,7 +390,7 @@ django-check: ## Run Django's production deployment checks
 		--env DJANGO_SETTINGS_MODULE=app.project.settings.prod \
 		--env DJANGO_SECRET_KEY=check-only-abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ \
 		--env DATABASE_URL=postgresql://app:app@db:5432/app \
-		$(DEV_APPLICATION_SERVICE) $(UV_RUN) python -m app.manage check --deploy
+		$(APPLICATION_SERVICE) $(UV_RUN) python -m app.manage check --deploy
 
 .PHONY: lint be.lint be.lint-in-container
 lint: be.lint ## Run lint checks in Docker
@@ -420,7 +419,7 @@ be.test-in-container:
 	cd "$(SCAFFOLD_ROOT)backend" && $(UV_RUN) pytest -q -c "$(SCAFFOLD_ROOT)$(PYTHON_PROJECT_DIR)/pyproject.toml"
 
 .PHONY: format format-check be.format-check
-RUFF = $(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(DEV_APPLICATION_SERVICE) $(UV_RUN) ruff
+RUFF = $(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/backend $(APPLICATION_SERVICE) $(UV_RUN) ruff
 format: ## Apply Python lint fixes and formatting in Docker
 	$(RUFF) check --config /workspace/backend/pyproject.toml --fix .
 	$(RUFF) format --config /workspace/backend/pyproject.toml .
@@ -526,8 +525,8 @@ EPHEMERAL_CURL = curl -fsS --cacert "$(EPHEMERAL_CERTS_PATH)/server.crt"
 .PHONY: integration-test-ephemeral
 integration-test-ephemeral: ## Check file delivery with the ephemeral application stopped
 	@set -eo pipefail; \
-		$(COMPOSE_EPHEMERAL) stop $(PROD_APPLICATION_SERVICE); \
-		trap '$(COMPOSE_EPHEMERAL) start $(PROD_APPLICATION_SERVICE)' EXIT; \
+		$(COMPOSE_EPHEMERAL) stop $(APPLICATION_SERVICE); \
+		trap '$(COMPOSE_EPHEMERAL) start $(APPLICATION_SERVICE)' EXIT; \
 		$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/static/smoketest.txt' | grep -q 'STATIC_OK'; \
 		if [ -n "$(EPHEMERAL_MEDIA_SMOKE)" ]; then \
 			$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)$(EPHEMERAL_MEDIA_SMOKE)' | grep -q 'MEDIA_OK'; \
@@ -586,7 +585,7 @@ prepare-prod: ## Prepare and validate private production inputs without starting
 		fi; \
 		$(PROD_CONFIG) config --format json 2>/dev/null | \
 		PREPARE_INTERACTIVE=$$prepare_interactive PROD_ENV_FILE="$(PROD_ENV_FILE)" HOST_INGRESS="$(HOST_INGRESS)" HOST_INGRESS_HOST="$(PREPARE_PUBLIC_HOST)" \
-		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" "$(PROD_APPLICATION_SERVICE)"
+		python3 "$(SCAFFOLD_ROOT)scripts/validate_prod_config.py" "$(APPLICATION_SERVICE)"
 	# Self-signed certificate renewal is explicitly local-only.
 	@if [ "$(HOST_INGRESS)" = "1" ]; then \
 		echo "Host ingress owns TLS; skipping application certificate generation"; \
