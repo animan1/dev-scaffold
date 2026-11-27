@@ -22,70 +22,11 @@ ifeq ($(MONITORING),1)
 PROD_COMPOSE_FILES += -f $(MONITORING_COMPOSE_FILE)
 PROD_COMPOSE_PROFILES += --profile monitoring
 endif
-COMPOSE_MONITOR = $(COMPOSE_PROD) -f $(MONITORING_COMPOSE_FILE) --profile monitoring
 PROD_WEB_SERVICE := nginx
 
 # ---- Paths ----
-PY_DIR := backend
 PYTHON_PROJECT_DIR := backend
 SMOKE_HOME_PATTERN := dev-scaffold\|id="root"
-
-.PHONY: be.bash
-be.bash: ## (Docker) Shell into backend container
-	$(COMPOSE_DEV) exec $(APPLICATION_SERVICE) bash
-
-# Prod
-.PHONY: bootstrap-prod
-bootstrap-prod: prepare-prod ## Prepare inputs and start the production stack
-	# Bring up stack, run migrations, and smoke test
-	$(MAKE) up-prod
-	$(MAKE) smoke-prod HOST_INGRESS=$(HOST_INGRESS) \
-		HOST_INGRESS_HOST=$(HOST_INGRESS_HOST) HOST_INGRESS_PORT=$(HOST_INGRESS_PORT)
-
-.PHONY: migrate-prod
-migrate-prod: ## Run Django migrations in prod
-	$(COMPOSE_PROD) run --rm $(APPLICATION_SERVICE) bash -lc "cd /app && python -m app.manage migrate"
-
-.PHONY: bash-prod
-bash-prod: ## Shell into backend container (prod)
-	$(COMPOSE_PROD) exec $(APPLICATION_SERVICE) bash
-
-.PHONY: ops.check-prod
-ops.check-prod: ## Run operational checks once and report their state
-	$(COMPOSE_PROD) run --rm $(APPLICATION_SERVICE) python -m app.manage monitor_operational_integrity
-
-.PHONY: ops.check-external-prod
-ops.check-external-prod: ## Run checks once through the external monitoring profile
-	$(COMPOSE_MONITOR) run --rm monitor python -m app.manage monitor_operational_integrity
-
-.PHONY: ops.monitor-prod
-ops.monitor-prod: ## Follow the unattended production monitor
-	$(COMPOSE_MONITOR) logs -f monitor
-
-# ---- Django dev helpers ----
-
-.PHONY: be.run
-be.run: ## Run Django dev server (app.settings.dev)
-	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage runserver 0.0.0.0:8000
-
-# ---- Setup / Hooks ----
-.PHONY: hooks
-hooks: ## Install pre-commit hooks
-	cd $(PY_DIR) && uv run pre-commit install
-
-# ---- Quality gates ----
-.PHONY: preflight
-preflight: ## Format + lint + typecheck + coverage + precommit
-preflight: format lint typecheck coverage precommit
-	@echo "✅ Preflight complete."
-
-
-# ---- Clean ----
-.PHONY: clean
-clean: ## Remove caches and build artifacts
-	find . -name "__pycache__" -type d -prune -exec rm -rf {} +
-	find . -name "*.pyc" -delete
-	rm -rf $(PY_DIR)/.pytest_cache $(PY_DIR)/.mypy_cache
 
 # ---- Frontend (Vite/React/TS) ----
 # List backend prerequisites first to preserve serial execution order.

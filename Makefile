@@ -23,6 +23,8 @@ COMPOSE_PROD_BASE = COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory $(COMPOSE_PROJECT_DIR) \
 	$(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file $(PROD_ENV_FILE)
 COMPOSE_PROD = $(COMPOSE_PROD_BASE) --env-file $(RELEASE_FILE)
+COMPOSE_MONITOR = MONITOR_SECRETS_DIR="$(abspath deploy/secrets)" $(COMPOSE_PROD) \
+	-f $(if $(MONITORING_COMPOSE_FILE),$(MONITORING_COMPOSE_FILE),deploy/docker-compose.external-monitoring.yml) --profile monitoring
 COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(abspath $(EPHEMERAL_ENV_FILE)) HOST_INGRESS_PORT=$(EPHEMERAL_HTTP_PORT) \
 	PROD_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) INGRESS_CERTS_PATH="$(EPHEMERAL_CERTS_PATH)" \
@@ -116,7 +118,7 @@ ci-ephemeral: ## Check source and exercise the recorded release in disposable Co
 		$(MAKE) up-ephemeral HOST_INGRESS=1 && \
 		$(MAKE) verify-ephemeral HOST_INGRESS=1
 
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|build|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|verify-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release|push-release-images|verify-monitoring-config|deploy-release|rollback-release
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|build|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|verify-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release|push-release-images|verify-monitoring-config|deploy-release|rollback-release|be\.bash-dev|be\.bash-prod|migrate-prod|ops\.check-prod|ops\.check-external-prod|ops\.monitor-prod|hooks|preflight|clean
 
 .PHONY: push-release-images
 push-release-images: ## Push verified images and record their immutable digests
@@ -140,6 +142,18 @@ be.precommit:
 		$(APPLICATION_SERVICE) $(UV_RUN) --no-sync pre-commit run \
 		--config "$(PRECOMMIT_CONFIG)" --all-files
 
+.PHONY: hooks preflight clean
+hooks: ## Install pre-commit hooks
+	cd backend && uv run pre-commit install
+
+preflight: format lint typecheck coverage precommit ## Format, lint, typecheck, check coverage, and run pre-commit
+	@echo "✅ Preflight complete."
+
+clean: ## Remove regenerable tool caches
+	find . -name "__pycache__" -type d -prune -exec rm -rf {} +
+	find . -name "*.pyc" -delete
+	rm -rf backend/.pytest_cache backend/.mypy_cache
+
 .PHONY: initialize-release
 initialize-release: ## Initialize the database and static volume with the recorded backend image
 	@test -f "$(RELEASE_FILE)" || { echo 'Set RELEASE_FILE to a recorded release manifest'; exit 1; }
@@ -155,6 +169,25 @@ deploy-release: initialize-release ## Deploy the recorded images through normal 
 	$(COMPOSE_PROD) up -d --no-build
 
 rollback-release: deploy-release ## Deploy a previously recorded release manifest
+
+.PHONY: be.bash-dev be.bash-prod migrate-prod ops.check-prod ops.check-external-prod ops.monitor-prod
+be.bash-dev: ## Shell into the development application container
+	$(COMPOSE_DEV) exec $(APPLICATION_SERVICE) bash
+
+be.bash-prod: ## Shell into the production application container
+	$(COMPOSE_PROD) exec $(APPLICATION_SERVICE) bash
+
+migrate-prod: ## Run Django migrations in production
+	$(COMPOSE_PROD) run --rm $(APPLICATION_SERVICE) python -m app.manage migrate
+
+ops.check-prod: ## Run operational checks once and report their state
+	$(COMPOSE_PROD) run --rm $(APPLICATION_SERVICE) python -m app.manage monitor_operational_integrity
+
+ops.check-external-prod: ## Run checks once through the external monitoring profile
+	$(COMPOSE_MONITOR) run --rm monitor python -m app.manage monitor_operational_integrity
+
+ops.monitor-prod: ## Follow the unattended production monitor
+	$(COMPOSE_PROD) --profile monitoring logs -f monitor
 
 .PHONY: coverage be.coverage coverage-in-container
 # Source checks use Django's fallback settings without the Compose dev database.

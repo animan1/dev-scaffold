@@ -26,11 +26,18 @@ def _make(*arguments: str) -> str:
     return result.stdout
 
 
-def test_production_operational_check_runs_once() -> None:
-    output = _make("ops.check-prod")
-    assert "docker compose --project-directory deploy -f deploy/docker-compose.prod.yml" in output
-    assert "run --rm backend python -m app.manage monitor_operational_integrity" in output
+@pytest.mark.parametrize(
+    ("profile", "application"), [("react-vite", "backend"), ("server-rendered-django", "app")]
+)
+def test_production_operational_check_runs_once(profile: str, application: str) -> None:
+    output = _make("ops.check-prod", f"SCAFFOLD_PROFILE={profile}")
+    assert f"run --rm {application} python -m app.manage monitor_operational_integrity" in output
     assert "--watch" not in output
+
+    external = _make("ops.check-external-prod", f"SCAFFOLD_PROFILE={profile}")
+    assert "deploy/docker-compose.external-monitoring.yml --profile monitoring" in external
+    assert f'MONITOR_SECRETS_DIR="{_repository_root() / "deploy/secrets"}"' in external
+    assert "run --rm monitor python -m app.manage monitor_operational_integrity" in external
 
 
 def test_production_monitor_target_follows_service_logs() -> None:
