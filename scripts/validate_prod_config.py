@@ -464,13 +464,16 @@ if __name__ == "__main__":
             prepare_backup_path()
             sys.exit(0)
         config = json.load(sys.stdin)
+        if sys.argv[1:2] == ["--host-ingress"]:
+            validate_ingress(config, config["services"][sys.argv[2]]["environment"])
+            sys.exit(0)
         validate(config, sys.argv[1] if len(sys.argv) > 1 else "backend")
         prepare_backup_paths(config)
     except ConfigurationError as error:
         sys.exit(str(error))
     except (OSError, subprocess.CalledProcessError, KeyboardInterrupt):
         sys.exit("Host backup group preparation requires administrator privileges")
-    except (KeyError, TypeError, json.JSONDecodeError):
+    except (IndexError, KeyError, TypeError, json.JSONDecodeError):
         sys.exit("Invalid production configuration; check the private input file")
     except ValueError:
         sys.exit("Invalid production input: DATABASE_URL")

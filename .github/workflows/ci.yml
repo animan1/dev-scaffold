@@ -179,9 +179,6 @@ jobs:
           mkdir -p "$(dirname "$RELEASE_FILE")"
           cp "$manifest" "$RELEASE_FILE"
 
-      - name: Verify host-ingress routing
-        run: make verify-host-ingress
-
       - name: Verify optional monitoring profile
         run: make verify-monitoring-config
 
@@ -202,10 +199,6 @@ jobs:
           output-file: ${{ env.RELEASE_WEB_SBOM }}
           upload-artifact: false
           upload-release-assets: false
-
-      - name: Tear down release verification
-        if: always()
-        run: make rm-ephemeral HOST_INGRESS=0
 
       - name: Log in to this repository's GHCR packages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

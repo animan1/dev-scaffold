@@ -132,7 +132,7 @@ def test_server_rendered_ephemeral_uses_local_tls_ingress() -> None:
     root = _repository_root()
     ingress = (root / "profiles/server-rendered-django/ingress.conf.template").read_text()
     web = (root / "profiles/server-rendered-django/release-nginx.conf").read_text()
-    smoke = _make("--dry-run", "verify-ephemeral").stdout
+    smoke = _make("--dry-run", "verify-ephemeral", "HOST_INGRESS=0").stdout
 
     assert "return 308 https://$host:${INGRESS_HTTPS_PORT}$request_uri" in ingress
     assert "proxy_pass http://web:8080" in ingress

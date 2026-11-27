@@ -616,3 +616,36 @@ def test_production_input_validation_checks_resolved_credentials_without_leaking
     assert (result.returncode == 0) is accepted
     assert "private-password" not in result.stdout + result.stderr
     assert "private-key" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(("address", "valid"), [("127.0.0.1", True), ("0.0.0.0", False)])
+@pytest.mark.parametrize(("application", "origin"), [("backend", "nginx"), ("app", "web")])
+def test_host_ingress_only_validation_checks_all_origin_bindings(
+    address: str, valid: bool, application: str, origin: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOST_INGRESS_HOST", "127.0.0.1")
+    config = {
+        "services": {
+            application: {"environment": {"DJANGO_ALLOWED_HOSTS": "127.0.0.1"}},
+            origin: {
+                "ports": [
+                    {"host_ip": "127.0.0.1", "published": "18080"},
+                    {"host_ip": address, "published": "18081"},
+                ],
+            },
+        },
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_repo_root() / "scripts/validate_prod_config.py"),
+            "--host-ingress",
+            application,
+        ],
+        input=json.dumps(config),
+        capture_output=True,
+        text=True,
+    )
+    assert (result.returncode == 0) is valid
+    if not valid:
+        assert "Host-ingress origin requires loopback TCP port bindings" in result.stderr
