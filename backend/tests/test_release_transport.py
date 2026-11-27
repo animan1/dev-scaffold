@@ -129,7 +129,8 @@ def test_installer_can_reuse_migrations_with_an_explicit_no_pull_command(profile
     assert "validated-compose" in output
     assert "python -m app.manage migrate" in output
     assert "python -m app.manage collectstatic" in output
-    assert "--no-build" in output
+    assert output.count(" up -d --no-build\n") == 1
+    assert "--force-recreate" not in output
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])

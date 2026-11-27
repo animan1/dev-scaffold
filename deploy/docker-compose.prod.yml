@@ -74,7 +74,9 @@ services:
       - ./nginx/default.prod.conf:/etc/nginx/templates/default.conf.template:ro
       - staticfiles:/static:ro
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+        restart: true
 
 volumes:
   pgdata:
