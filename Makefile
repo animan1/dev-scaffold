@@ -326,8 +326,7 @@ setup: ## Prepare Docker development dependencies from committed lockfiles
 .PHONY: ci-ephemeral
 ci-ephemeral: ## Check source and exercise the recorded release in disposable Compose
 	$(MAKE) setup
-	$(MAKE) check SOURCE_DB_ARGS='--no-deps --env DATABASE_URL=sqlite:///:memory:'
-	$(MAKE) fe.fmt-check fe.coverage
+	$(MAKE) check
 	$(MAKE) build-release-images
 	@trap 'status=$$?; $(MAKE) rm-ephemeral HOST_INGRESS=0 || { if [ "$$status" -eq 0 ]; then exit 1; fi; }; exit "$$status"' EXIT; \
 		$(MAKE) verify-release-images HOST_INGRESS=0
@@ -355,8 +354,10 @@ initialize-release: ## Initialize the database and static volume with the record
 	$(RUN_PROD) python -m app.manage collectstatic --noinput --clear
 
 .PHONY: coverage coverage-in-container
+# Source checks use Django's fallback settings without the Compose dev database.
+SOURCE_CHECK_ARGS := --no-deps --env DATABASE_URL=
 coverage: ## Run backend tests and enforce total and changed-line coverage in Docker
-	$(call DEV_RUN_BACKEND_MAKE,$(SOURCE_DB_ARGS)) \
+	$(call DEV_RUN_BACKEND_MAKE,$(SOURCE_CHECK_ARGS)) \
 		DIFF_BASE="$(DIFF_BASE)" coverage-in-container
 
 coverage-in-container:
@@ -367,10 +368,10 @@ coverage-in-container:
 
 .PHONY: check django-check
 check: ## Run source quality gates through the development toolchain
-	$(MAKE) format-check
+	$(MAKE) format-check fe.fmt-check
 	$(MAKE) lint
 	$(MAKE) typecheck
-	$(MAKE) coverage
+	$(MAKE) coverage fe.coverage
 	$(MAKE) migrations-check
 	$(MAKE) django-check
 
@@ -588,7 +589,7 @@ migrations: ## Create migrations for intentional model changes
 	$(DJANGO_DEV_MANAGE) makemigrations
 
 migrations-check: ## Reject model changes without migrations
-	$(call DJANGO_DEV_MANAGE,$(SOURCE_DB_ARGS)) makemigrations --check --dry-run
+	$(call DJANGO_DEV_MANAGE,$(SOURCE_CHECK_ARGS)) makemigrations --check --dry-run
 
 migrate: ## Apply development database migrations
 	$(DJANGO_DEV_MANAGE) migrate

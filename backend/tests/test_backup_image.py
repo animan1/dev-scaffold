@@ -87,8 +87,8 @@ def test_backup_image_version_report_is_make_driven() -> None:
 
 
 def test_aggregate_verification_includes_backup_image() -> None:
-    default_verify = _make("SCAFFOLD_BACKUP_PROFILE=none", "verify")
-    selected_verify = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "verify")
+    default_verify = _make("SCAFFOLD_BACKUP_PROFILE=none", "ci-ephemeral")
+    selected_verify = _make("SCAFFOLD_BACKUP_PROFILE=immutable-backup", "ci-ephemeral")
 
     assert "profiles/immutable-backup/Dockerfile" not in default_verify
     assert "profiles/immutable-backup/Dockerfile" in selected_verify

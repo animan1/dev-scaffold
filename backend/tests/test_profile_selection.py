@@ -144,12 +144,13 @@ def test_common_lint_runs_frontend_only_when_applicable_and_django_passes(
 def test_ci_checks_source_without_starting_dev_services(profile: str) -> None:
     output = _make(f"SCAFFOLD_PROFILE={profile}", "--dry-run", "ci-ephemeral").stdout
 
-    assert "--no-deps --env DATABASE_URL=sqlite:///:memory:" in output
+    assert output.count("--no-deps --env DATABASE_URL= ") == 2
     assert "up-dev" not in output
     assert "down-dev" not in output
     assert "up-prod" not in output
     assert "coverage-in-container" in output
     assert ("diff-cover coverage/lcov.info" in output) == (profile == "react-vite")
+    assert ("frontend corepack pnpm fmt-check" in output) == (profile == "react-vite")
     assert "verify-release-images HOST_INGRESS=0" in output
     assert "down -v --remove-orphans" in output
 
@@ -170,7 +171,6 @@ def test_ci_cleans_up_release_validation_and_reports_failure(
     expected = ["setup", "check"]
     if failure != "check":
         expected += [
-            "fe.fmt-check",
             "build-release-images",
             "verify-release-images",
             "rm-ephemeral",
