@@ -103,11 +103,14 @@ def test_release_configuration_resolves_production_project_and_volumes(
                 "HOST_INGRESS_PORT=19080",
                 "RELEASE_HTTP_PORT=28080",
                 "PROD_HTTPS_PORT=28043",
-                f"PROD_ENV_FILE={private}",
+                f"PROD_ENV_FILE={os.path.relpath(private, _repository_root())}",
                 f"RELEASE_FILE={manifest}",
             )
         )
         assert config["name"] == project
+        application = "app" if profile == "server-rendered-django" else "backend"
+        assert config["services"][application]["image"] == "local/backend:test"
+        assert config["services"]["db"]["environment"]["POSTGRES_PASSWORD"] == "test-only"
         web = "web" if profile == "server-rendered-django" else "nginx"
         if profile == "server-rendered-django" and host_ingress == "0":
             assert not config["services"][web].get("ports")
