@@ -31,7 +31,7 @@ def _make(profile: str, *arguments: str) -> str:
 
 def test_react_release_path_remains_selected_by_the_react_profile() -> None:
     build = _make("react-vite", "--dry-run", "build-release-images")
-    verify = _make("react-vite", "--dry-run", "verify-release-images")
+    verify = _make("react-vite", "--dry-run", "up-ephemeral", "verify-ephemeral")
     logs = _make("react-vite", "--dry-run", "logs-ephemeral")
     initialize = _make("react-vite", "--dry-run", "initialize-release")
 
@@ -55,7 +55,7 @@ def test_environment_namespaces_do_not_inherit_global_compose_project(
     for suffix, targets in (
         ("dev", ("up-dev", "down-dev", "reset-dev", "logs-dev", "ps-dev")),
         ("prod", ("up-prod", "down-prod", "deploy-release", "rollback-release", "prepare-prod")),
-        ("ephemeral", ("verify-release-images", "logs-ephemeral", "down-ephemeral")),
+        ("ephemeral", ("up-ephemeral", "verify-ephemeral", "logs-ephemeral", "down-ephemeral")),
     ):
         output = _make(profile, "PROJECT_NAME=tenant", "--dry-run", *targets)
         projects = re.findall(r"COMPOSE_PROJECT_NAME=([^\s]+)", output)
@@ -330,7 +330,11 @@ def test_smoke_requires_static_delivery_in_both_profiles(
 
 def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> None:
     build = _make("server-rendered-django", "--dry-run", "build-release-images")
-    verify = _make("server-rendered-django", "--dry-run", "verify-release-images", "HOST_INGRESS=0")
+    verify = _make("server-rendered-django", "--dry-run", "up-ephemeral", "HOST_INGRESS=0")
+    smoke = _make("server-rendered-django", "--dry-run", "verify-ephemeral", "HOST_INGRESS=0")
+    integration = _make(
+        "server-rendered-django", "--dry-run", "integration-test-ephemeral", "HOST_INGRESS=0"
+    )
     logs = _make("server-rendered-django", "--dry-run", "logs-ephemeral")
 
     assert "profiles/server-rendered-django/backend.Dockerfile" in build
@@ -346,10 +350,13 @@ def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> Non
     static_collection = verify.index("python -m app.manage collectstatic --noinput --clear")
     application_start = verify.index("up -d --no-build\n")
     assert db_start < production_check < migration < static_collection < application_start
-    assert verify.count("run --rm --no-deps app") == 4
+    assert verify.count("run --rm --no-deps app") == 3
     assert "up -d --no-build db app" not in verify
     assert "exec -T app python -m app.manage migrate" not in verify
-    before_stop, after_stop = verify.split("stop app", 1)
+    assert "/static/smoketest.txt" in smoke
+    assert "docker compose" not in smoke
+    before_stop, after_stop = integration.split("stop app", 1)
+    assert "start app" in after_stop
     for path in ("static/smoketest.txt", "media/release-smoketest.txt"):
         url = f"https://127.0.0.1:18444/{path}"
         assert url in before_stop
@@ -366,7 +373,7 @@ def test_server_rendered_release_preserves_manifest_deploy_and_rollback_contract
         "build-release-images",
         "initialize-ephemeral",
         "initialize-release",
-        "verify-release-images",
+        "verify-ephemeral",
         "push-release-images",
         "deploy-release",
         "rollback-release",
@@ -385,7 +392,7 @@ def test_server_rendered_release_preserves_manifest_deploy_and_rollback_contract
     ("target", "extra_arguments"),
     (
         (
-            "verify-release-images",
+            "up-ephemeral",
             ("EPHEMERAL_ENV_FILE={ci_env_file}", "RELEASE_FILE={release_file}"),
         ),
         ("deploy-release", ("RELEASE_FILE={release_file}",)),
@@ -447,7 +454,7 @@ def test_failed_migration_never_starts_a_persistent_application(
 
     assert result.returncode != 0
     commands = docker_log.read_text().splitlines()
-    suffix = "ephemeral" if target == "verify-release-images" else "prod"
+    suffix = "ephemeral" if target == "up-ephemeral" else "prod"
     assert all(
         command.startswith(f"{_repository_root().name}-{suffix} ")
         for command in commands
@@ -483,7 +490,9 @@ def test_server_rendered_only_selector_runs_the_shared_release_publication() -> 
     assert "always()" in release_job
     assert "needs.immutable-release-gate.result == 'success'" in release_job
     assert "run: make build-release-images" in release_job
-    assert "run: make verify-release-images" in release_job
+    assert "make up-ephemeral HOST_INGRESS=0" in release_job
+    assert "make verify-ephemeral HOST_INGRESS=0" in release_job
+    assert "make integration-test-ephemeral HOST_INGRESS=0" in release_job
     assert release_job.count("uses: anchore/sbom-action@v0") == 2
     assert "RELEASE_BACKEND_SBOM" in release_job
     assert "RELEASE_WEB_SBOM" in release_job

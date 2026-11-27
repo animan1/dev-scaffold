@@ -54,7 +54,7 @@ release Make interface. Initialization starts only PostgreSQL, then uses
 one-shot containers from the recorded backend image for the production check,
 migrations, and static collection. A failed operation therefore leaves the
 currently deployed application and web containers in place; only successful
-initialization permits `deploy-release` or `verify-release-images` to start the
+initialization permits `deploy-release` or `up-ephemeral` to start the
 persistent application and web services. Neither path builds an image during
 deployment.
 

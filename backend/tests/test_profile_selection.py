@@ -151,11 +151,15 @@ def test_ci_checks_source_without_starting_dev_services(profile: str) -> None:
     assert "coverage-in-container" in output
     assert ("diff-cover coverage/lcov.info" in output) == (profile == "react-vite")
     assert ("frontend corepack pnpm fmt-check" in output) == (profile == "react-vite")
-    assert "verify-release-images HOST_INGRESS=0" in output
+    assert "up-ephemeral HOST_INGRESS=0" in output
+    assert "verify-ephemeral HOST_INGRESS=0" in output
     assert "down -v --remove-orphans" in output
 
 
-@pytest.mark.parametrize("failure", ["", "check", "verify-release-images", "rm-ephemeral"])
+@pytest.mark.parametrize(
+    "failure",
+    ["", "check", "up-ephemeral", "verify-ephemeral", "integration-test-ephemeral", "rm-ephemeral"],
+)
 def test_ci_cleans_up_release_validation_and_reports_failure(
     failure: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -170,11 +174,12 @@ def test_ci_cleans_up_release_validation_and_reports_failure(
 
     expected = ["setup", "check"]
     if failure != "check":
-        expected += [
-            "build-release-images",
-            "verify-release-images",
-            "rm-ephemeral",
-        ]
+        expected += ["build-release-images", "up-ephemeral"]
+        if failure != "up-ephemeral":
+            expected.append("verify-ephemeral")
+            if failure != "verify-ephemeral":
+                expected.append("integration-test-ephemeral")
+        expected.append("rm-ephemeral")
     assert log.read_text().splitlines() == expected
     assert (result.returncode != 0) == bool(failure)
 
