@@ -65,7 +65,6 @@ DEV_COMPOSE_PROJECT_DIR := deploy
 DEV_APPLICATION_SERVICE := backend
 CONTAINER_PYTHON_PROJECT_DIR := /app
 FRONTEND_DIR := frontend
-FE_INSTALL = corepack pnpm install --frozen-lockfile
 MONITORING ?= 0
 EPHEMERAL_HTTPS_PORT ?= 18443
 PROD_COMPOSE_FILES := -f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml
@@ -119,7 +118,7 @@ be.verify: ## Run backend verification in the development container
 fe.ci: ## (Docker) Run frontend verify inside dev container
 	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
 		--volume "$(CURDIR)/frontend/node_modules:/app/node_modules" \
-		frontend sh -lc 'apk add --no-cache make >/dev/null 2>&1 || true; corepack enable; git config --global --add safe.directory /workspace; $(FE_INSTALL) && make -f /workspace/Makefile FRONTEND_DIR=/workspace/frontend fe.verify'
+		frontend sh -lc 'apk add --no-cache make >/dev/null 2>&1 || true; corepack enable; git config --global --add safe.directory /workspace; make -f /workspace/Makefile SCAFFOLD_PROFILE=react-vite FRONTEND_DIR=/workspace/frontend fe.setup-in-container fe.verify'
 	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
 		backend $(CONTAINER_PYTHON_PROJECT_DIR)/.venv/bin/diff-cover coverage/lcov.info \
 		--config-file /workspace/backend/pyproject.toml $(if $(DIFF_BASE),--compare-branch=$(DIFF_BASE))
@@ -313,13 +312,16 @@ clean: ## Remove caches and build artifacts
 	rm -rf $(PY_DIR)/.pytest_cache $(PY_DIR)/.mypy_cache
 
 # ---- Frontend (Vite/React/TS) ----
-.PHONY: fe.setup
+.PHONY: fe.setup fe.setup-in-container
 fe.setup: ## Install locked frontend dependencies in Docker
 	@mkdir -p "$(FRONTEND_DIR)/node_modules"
 	$(COMPOSE_DEV) run --rm --no-deps --user "$$(id -u):$$(id -g)" \
 		--env HOME=/tmp --env COREPACK_HOME=/tmp/corepack \
 		--volume "$(abspath $(FRONTEND_DIR))/node_modules:/app/node_modules" \
-		frontend $(FE_INSTALL)
+		frontend make -f /workspace/Makefile SCAFFOLD_PROFILE=react-vite fe.setup-in-container
+
+fe.setup-in-container:
+	corepack pnpm install --frozen-lockfile
 
 .PHONY: fe.run
 fe.run: ## Run Vite dev server

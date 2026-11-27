@@ -206,7 +206,16 @@ def test_setup_builds_development_dependencies(profile: str, service: str) -> No
 
     assert f"build {service}\n" in output
     assert " up " not in output
-    assert ("frontend corepack pnpm install --frozen-lockfile" in output) == (service == "backend")
+    assert ("fe.setup-in-container" in output) == (profile == "react-vite")
+
+
+def test_react_setup_and_ci_share_the_container_install() -> None:
+    selectors = ("SCAFFOLD_PROFILE=react-vite", "--dry-run")
+    ci = _make(*selectors, "fe.ci").stdout
+    install = _make(*selectors, "fe.setup-in-container").stdout
+
+    assert "fe.setup-in-container fe.verify" in ci
+    assert install.strip() == "corepack pnpm install --frozen-lockfile"
 
 
 def test_help_lists_commands_when_optional_makefiles_are_loaded() -> None:
