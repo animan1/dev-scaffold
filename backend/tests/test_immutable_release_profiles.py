@@ -204,13 +204,17 @@ def test_shared_lifecycle_commands_select_each_requested_environment(profile: st
             "tenant-ephemeral",
         ]
     waiting = _make(
-        profile, "--dry-run", "PROJECT_NAME=tenant", "wait-prod", "DEV_URL_ROOT=http://dev.example"
+        profile,
+        "--dry-run",
+        "PROJECT_NAME=tenant",
+        "wait-prod",
+        "DEV_URL_ROOT=http://dev.example",
+        "PROD_HTTPS_URL=https://tenant.example:9443",
     )
     assert "COMPOSE_PROJECT_NAME=tenant-prod" in waiting
     assert "tenant-dev" not in waiting
-    assert "X-Forwarded-Proto: https" in waiting
-    assert "Host: 127.0.0.1" in waiting
-    assert "http://127.0.0.1:18080/api/healthz" in waiting
+    assert "X-Forwarded-Proto" not in waiting
+    assert "https://tenant.example:9443/api/healthz" in waiting
     assert "http://dev.example" not in waiting
     smoke = _make(
         profile,
@@ -239,9 +243,11 @@ def test_shared_lifecycle_commands_select_each_requested_environment(profile: st
     assert "--cacert 'deploy/nginx/certs/server.crt'" in direct
     assert "X-Forwarded-Proto" not in direct
     assert "curl -k" not in direct
+    assert "X-Forwarded-Proto" not in smoke
     if profile == "react-vite":
-        assert "Django admin slash redirect was not routed" in smoke
-        assert "Django admin slash redirect was not routed" not in direct
+        origin = _make(profile, "--dry-run", "verify-host-ingress")
+        assert "Django admin slash redirect was not routed" in origin
+        assert "X-Forwarded-Proto: https" in origin
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])

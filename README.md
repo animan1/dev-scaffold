@@ -247,8 +247,9 @@ make smoke-prod HOST_INGRESS_PORT=18080 \
 make down-prod HOST_INGRESS=1 HOST_INGRESS_PORT=18080
 ```
 
-`smoke-prod` connects to `https://$(HOST_INGRESS_HOST)` with normal certificate
-verification. Set `PROD_HTTPS_URL` for a custom HTTPS endpoint or port.
+`wait-prod` and `smoke-prod` connect to `https://$(HOST_INGRESS_HOST)` on port 443
+with normal certificate verification. Set `PROD_HTTPS_URL` for a custom HTTPS
+endpoint or port.
 
 Digest-pinned deployments use the same opt-in flag:
 
