@@ -18,14 +18,7 @@ COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 	PROD_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) INGRESS_CERTS_PATH="$(EPHEMERAL_CERTS_PATH)" \
 	docker compose --project-directory $(COMPOSE_PROJECT_DIR) $(PROD_COMPOSE_FILES) \
 	--env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
-LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
-	RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) RELEASE_IMAGE_PREFIX=$(RELEASE_IMAGE_PREFIX) \
-	RELEASE_REVISION=$(RELEASE_REVISION) RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT)
 PROD_APPLICATION_SERVICE := app
-# Resolve configuration before a release manifest or its images exist.
-PROD_CONFIG = $(LOCAL_RELEASE_IMAGES) COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) \
-	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory $(COMPOSE_PROJECT_DIR) \
-	$(PROD_COMPOSE_FILES) --env-file $(PROD_ENV_FILE)
 
 .PHONY: fe.setup fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check fe.coverage
 fe.lint: ## No frontend lint checks for this profile
