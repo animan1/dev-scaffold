@@ -46,7 +46,7 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
         "check",
         "ci-ephemeral",
         "precommit",
-        "build-production",
+        "build-release-images",
         "up-prod",
         "smoke-prod",
         "down-prod",

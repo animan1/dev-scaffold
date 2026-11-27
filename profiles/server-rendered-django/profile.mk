@@ -2,7 +2,6 @@ HELP_FILES = $(filter-out $(firstword $(MAKEFILE_LIST)),$(MAKEFILE_LIST))
 
 PYTHON_PROJECT_DIR := profiles/server-rendered-django
 SMOKE_HOME_PATTERN := <main
-PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
 DEV_COMPOSE_FILE := profiles/server-rendered-django/compose.yml
 COMPOSE_PROJECT_DIR := .
 CONTAINER_PYTHON_PROJECT_DIR := /workspace/profiles/server-rendered-django
@@ -15,12 +14,6 @@ PROD_COMPOSE_FILES = -f $(RELEASE_COMPOSE_FILE) \
 	$(if $(filter 0,$(HOST_INGRESS)),-f profiles/server-rendered-django/standalone.compose.yml)
 EPHEMERAL_COMPOSE_FILES = $(PROD_COMPOSE_FILES)
 PROD_APPLICATION_SERVICE := app
-
-.PHONY: build-production
-build-production: ## Build the multi-stage non-root production image
-	docker build -f profiles/server-rendered-django/backend.Dockerfile \
-		--target production -t $(PRODUCTION_IMAGE) .
-	@test "$$(docker image inspect --format='{{.Config.User}}' $(PRODUCTION_IMAGE))" = "app"
 
 .PHONY: build-release-images
 build-release-images: ## Build commit-addressed Django and application Nginx images once

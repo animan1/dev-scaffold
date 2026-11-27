@@ -16,7 +16,7 @@ future scaffold merges can update both profiles normally.
 - The same Make interface for developers and CI: `prepare-prod`, `setup`, `up-dev`, `down-dev`,
   `reset-dev`, `deps.lock`, `format`, `lint`, `typecheck`, `test`, `coverage`,
   `migrations`, `migrate`, `superuser`, `shell`, `check`, `verify`, `precommit`,
-  `build-production`, and `smoke`.
+  `build-release-images`, and `smoke`.
 - Ruff formatting and linting, strict MyPy, pytest, total and changed-line
   coverage, migration-drift checks, Django deployment checks, a multi-stage
   non-root production image, and routed smoke tests.
