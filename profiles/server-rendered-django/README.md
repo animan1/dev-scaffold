@@ -13,7 +13,7 @@ future scaffold merges can update both profiles normally.
 - Project-scoped Compose resources and a configurable loopback-only port.
 - A persistent PostgreSQL volume. `make down-dev` preserves it; `make reset-dev
   CONFIRM_RESET=1` is the explicit destructive operation.
-- The same Make interface for developers and CI: `prepare-prod`, `build`, `up-dev`, `down-dev`,
+- The same Make interface for developers and CI: `prepare-prod`, `setup`, `up-dev`, `down-dev`,
   `reset-dev`, `deps.lock`, `format`, `lint`, `typecheck`, `test`, `coverage`,
   `migrations`, `migrate`, `superuser`, `shell`, `check`, `verify`, `precommit`,
   `build-production`, and `smoke`.

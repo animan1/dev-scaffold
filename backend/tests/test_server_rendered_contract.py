@@ -32,7 +32,7 @@ def test_server_rendered_make_contract_and_quality_gates() -> None:
     makefile += (_repository_root() / "Makefile").read_text()
 
     for target in (
-        "build",
+        "setup",
         "up-dev",
         "down-dev",
         "logs-dev",
