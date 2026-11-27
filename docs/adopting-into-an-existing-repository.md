@@ -74,7 +74,7 @@ adaptations here. Those belong in later application commits or pull requests.
 Run the selected profile's documented contracts from the reconciled tree:
 
 ```bash
-make verify
+make ci-ephemeral
 make precommit
 git diff --check
 ```

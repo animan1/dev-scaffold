@@ -39,21 +39,10 @@ jobs:
             > .scaffold-profile
           test "$(make --no-print-directory profiles | jq -r '.selected.application')" = "server-rendered-django"
 
-      - name: Verify the downstream profile through its shared Make contract
+      - name: Check source and exercise the ephemeral release
         env:
           DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
-        run: make verify migrate
-
-      - name: Exercise ephemeral deployment and local ingress
-        run: make build-release-images up-ephemeral verify-ephemeral HOST_INGRESS=0
-
-      - name: Exercise the server-rendered immutable-release contract
-        if: needs.profile-selection.outputs.selected-profile != 'server-rendered-django'
-        run: make build-release-images verify-release-images HOST_INGRESS=0
-
-      - name: Stop development and remove ephemeral test data
-        if: always()
-        run: make down-dev rm-ephemeral HOST_INGRESS=0
+        run: make ci-ephemeral
 
   backend:
     needs: profile-selection
@@ -64,23 +53,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Compose up (detached) via Make
-        run: make up-dev
-
-      - name: Wait for backend
-        run: make wait-dev
-
-      - name: Verify (inside container) via Make
+      - name: Check source and exercise the ephemeral release
         env:
           DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
-        run: make migrate be.ci fe.ci
-
-      - name: Smoke test via Nginx
-        run: make smoke
-
-      - name: Tear down
-        if: always()
-        run: make down-dev
+        run: make ci-ephemeral SCAFFOLD_PROFILE=react-vite
 
   immutable-backup-profile:
     needs: profile-selection
@@ -163,7 +139,7 @@ jobs:
         run: make build-release-images
 
       - name: Verify and smoke-test exact images
-        run: make verify-release-images
+        run: make verify-release-images HOST_INGRESS=0
 
       - name: Verify host-ingress routing
         run: make verify-host-ingress
@@ -191,7 +167,7 @@ jobs:
 
       - name: Tear down release verification
         if: always()
-        run: make rm-ephemeral
+        run: make rm-ephemeral HOST_INGRESS=0
 
       - name: Log in to this repository's GHCR packages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

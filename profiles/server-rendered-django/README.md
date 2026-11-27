@@ -127,7 +127,7 @@ applying committed schema changes; restarting services does not change schema.
 Then exercise the profile through its stable contract:
 
 ```bash
-make verify
+make ci-ephemeral
 make precommit
 make deps.lock
 ```

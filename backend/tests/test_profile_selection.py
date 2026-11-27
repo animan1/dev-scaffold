@@ -140,35 +140,43 @@ def test_common_lint_runs_frontend_only_when_applicable_and_django_passes(
     assert log.read_text().splitlines() == expected
 
 
-def test_backend_verification_uses_explicit_container_boundary_without_overrides() -> None:
-    ci = _make("SCAFFOLD_PROFILE=react-vite", "--dry-run", "be.ci").stdout
-    verify = _make("SCAFFOLD_PROFILE=react-vite", "--dry-run", "be.verify").stdout
-    assert ci == verify
-    assert "docker compose" in verify
-    assert "be.verify-in-container" in verify
-    assert "RUFF=" not in verify
-    internal = subprocess.run(
-        [
-            "make",
-            "--no-print-directory",
-            "--dry-run",
-            "-f",
-            str(_repository_root() / "Makefile"),
-            "SCAFFOLD_PROFILE=react-vite",
-            f"PY_DIR={_repository_root() / 'backend'}",
-            "be.verify-in-container",
-        ],
-        cwd=_repository_root() / "backend",
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    assert "docker compose" not in internal
-    assert "ruff format --config /workspace/backend/pyproject.toml --check ." in internal
-    assert "ruff check --config /workspace/backend/pyproject.toml" in internal
-    assert "mypy --config-file /workspace/backend/pyproject.toml" in internal
-    assert "--cov=src --cov-config=pyproject.toml" in internal
-    assert f'pytest -c "{_repository_root() / "backend/pyproject.toml"}"' in internal
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+def test_ci_checks_source_without_starting_dev_services(profile: str) -> None:
+    output = _make(f"SCAFFOLD_PROFILE={profile}", "--dry-run", "ci-ephemeral").stdout
+
+    assert "--no-deps --env DATABASE_URL=sqlite:///:memory:" in output
+    assert "up-dev" not in output
+    assert "down-dev" not in output
+    assert "up-prod" not in output
+    assert "coverage-in-container" in output
+    assert ("diff-cover coverage/lcov.info" in output) == (profile == "react-vite")
+    assert "verify-release-images HOST_INGRESS=0" in output
+    assert "down -v --remove-orphans" in output
+
+
+@pytest.mark.parametrize("failure", ["", "check", "verify-release-images", "rm-ephemeral"])
+def test_ci_cleans_up_release_validation_and_reports_failure(
+    failure: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make = tmp_path / "record-make"
+    log = tmp_path / "calls"
+    make.write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "$CALL_LOG"\n[ "$1" != "$FAIL_TARGET" ]\n')
+    make.chmod(0o755)
+    monkeypatch.setenv("CALL_LOG", str(log))
+    monkeypatch.setenv("FAIL_TARGET", failure)
+
+    result = _make(f"MAKE={make}", "ci-ephemeral", check=False)
+
+    expected = ["setup", "check"]
+    if failure != "check":
+        expected += [
+            "fe.fmt-check",
+            "build-release-images",
+            "verify-release-images",
+            "rm-ephemeral",
+        ]
+    assert log.read_text().splitlines() == expected
+    assert (result.returncode != 0) == bool(failure)
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
@@ -211,10 +219,10 @@ def test_setup_builds_development_dependencies(profile: str, service: str) -> No
 
 def test_react_setup_and_ci_share_the_container_install() -> None:
     selectors = ("SCAFFOLD_PROFILE=react-vite", "--dry-run")
-    ci = _make(*selectors, "fe.ci").stdout
+    ci = _make(*selectors, "fe.coverage").stdout
     install = _make(*selectors, "fe.setup-in-container").stdout
 
-    assert "fe.setup-in-container fe.verify" in ci
+    assert "COVERAGE=1 fe.setup-in-container fe.test-in-container" in ci
     assert install.strip() == "corepack pnpm install --frozen-lockfile"
 
 
@@ -248,6 +256,8 @@ def test_ci_routes_profiles_without_duplicate_pr_push_runs() -> None:
     assert "SCAFFOLD_PROFILE ?= server-rendered-django" in server_job
     assert "CI_PROFILES ?= server-rendered-django" in server_job
     assert "make --no-print-directory profiles | jq -r '.selected.application'" in server_job
-    assert "run: make verify migrate" in server_job
+    assert "run: make ci-ephemeral" in server_job
+    assert "run: make ci-ephemeral SCAFFOLD_PROFILE=react-vite" in workflow
+    assert "run: make up-dev" not in workflow
     assert "SCAFFOLD_PROFILE:" not in server_job
     assert "pnpm" not in server_job
