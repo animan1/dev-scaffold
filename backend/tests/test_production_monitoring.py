@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 
 def _repository_root() -> Path:
@@ -32,6 +35,34 @@ def test_production_operational_check_runs_once() -> None:
 
 def test_production_monitor_target_follows_service_logs() -> None:
     assert "logs -f monitor" in _make("ops.monitor-prod")
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Needs Docker Compose client")
+@pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
+def test_monitoring_config_resolves_without_a_daemon(profile: str, tmp_path: Path) -> None:
+    manifest = tmp_path / "release.env"
+    manifest.write_text(
+        "RELEASE_BACKEND_IMAGE=local/backend:test\nRELEASE_WEB_IMAGE=local/web:test\n"
+    )
+    subprocess.run(
+        [
+            "make",
+            "verify-monitoring-config",
+            f"SCAFFOLD_PROFILE={profile}",
+            "SCAFFOLD_BACKUP_PROFILE=none",
+            "DOCKER_HOST=unix:///nonexistent",
+            f"EPHEMERAL_ENV_FILE={tmp_path / 'ephemeral.env'}",
+            f"RELEASE_FILE={manifest}",
+        ],
+        cwd=_repository_root(),
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    command = _make("verify-monitoring-config", f"SCAFFOLD_PROFILE={profile}")
+    assert ("-f deploy/docker-compose.external-monitoring.yml" in command) == (
+        profile == "react-vite"
+    )
 
 
 def test_backup_status_volume_is_shared_with_operational_monitor() -> None:

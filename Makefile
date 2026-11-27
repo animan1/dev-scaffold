@@ -84,6 +84,7 @@ RELEASE_BACKEND_CONTEXT := backend
 RELEASE_BACKEND_DOCKERFILE := backend/Dockerfile
 RELEASE_WEB_DOCKERFILE := deploy/nginx/Dockerfile
 MONITORING ?= 0
+MONITORING_COMPOSE_FILE := deploy/docker-compose.external-monitoring.yml
 EPHEMERAL_HTTP_PORT ?= $(RELEASE_HTTP_PORT)
 EPHEMERAL_HTTPS_PORT ?= 18443
 RELEASE_COMPOSE_FILES := -f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml
@@ -95,10 +96,10 @@ ifeq ($(HOST_INGRESS),1)
 PROD_COMPOSE_FILES += -f deploy/docker-compose.host-ingress.yml
 endif
 ifeq ($(MONITORING),1)
-PROD_COMPOSE_FILES += -f deploy/docker-compose.external-monitoring.yml
+PROD_COMPOSE_FILES += -f $(MONITORING_COMPOSE_FILE)
 PROD_COMPOSE_PROFILES += --profile monitoring
 endif
-COMPOSE_MONITOR = $(COMPOSE_PROD) -f deploy/docker-compose.external-monitoring.yml --profile monitoring
+COMPOSE_MONITOR = $(COMPOSE_PROD) -f $(MONITORING_COMPOSE_FILE) --profile monitoring
 PROD_WEB_SERVICE := nginx
 
 # ---- Paths ----
@@ -137,10 +138,6 @@ ops.check-external-prod: ## Run checks once through the external monitoring prof
 .PHONY: ops.monitor-prod
 ops.monitor-prod: ## Follow the unattended production monitor
 	$(COMPOSE_MONITOR) logs -f monitor
-
-.PHONY: verify-monitoring-config
-verify-monitoring-config: prepare-ephemeral ## Validate the optional monitoring Compose profile
-	$(COMPOSE_EPHEMERAL) -f deploy/docker-compose.external-monitoring.yml --profile monitoring config --quiet
 
 .PHONY: deploy-release
 deploy-release: initialize-release ## Deploy the recorded images through normal production initialization
@@ -295,7 +292,7 @@ ci-ephemeral: ## Check source and exercise the recorded release in disposable Co
 		$(MAKE) up-ephemeral HOST_INGRESS=1 && \
 		$(MAKE) verify-ephemeral HOST_INGRESS=1
 
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|build|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|verify-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release|push-release-images
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|build|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|verify-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release|push-release-images|verify-monitoring-config
 
 .PHONY: push-release-images
 push-release-images: ## Push verified images and record their immutable digests
@@ -528,6 +525,10 @@ else
 EPHEMERAL_URL_ROOT = $(EPHEMERAL_HTTPS_URL)
 EPHEMERAL_CURL_CMD = $(EPHEMERAL_CURL)
 endif
+
+.PHONY: verify-monitoring-config
+verify-monitoring-config: prepare-ephemeral ## Validate the optional monitoring Compose profile
+	$(COMPOSE_EPHEMERAL) $(if $(MONITORING_COMPOSE_FILE),-f $(MONITORING_COMPOSE_FILE)) --profile monitoring config --quiet
 
 .PHONY: integration-test-ephemeral
 integration-test-ephemeral: ## Check file delivery with the ephemeral application stopped

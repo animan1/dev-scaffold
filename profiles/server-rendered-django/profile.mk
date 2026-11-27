@@ -27,10 +27,6 @@ seed-ephemeral-media:
 	$(COMPOSE_EPHEMERAL) exec -T $(APPLICATION_SERVICE) \
 		sh -c "printf 'MEDIA_OK\\n' > $(EPHEMERAL_MEDIA_SMOKE)"
 
-.PHONY: verify-monitoring-config
-verify-monitoring-config: prepare-ephemeral ## Validate the optional release monitor
-	$(COMPOSE_EPHEMERAL) --profile monitoring config --quiet
-
 .PHONY: deploy-release
 deploy-release: initialize-release ## Deploy the digest-pinned server-rendered image set
 	$(COMPOSE_PROD) up -d --no-build
