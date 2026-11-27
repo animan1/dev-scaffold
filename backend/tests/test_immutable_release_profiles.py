@@ -152,6 +152,27 @@ def test_release_configuration_resolves_production_project_and_volumes(
         )["services"]["nginx"]
         assert ephemeral["environment"]["PROD_HTTPS_PORT"] == "28044"
         assert ephemeral["ports"][1]["published"] == "28044"
+    else:
+        ephemeral = json.loads(
+            _make(
+                profile,
+                "-s",
+                "release-bundle-config",
+                "COMPOSE_PROD=$(COMPOSE_EPHEMERAL)",
+                "SCAFFOLD_BACKUP_PROFILE=none",
+                f"EPHEMERAL_ENV_FILE={private}",
+                f"RELEASE_FILE={manifest}",
+                "EPHEMERAL_HTTP_PORT=28081",
+                "EPHEMERAL_HTTPS_PORT=28044",
+            )
+        )
+        assert not ephemeral["services"]["web"].get("ports")
+        ingress = ephemeral["services"]["ingress"]
+        assert [port["published"] for port in ingress["ports"]] == ["28081", "28044"]
+        assert any(
+            mount["source"] == str(tmp_path / "certs") and mount["read_only"]
+            for mount in ingress["volumes"]
+        )
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
@@ -314,9 +335,11 @@ def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> Non
     assert verify.count("run --rm --no-deps app") == 4
     assert "up -d --no-build db app" not in verify
     assert "exec -T app python -m app.manage migrate" not in verify
-    assert "/static/smoketest.txt" in verify
-    assert "/media/release-smoketest.txt" in verify
-    assert "stop app" in verify
+    before_stop, after_stop = verify.split("stop app", 1)
+    for path in ("static/smoketest.txt", "media/release-smoketest.txt"):
+        url = f"https://127.0.0.1:18444/{path}"
+        assert url in before_stop
+        assert url in after_stop
     assert "profiles/server-rendered-django/release.compose.yml" in logs
     assert "logs -f --tail=200" in logs
 

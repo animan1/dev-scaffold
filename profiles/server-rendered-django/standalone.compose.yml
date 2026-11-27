@@ -16,5 +16,5 @@ services:
       - "127.0.0.1:${PROD_HTTPS_PORT:-18443}:443"
     volumes:
       - ./profiles/server-rendered-django/ingress.conf.template:/etc/nginx/templates/default.conf.template:ro
-      - ./deploy/nginx/certs:/etc/nginx/certs:ro
+      - "${INGRESS_CERTS_PATH:-./deploy/nginx/certs}:/etc/nginx/certs:ro"
     restart: unless-stopped

@@ -95,6 +95,8 @@ make down-prod HOST_INGRESS=0   # stop stack
 For server-rendered Django, Compose provides the TLS proxy in this mode.
 By default, `http://127.0.0.1:18080` redirects to `https://127.0.0.1:18443`.
 `smoke-prod` verifies the certificate using `deploy/nginx/certs/server.crt`.
+The ephemeral release checks use the same proxy with disposable TLS inputs
+and separate loopback ports.
 
 ### Immutable releases
 

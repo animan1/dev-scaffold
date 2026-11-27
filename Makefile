@@ -211,31 +211,6 @@ build-release-images: ## Build SHA-tagged production images once
 		--backend $(RELEASE_BACKEND_TAG) --web $(RELEASE_WEB_TAG) \
 		$(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) --output $(RELEASE_FILE)
 
-.PHONY: prepare-ephemeral
-prepare-ephemeral: ## Prepare isolated, non-secret release smoke-test configuration
-	@mkdir -p $(dir $(EPHEMERAL_ENV_FILE))publication $(dir $(EPHEMERAL_ENV_FILE))certs
-	@chmod 2770 $(dir $(EPHEMERAL_ENV_FILE))publication
-	@printf '%s\n' \
-		'DJANGO_SECRET_KEY=release-ci-only' \
-		'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,$(HOST_INGRESS_HOST)' \
-		'DJANGO_CSRF_TRUSTED_ORIGINS=https://$(HOST_INGRESS_HOST)' \
-		'POSTGRES_USER=app' \
-		'POSTGRES_PASSWORD=release-ci-only' \
-		'POSTGRES_DB=app' \
-		'DATABASE_URL=postgresql://app:release-ci-only@db:5432/app' \
-		'BACKUP_PASSWORD=ephemeral-only' \
-		'BACKUP_PUBLICATION_PATH=$(dir $(EPHEMERAL_ENV_FILE))publication' \
-		'BACKUP_RUNTIME_GID=$(shell id -g)' \
-		'EPHEMERAL_CERTS_PATH=$(dir $(EPHEMERAL_ENV_FILE))certs' \
-		> $(EPHEMERAL_ENV_FILE)
-	@if [ ! -f $(dir $(EPHEMERAL_ENV_FILE))certs/server.crt ] || [ ! -f $(dir $(EPHEMERAL_ENV_FILE))certs/server.key ]; then \
-		openssl req -x509 -nodes -newkey rsa:2048 \
-			-keyout $(dir $(EPHEMERAL_ENV_FILE))certs/server.key \
-			-out $(dir $(EPHEMERAL_ENV_FILE))certs/server.crt \
-			-days 1 -subj '/CN=$(HOST_INGRESS_HOST)' \
-			-addext 'subjectAltName=DNS:$(HOST_INGRESS_HOST),IP:127.0.0.1,DNS:localhost'; \
-	fi
-
 .PHONY: verify-ephemeral
 verify-ephemeral: ## Verify the running recorded release in ephemeral
 	@for i in $$(seq 1 60); do \
@@ -570,6 +545,34 @@ down-prod: ## Stop production services while preserving volumes
 logs-prod: ## Follow recent production logs
 
 .PHONY: initialize-ephemeral up-ephemeral down-ephemeral rm-ephemeral logs-ephemeral
+EPHEMERAL_CERTS_PATH := $(dir $(abspath $(EPHEMERAL_ENV_FILE)))certs
+
+.PHONY: prepare-ephemeral
+prepare-ephemeral: ## Prepare isolated, non-secret release smoke-test configuration
+	@mkdir -p "$(dir $(EPHEMERAL_ENV_FILE))publication" "$(EPHEMERAL_CERTS_PATH)"
+	@chmod 2770 "$(dir $(EPHEMERAL_ENV_FILE))publication"
+	@printf '%s\n' \
+		'DJANGO_SECRET_KEY=release-ci-only-abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ' \
+		'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,$(HOST_INGRESS_HOST)' \
+		'DJANGO_CSRF_TRUSTED_ORIGINS=https://$(HOST_INGRESS_HOST)' \
+		'POSTGRES_USER=app' \
+		'POSTGRES_PASSWORD=release-ci-only' \
+		'POSTGRES_DB=app' \
+		'DATABASE_URL=postgresql://app:release-ci-only@db:5432/app' \
+		'BACKUP_PASSWORD=ephemeral-only' \
+		'BACKUP_PUBLICATION_PATH=$(dir $(EPHEMERAL_ENV_FILE))publication' \
+		'BACKUP_RUNTIME_GID=$(shell id -g)' \
+		'EPHEMERAL_CERTS_PATH=$(EPHEMERAL_CERTS_PATH)' \
+		> "$(EPHEMERAL_ENV_FILE)"
+	@if [ ! -f "$(EPHEMERAL_CERTS_PATH)/server.key" ] || \
+		! openssl x509 -in "$(EPHEMERAL_CERTS_PATH)/server.crt" -noout -checkend 3600 >/dev/null 2>&1; then \
+		openssl req -x509 -nodes -newkey rsa:2048 \
+			-keyout "$(EPHEMERAL_CERTS_PATH)/server.key" \
+			-out "$(EPHEMERAL_CERTS_PATH)/server.crt" \
+			-days 1 -subj '/CN=$(HOST_INGRESS_HOST)' \
+			-addext 'subjectAltName=DNS:$(HOST_INGRESS_HOST),IP:127.0.0.1,DNS:localhost'; \
+	fi
+
 initialize-ephemeral: prepare-ephemeral ## Initialize test data through the recorded-release workflow
 	$(MAKE) initialize-release 'COMPOSE_PROD=$(COMPOSE_EPHEMERAL)' RELEASE_PULL=true
 
