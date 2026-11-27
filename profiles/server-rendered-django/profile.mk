@@ -57,21 +57,12 @@ build-release-images: ## Build commit-addressed Django and application Nginx ima
 		--backend $(RELEASE_BACKEND_TAG) --web $(RELEASE_WEB_TAG) \
 		$(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) --output $(RELEASE_FILE)
 
-EPHEMERAL_HTTPS_URL = https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)
-EPHEMERAL_CURL = curl -fsS --cacert "$(EPHEMERAL_CERTS_PATH)/server.crt"
-.PHONY: integration-test-ephemeral
-integration-test-ephemeral: ## Exercise static and media delivery with Django stopped
+EPHEMERAL_MEDIA_SMOKE := /media/release-smoketest.txt
+integration-test-ephemeral: seed-ephemeral-media
+.PHONY: seed-ephemeral-media
+seed-ephemeral-media:
 	$(COMPOSE_EPHEMERAL) exec -T app \
-		sh -c "printf 'MEDIA_OK\\n' > /media/release-smoketest.txt"
-	$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/static/smoketest.txt' \
-		| grep -q 'STATIC_OK'
-	$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/media/release-smoketest.txt' \
-		| grep -q 'MEDIA_OK'
-	@set -eo pipefail; \
-		$(COMPOSE_EPHEMERAL) stop app; \
-		trap '$(COMPOSE_EPHEMERAL) start app' EXIT; \
-		$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/static/smoketest.txt' | grep -q 'STATIC_OK'; \
-		$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/media/release-smoketest.txt' | grep -q 'MEDIA_OK'
+		sh -c "printf 'MEDIA_OK\\n' > $(EPHEMERAL_MEDIA_SMOKE)"
 
 .PHONY: verify-host-ingress
 verify-host-ingress: HOST_INGRESS := 1

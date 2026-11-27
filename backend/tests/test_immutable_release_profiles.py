@@ -32,6 +32,7 @@ def _make(profile: str, *arguments: str) -> str:
 def test_react_release_path_remains_selected_by_the_react_profile() -> None:
     build = _make("react-vite", "--dry-run", "build-release-images")
     verify = _make("react-vite", "--dry-run", "up-ephemeral", "verify-ephemeral")
+    integration = _make("react-vite", "--dry-run", "integration-test-ephemeral")
     logs = _make("react-vite", "--dry-run", "logs-ephemeral")
     initialize = _make("react-vite", "--dry-run", "initialize-release")
 
@@ -40,6 +41,10 @@ def test_react_release_path_remains_selected_by_the_react_profile() -> None:
     assert "profiles/server-rendered-django" not in build
     assert "deploy/docker-compose.release.yml" in verify
     assert "--env-file deploy/releases/" in verify
+    assert "stop backend" in integration
+    assert "start backend" in integration
+    assert "/static/smoketest.txt" in integration
+    assert "/media/" not in integration
     assert "docker-compose.ephemeral.yml" in logs
     assert "logs -f --tail=200" in logs
     assert "pull backend nginx" in initialize
@@ -356,10 +361,10 @@ def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> Non
     assert "/static/smoketest.txt" in smoke
     assert "docker compose" not in smoke
     before_stop, after_stop = integration.split("stop app", 1)
+    assert "/media/release-smoketest.txt" in before_stop
     assert "start app" in after_stop
     for path in ("static/smoketest.txt", "media/release-smoketest.txt"):
         url = f"https://127.0.0.1:18444/{path}"
-        assert url in before_stop
         assert url in after_stop
     assert "profiles/server-rendered-django/release.compose.yml" in logs
     assert "logs -f --tail=200" in logs
@@ -489,10 +494,14 @@ def test_server_rendered_only_selector_runs_the_shared_release_publication() -> 
     assert "needs: [profile-selection, immutable-release-gate]" in release_job
     assert "always()" in release_job
     assert "needs.immutable-release-gate.result == 'success'" in release_job
-    assert "run: make build-release-images" in release_job
-    assert "make up-ephemeral HOST_INGRESS=0" in release_job
-    assert "make verify-ephemeral HOST_INGRESS=0" in release_job
-    assert "make integration-test-ephemeral HOST_INGRESS=0" in release_job
+    assert "make build-release-images" not in release_job
+    assert "make up-ephemeral" not in release_job
+    assert "make verify-ephemeral" not in release_job
+    assert "make integration-test-ephemeral" not in release_job
+    assert "docker image load" in release_job
+    assert release_job.count("docker image inspect --format '{{.Id}}'") == 2
+    assert "docker image save" in server_job
+    assert "tested-release-images" in server_job and "tested-release-images" in release_job
     assert release_job.count("uses: anchore/sbom-action@v0") == 2
     assert "RELEASE_BACKEND_SBOM" in release_job
     assert "RELEASE_WEB_SBOM" in release_job
