@@ -18,7 +18,6 @@ COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 	PROD_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) INGRESS_CERTS_PATH="$(EPHEMERAL_CERTS_PATH)" \
 	docker compose --project-directory $(COMPOSE_PROJECT_DIR) $(PROD_COMPOSE_FILES) \
 	--env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
-RUN_EPHEMERAL = $(COMPOSE_EPHEMERAL) run --rm --no-deps app
 LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
 	RELEASE_WEB_IMAGE=$(RELEASE_WEB_TAG) RELEASE_IMAGE_PREFIX=$(RELEASE_IMAGE_PREFIX) \
 	RELEASE_REVISION=$(RELEASE_REVISION) RELEASE_HTTP_PORT=$(RELEASE_HTTP_PORT)
@@ -55,22 +54,12 @@ build-release-images: ## Build commit-addressed Django and application Nginx ima
 		--backend $(RELEASE_BACKEND_TAG) --web $(RELEASE_WEB_TAG) \
 		$(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) --output $(RELEASE_FILE)
 
-EPHEMERAL_HTTPS_URL = https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)
-EPHEMERAL_CURL = curl -fsS --cacert "$(EPHEMERAL_CERTS_PATH)/server.crt"
-.PHONY: verify-release-images
-verify-release-images: up-ephemeral ## Smoke-test the exact production image set
-	$(RUN_EPHEMERAL) \
-		sh -c "printf 'MEDIA_OK\\n' > /media/release-smoketest.txt"
-	$(MAKE) verify-ephemeral
-	$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/static/smoketest.txt' \
-		| grep -q 'STATIC_OK'
-	$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/media/release-smoketest.txt' \
-		| grep -q 'MEDIA_OK'
-	$(COMPOSE_EPHEMERAL) stop app
-	$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/static/smoketest.txt' \
-		| grep -q 'STATIC_OK'
-	$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/media/release-smoketest.txt' \
-		| grep -q 'MEDIA_OK'
+EPHEMERAL_MEDIA_SMOKE := /media/release-smoketest.txt
+integration-test-ephemeral: seed-ephemeral-media
+.PHONY: seed-ephemeral-media
+seed-ephemeral-media:
+	$(COMPOSE_EPHEMERAL) exec -T app \
+		sh -c "printf 'MEDIA_OK\\n' > $(EPHEMERAL_MEDIA_SMOKE)"
 
 .PHONY: verify-host-ingress
 verify-host-ingress: HOST_INGRESS := 1
@@ -116,6 +105,7 @@ verify-ephemeral: ## Verify local HTTP redirect, HTTPS customer/admin routes, an
 		| grep -Eiq '^location: https://$(HOST_INGRESS_HOST):$(EPHEMERAL_HTTPS_PORT)/'
 	$(EPHEMERAL_CURL) -H 'Host: $(HOST_INGRESS_HOST)' \
 		'$(EPHEMERAL_HTTPS_URL)/' | grep -q '<main'
+	$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/static/smoketest.txt' | grep -q 'STATIC_OK'
 	$(EPHEMERAL_CURL) -D - -o /dev/null -H 'Host: $(HOST_INGRESS_HOST)' \
 		'$(EPHEMERAL_HTTPS_URL)/admin/' \
 		| grep -Eiq '^location: /admin/login/\?next=/admin/'

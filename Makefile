@@ -180,13 +180,9 @@ build-release-images: ## Build SHA-tagged production images once
 
 .PHONY: verify-ephemeral
 verify-ephemeral: COMPOSE = $(COMPOSE_EPHEMERAL)
-verify-ephemeral: URL_ROOT = https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)
-verify-ephemeral: CURL_CMD = curl -fsS --cacert "$(EPHEMERAL_CERTS_PATH)/server.crt"
+verify-ephemeral: URL_ROOT = $(EPHEMERAL_HTTPS_URL)
+verify-ephemeral: CURL_CMD = $(EPHEMERAL_CURL)
 verify-ephemeral: smoke ## Verify the running recorded release in ephemeral
-
-.PHONY: verify-release-images
-verify-release-images: up-ephemeral ## Verify and smoke-test the exact recorded images
-	$(MAKE) verify-ephemeral
 
 .PHONY: verify-host-ingress
 verify-host-ingress: prepare-ephemeral ## Verify exact images through the loopback ingress boundary
@@ -329,7 +325,9 @@ ci-ephemeral: ## Check source and exercise the recorded release in disposable Co
 	$(MAKE) check
 	$(MAKE) build-release-images
 	@trap 'status=$$?; $(MAKE) rm-ephemeral HOST_INGRESS=0 || { if [ "$$status" -eq 0 ]; then exit 1; fi; }; exit "$$status"' EXIT; \
-		$(MAKE) verify-release-images HOST_INGRESS=0
+		$(MAKE) up-ephemeral HOST_INGRESS=0 && \
+		$(MAKE) verify-ephemeral HOST_INGRESS=0 && \
+		$(MAKE) integration-test-ephemeral HOST_INGRESS=0
 
 HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release
 
@@ -509,6 +507,18 @@ logs-prod: ## Follow recent production logs
 
 .PHONY: initialize-ephemeral up-ephemeral down-ephemeral rm-ephemeral logs-ephemeral
 EPHEMERAL_CERTS_PATH := $(dir $(abspath $(EPHEMERAL_ENV_FILE)))certs
+EPHEMERAL_HTTPS_URL = https://127.0.0.1:$(EPHEMERAL_HTTPS_PORT)
+EPHEMERAL_CURL = curl -fsS --cacert "$(EPHEMERAL_CERTS_PATH)/server.crt"
+
+.PHONY: integration-test-ephemeral
+integration-test-ephemeral: ## Check file delivery with the ephemeral application stopped
+	@set -eo pipefail; \
+		$(COMPOSE_EPHEMERAL) stop $(PROD_APPLICATION_SERVICE); \
+		trap '$(COMPOSE_EPHEMERAL) start $(PROD_APPLICATION_SERVICE)' EXIT; \
+		$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)/static/smoketest.txt' | grep -q 'STATIC_OK'; \
+		if [ -n "$(EPHEMERAL_MEDIA_SMOKE)" ]; then \
+			$(EPHEMERAL_CURL) '$(EPHEMERAL_HTTPS_URL)$(EPHEMERAL_MEDIA_SMOKE)' | grep -q 'MEDIA_OK'; \
+		fi
 
 .PHONY: prepare-ephemeral
 prepare-ephemeral: ## Prepare isolated, non-secret release smoke-test configuration

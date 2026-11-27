@@ -58,7 +58,7 @@ def tenant_adapter(tmp_path: Path, **overrides: object) -> Path:
         "schema": 1,
         "profile": "tenant",
         "images": {"app": "RELEASE_BACKEND_IMAGE"},
-        "check_targets": ["check", "verify-release-images"],
+        "check_targets": ["check", "up-ephemeral", "verify-ephemeral"],
         **overrides,
     }
     path = tmp_path / "release-bundle.json"
@@ -70,7 +70,7 @@ def test_tenant_adapter_takes_precedence_over_profile_fallback(tmp_path: Path) -
     tenant_adapter(tmp_path)
     value = bundle.adapter(tmp_path, "tenant")
     assert value["images"] == {"app": "RELEASE_BACKEND_IMAGE"}
-    assert value["check_targets"] == ["check", "verify-release-images"]
+    assert value["check_targets"] == ["check", "up-ephemeral", "verify-ephemeral"]
 
 
 @pytest.mark.parametrize(

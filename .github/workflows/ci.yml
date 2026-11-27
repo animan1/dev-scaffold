@@ -32,6 +32,7 @@ jobs:
           fetch-depth: 0
 
       - name: Select the downstream-only server-rendered profile
+        if: needs.profile-selection.outputs.selected-profile != 'server-rendered-django'
         run: |
           printf '%s\n' \
             'SCAFFOLD_PROFILE ?= server-rendered-django' \
@@ -43,6 +44,27 @@ jobs:
         env:
           DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
         run: make ci-ephemeral
+
+      - name: Save the tested release images
+        if: needs.profile-selection.outputs.selected-profile == 'server-rendered-django'
+        run: &save-tested-release |
+          manifest="deploy/releases/${GITHUB_SHA}.env"
+          docker image tag "$(sed -n 's/^RELEASE_BACKEND_IMAGE=//p' "$manifest")" "local/tested-backend:${GITHUB_SHA}"
+          docker image tag "$(sed -n 's/^RELEASE_WEB_IMAGE=//p' "$manifest")" "local/tested-web:${GITHUB_SHA}"
+          cp "$manifest" "$RUNNER_TEMP/tested-release.env"
+          docker image save --output "$RUNNER_TEMP/tested-release.tar" \
+            "local/tested-backend:${GITHUB_SHA}" "local/tested-web:${GITHUB_SHA}"
+
+      - uses: actions/upload-artifact@v4
+        if: needs.profile-selection.outputs.selected-profile == 'server-rendered-django'
+        with: &tested-release-artifact
+          name: tested-release-images
+          path: |
+            ${{ runner.temp }}/tested-release.env
+            ${{ runner.temp }}/tested-release.tar
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 1
 
   backend:
     needs: profile-selection
@@ -57,6 +79,14 @@ jobs:
         env:
           DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
         run: make ci-ephemeral SCAFFOLD_PROFILE=react-vite
+
+      - name: Save the tested release images
+        if: needs.profile-selection.outputs.selected-profile == 'react-vite'
+        run: *save-tested-release
+
+      - uses: actions/upload-artifact@v4
+        if: needs.profile-selection.outputs.selected-profile == 'react-vite'
+        with: *tested-release-artifact
 
   immutable-backup-profile:
     needs: profile-selection
@@ -135,11 +165,28 @@ jobs:
           project="${GITHUB_REPOSITORY//\//-}"
           echo "EPHEMERAL_COMPOSE_PROJECT=${project,,}-ephemeral-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
 
-      - name: Build production images once
-        run: make build-release-images
+      - uses: actions/download-artifact@v4
+        with:
+          name: tested-release-images
+          path: ${{ runner.temp }}/tested-release
 
-      - name: Verify and smoke-test exact images
-        run: make verify-release-images HOST_INGRESS=0
+      - name: Load the images verified by ci-ephemeral
+        env:
+          SELECTED_PROFILE: ${{ needs.profile-selection.outputs.selected-profile }}
+        run: |
+          directory="$RUNNER_TEMP/tested-release"
+          manifest="$directory/tested-release.env"
+          grep -Fx "SCAFFOLD_PROFILE=$SELECTED_PROFILE" "$manifest"
+          grep -Fx "RELEASE_REVISION=$RELEASE_REVISION" "$manifest"
+          docker image load --input "$directory/tested-release.tar"
+          backend="$(sed -n 's/^RELEASE_BACKEND_IMAGE=//p' "$manifest")"
+          web="$(sed -n 's/^RELEASE_WEB_IMAGE=//p' "$manifest")"
+          test "$(docker image inspect --format '{{.Id}}' "local/tested-backend:${GITHUB_SHA}")" = "$backend"
+          test "$(docker image inspect --format '{{.Id}}' "local/tested-web:${GITHUB_SHA}")" = "$web"
+          docker image tag "$backend" "$RELEASE_BACKEND_TAG"
+          docker image tag "$web" "$RELEASE_WEB_TAG"
+          mkdir -p "$(dirname "$RELEASE_FILE")"
+          cp "$manifest" "$RELEASE_FILE"
 
       - name: Verify host-ingress routing
         run: make verify-host-ingress
