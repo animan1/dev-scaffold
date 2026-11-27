@@ -23,19 +23,19 @@ services:
       ]
     volumes:
       - type: bind
-        source: "${MONITOR_OPERATIONAL_URL_PATH:-./secrets/monitor-operational-url}"
+        source: "${MONITOR_OPERATIONAL_URL_PATH:-${MONITOR_SECRETS_DIR:-./secrets}/monitor-operational-url}"
         target: /run/secrets/monitor-operational-url
         read_only: true
         bind:
           create_host_path: false
       - type: bind
-        source: "${MONITOR_BACKUP_URL_PATH:-./secrets/monitor-backup-url}"
+        source: "${MONITOR_BACKUP_URL_PATH:-${MONITOR_SECRETS_DIR:-./secrets}/monitor-backup-url}"
         target: /run/secrets/monitor-backup-url
         read_only: true
         bind:
           create_host_path: false
       - type: bind
-        source: "${MONITOR_RESTORE_URL_PATH:-./secrets/monitor-restore-url}"
+        source: "${MONITOR_RESTORE_URL_PATH:-${MONITOR_SECRETS_DIR:-./secrets}/monitor-restore-url}"
         target: /run/secrets/monitor-restore-url
         read_only: true
         bind:

@@ -272,6 +272,20 @@ def test_help_lists_commands_when_optional_makefiles_are_loaded() -> None:
             assert ("fe.setup" in help_output) == (profile == "react-vite")
 
 
+@pytest.mark.parametrize(
+    ("profile", "application"), [("react-vite", "backend"), ("server-rendered-django", "app")]
+)
+def test_application_shells_and_production_migrations_are_shared(
+    profile: str, application: str
+) -> None:
+    for environment in ("dev", "prod"):
+        shell = _make(f"SCAFFOLD_PROFILE={profile}", "--dry-run", f"be.bash-{environment}").stdout
+        assert f"-{environment} " in shell
+        assert f"exec {application} bash" in shell
+    migration = _make(f"SCAFFOLD_PROFILE={profile}", "--dry-run", "migrate-prod").stdout
+    assert f"run --rm {application} python -m app.manage migrate" in migration
+
+
 def test_ci_routes_profiles_without_duplicate_pr_push_runs() -> None:
     workflow = (_repository_root() / ".github/workflows/ci.yml").read_text()
 

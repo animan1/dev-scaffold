@@ -276,14 +276,14 @@ another service name without copying the template. Substitution is deliberately
 restricted to `BACKEND_HOST`, preserving Nginx runtime variables such as `$host`
 and `$remote_addr`. API and Django admin requests go to that backend, while
 static files, built frontend assets, and client-side routes remain owned by
-Nginx. Ordinary `up-prod`, `bootstrap-prod`, and `deploy-release` operations
-recreate Nginx after replacing the backend so it cannot retain the old
-container address. Its bare `/admin` redirect remains relative so the private
-HTTP origin never downgrades the public HTTPS scheme.
+Nginx. When `up-prod` or `deploy-release` replaces the backend, Compose restarts
+Nginx so it resolves the new container address. Its bare `/admin` redirect
+remains relative so the private HTTP origin never downgrades the public HTTPS
+scheme.
 
 Existing React/Vite children adopting this behavior should copy the host-ingress
-Compose overlay and Nginx template together, plus the Nginx refresh lines and
-admin checks from the root Makefile. Keep the child's hostnames, loopback ports,
+Compose overlay and Nginx template together, plus the proxy's Compose dependency
+restart and the admin checks from the root Makefile. Keep the child's hostnames, loopback ports,
 Compose identity, release registry, CSP additions, and application-specific
 promotion or backup checks in the child. Server-rendered children already use
 their profile-owned Nginx release topology and should retain that boundary.
@@ -320,8 +320,9 @@ chmod 0600 deploy/secrets/monitor-*-url
 make ops.check-external-prod
 ```
 
-The files are ignored by Git and mounted read-only under `/run/secrets`. For
-secrets stored elsewhere, set `MONITOR_OPERATIONAL_URL_PATH`,
+The files are ignored by Git and mounted read-only under `/run/secrets`. With
+server-rendered Django, make the files readable by the monitor's `app` user
+(UID 10001). For secrets stored elsewhere, set `MONITOR_OPERATIONAL_URL_PATH`,
 `MONITOR_BACKUP_URL_PATH`, and `MONITOR_RESTORE_URL_PATH` to host file paths.
 
 Configure the provider schedules to match these bounded defaults:
