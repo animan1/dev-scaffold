@@ -14,20 +14,11 @@ PROD_COMPOSE_FILES = -f $(RELEASE_COMPOSE_FILE) \
 	$(if $(filter 0,$(HOST_INGRESS)),-f profiles/server-rendered-django/standalone.compose.yml)
 EPHEMERAL_COMPOSE_FILES = $(PROD_COMPOSE_FILES)
 
-.PHONY: build-release-images
-build-release-images: ## Build commit-addressed Django and application Nginx images once
-	docker build -f profiles/server-rendered-django/backend.Dockerfile \
-		--target production -t $(RELEASE_BACKEND_TAG) $(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) \
-		--label org.opencontainers.image.revision=$(RELEASE_REVISION) .
-	docker build -f profiles/server-rendered-django/release-nginx.Dockerfile \
-		-t $(RELEASE_WEB_TAG) $(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) \
-		--label org.opencontainers.image.revision=$(RELEASE_REVISION) .
-	@test "$$(docker image inspect --format='{{.Config.User}}' $(RELEASE_BACKEND_TAG))" = "app"
-	@test "$$(docker image inspect --format='{{.Config.User}}' $(RELEASE_WEB_TAG))" = "nginx"
-	python3 scripts/record_local_release.py --revision $(RELEASE_REVISION) \
-		--profile $(SCAFFOLD_PROFILE) --prefix $(RELEASE_IMAGE_PREFIX) \
-		--backend $(RELEASE_BACKEND_TAG) --web $(RELEASE_WEB_TAG) \
-		$(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) --output $(RELEASE_FILE)
+RELEASE_BACKEND_CONTEXT := .
+RELEASE_BACKEND_DOCKERFILE := profiles/server-rendered-django/backend.Dockerfile
+RELEASE_WEB_DOCKERFILE := profiles/server-rendered-django/release-nginx.Dockerfile
+RELEASE_BACKEND_USER := app
+RELEASE_WEB_USER := nginx
 
 EPHEMERAL_MEDIA_SMOKE := /media/release-smoketest.txt
 integration-test-ephemeral: seed-ephemeral-media

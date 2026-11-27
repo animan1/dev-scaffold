@@ -16,7 +16,7 @@ future scaffold merges can update both profiles normally.
 - The same Make interface for developers and CI: `prepare-prod`, `setup`, `up-dev`, `down-dev`,
   `reset-dev`, `deps.lock`, `format`, `lint`, `typecheck`, `test`, `coverage`,
   `migrations`, `migrate`, `superuser`, `shell`, `check`, `verify`, `precommit`,
-  `build-release-images`, and `smoke`.
+  `build`, and `smoke`.
 - Ruff formatting and linting, strict MyPy, pytest, total and changed-line
   coverage, migration-drift checks, Django deployment checks, a multi-stage
   non-root production image, and routed smoke tests.
@@ -77,7 +77,7 @@ In the multi-profile scaffold repository, use the profile-local wrapper so the
 React/Vite default selection remains unchanged:
 
 ```sh
-make build-release-images SCAFFOLD_PROFILE=server-rendered-django
+make build SCAFFOLD_PROFILE=server-rendered-django
 profiles/server-rendered-django/ephemeral up
 profiles/server-rendered-django/ephemeral smoke
 profiles/server-rendered-django/ephemeral down

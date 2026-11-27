@@ -85,7 +85,7 @@ def build_hotfix(root, source, rev, target, selected, values, env, spec):
         "RELEASE_PLATFORM": target,
         "RELEASE_IMAGE_PREFIX": prefix,
     }
-    make(source, "build-release-images", build_values, env)
+    make(source, "build", build_values, env)
     roles = {
         name: prefix
         + "-"

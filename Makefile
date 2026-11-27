@@ -80,6 +80,9 @@ COMPOSE_PROJECT_DIR := deploy
 APPLICATION_SERVICE := backend
 CONTAINER_PYTHON_PROJECT_DIR := /app
 FRONTEND_DIR := frontend
+RELEASE_BACKEND_CONTEXT := backend
+RELEASE_BACKEND_DOCKERFILE := backend/Dockerfile
+RELEASE_WEB_DOCKERFILE := deploy/nginx/Dockerfile
 MONITORING ?= 0
 EPHEMERAL_HTTP_PORT ?= $(RELEASE_HTTP_PORT)
 EPHEMERAL_HTTPS_PORT ?= 18443
@@ -169,17 +172,6 @@ smoke-host-ingress: smoke
 	}
 
 # Optional immutable-release profile
-.PHONY: build-release-images
-build-release-images: ## Build SHA-tagged production images once
-	docker build --target prod -t $(RELEASE_BACKEND_TAG) $(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) \
-		--label org.opencontainers.image.revision=$(RELEASE_REVISION) backend
-	docker build -f deploy/nginx/Dockerfile -t $(RELEASE_WEB_TAG) $(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) \
-		--label org.opencontainers.image.revision=$(RELEASE_REVISION) .
-	python3 scripts/record_local_release.py --revision $(RELEASE_REVISION) \
-		--profile $(SCAFFOLD_PROFILE) --prefix $(RELEASE_IMAGE_PREFIX) \
-		--backend $(RELEASE_BACKEND_TAG) --web $(RELEASE_WEB_TAG) \
-		$(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) --output $(RELEASE_FILE)
-
 .PHONY: verify-ephemeral
 verify-ephemeral: COMPOSE = $(COMPOSE_EPHEMERAL)
 verify-ephemeral: URL_ROOT = $(EPHEMERAL_HTTPS_URL)
@@ -330,17 +322,39 @@ setup: be.setup ## Prepare Docker development dependencies from committed lockfi
 be.setup:
 	$(COMPOSE_DEV) build $(APPLICATION_SERVICE)
 
+.PHONY: build
+build: ## Build and record production images from a clean checkout
+	@set -e -o pipefail; \
+		head="$$(git rev-parse --verify HEAD)"; \
+		changes="$$(git status --porcelain=v1 --untracked-files=all)"; \
+		test -z "$$changes" || { echo 'Commit changes before building a release.' >&2; exit 1; }; \
+		test "$$head" = '$(RELEASE_REVISION)' || { echo 'RELEASE_REVISION must match HEAD.' >&2; exit 1; }; \
+		context="$$(mktemp -d)"; trap 'rm -rf -- "$$context"' EXIT; \
+		git archive "$$head" | tar -xf - -C "$$context"; \
+		docker build -f "$$context/$(RELEASE_BACKEND_DOCKERFILE)" --target prod \
+			-t $(RELEASE_BACKEND_TAG) $(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) \
+			--label org.opencontainers.image.revision="$$head" "$$context/$(RELEASE_BACKEND_CONTEXT)"; \
+		docker build -f "$$context/$(RELEASE_WEB_DOCKERFILE)" \
+			-t $(RELEASE_WEB_TAG) $(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) \
+			--label org.opencontainers.image.revision="$$head" "$$context"; \
+		python3 scripts/record_local_release.py --revision "$$head" \
+			--profile $(SCAFFOLD_PROFILE) --prefix $(RELEASE_IMAGE_PREFIX) \
+			--backend $(RELEASE_BACKEND_TAG) --web $(RELEASE_WEB_TAG) \
+			$(if $(RELEASE_BACKEND_USER),--backend-user $(RELEASE_BACKEND_USER)) \
+			$(if $(RELEASE_WEB_USER),--web-user $(RELEASE_WEB_USER)) \
+			$(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) --output $(RELEASE_FILE)
+
 .PHONY: ci-ephemeral
 ci-ephemeral: ## Check source and exercise the recorded release in disposable Compose
 	$(MAKE) setup
 	$(MAKE) check
-	$(MAKE) build-release-images
+	$(MAKE) build
 	@trap 'status=$$?; $(MAKE) rm-ephemeral HOST_INGRESS=0 || { if [ "$$status" -eq 0 ]; then exit 1; fi; }; exit "$$status"' EXIT; \
 		$(MAKE) up-ephemeral HOST_INGRESS=0 && \
 		$(MAKE) verify-ephemeral HOST_INGRESS=0 && \
 		$(MAKE) integration-test-ephemeral HOST_INGRESS=0
 
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|build|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release
 
 .PHONY: precommit be.precommit
 precommit: be.precommit ## Run repository pre-commit hooks in the Docker toolchain

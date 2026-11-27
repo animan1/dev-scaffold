@@ -31,19 +31,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Select the downstream-only server-rendered profile
-        if: needs.profile-selection.outputs.selected-profile != 'server-rendered-django'
-        run: |
-          printf '%s\n' \
-            'SCAFFOLD_PROFILE ?= server-rendered-django' \
-            'CI_PROFILES ?= server-rendered-django' \
-            > .scaffold-profile
-          test "$(make --no-print-directory profiles | jq -r '.selected.application')" = "server-rendered-django"
-
       - name: Check source and exercise the ephemeral release
         env:
           DIFF_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
-        run: make ci-ephemeral
+        run: make ci-ephemeral SCAFFOLD_PROFILE=server-rendered-django
 
       - name: Save the tested release images
         if: needs.profile-selection.outputs.selected-profile == 'server-rendered-django'

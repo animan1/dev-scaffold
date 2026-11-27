@@ -78,7 +78,7 @@ def test_hotfix_builds_target_platform_and_checks_same_image_ids(
     assert build_values["RELEASE_PLATFORM"] == "linux/arm64"
     assert roles == {"RELEASE_BACKEND_IMAGE": f"local/emergency-{REVISION}-backend:{REVISION}"}
     assert env["DOCKER_DEFAULT_PLATFORM"] == "linux/arm64"
-    assert [call[1] for call in make_calls] == ["build-release-images", "release-check"]
+    assert [call[1] for call in make_calls] == ["build", "release-check"]
     assert all(call[3]["DOCKER_DEFAULT_PLATFORM"] == "linux/arm64" for call in make_calls)
     check_values = make_calls[1][2]
     assert check_values["PROJECT_NAME"] == f"emergency-check-{REVISION[:16]}"
