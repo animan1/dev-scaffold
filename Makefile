@@ -164,7 +164,7 @@ ops.monitor-prod: ## Follow the unattended production monitor
 smoke-host-ingress: ## Smoke-test the loopback origin as routed by a host ingress
 smoke-host-ingress: COMPOSE = $(COMPOSE_PROD)
 smoke-host-ingress: URL_ROOT = http://127.0.0.1:$(HOST_INGRESS_PORT)
-smoke-host-ingress: CHECK_CURL_FLAGS = -L -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https'
+smoke-host-ingress: CURL_CMD = curl -fsS -L -H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https'
 smoke-host-ingress: smoke
 	@location="$$(curl -fsS -D - -o /dev/null \
 		-H 'Host: $(HOST_INGRESS_HOST)' -H 'X-Forwarded-Proto: https' \
@@ -459,12 +459,12 @@ deps.lock: ## Update the selected profile's Python lockfile with pinned Dockeriz
 
 COMPOSE ?= $(COMPOSE_DEV)
 URL_ROOT ?= $(DEV_URL_ROOT)
-CHECK_CURL_FLAGS = $(CURL_FLAGS)
+CURL_CMD = curl $(CURL_FLAGS) -fsS
 ENV ?= dev
 down-dev logs-dev ps-dev wait-dev: COMPOSE = $(COMPOSE_DEV)
 down-prod logs-prod ps-prod wait-prod smoke-prod: COMPOSE = $(COMPOSE_PROD)
 wait-prod smoke-prod: URL_ROOT = $(PROD_HTTPS_URL)
-wait-prod smoke-prod: CHECK_CURL_FLAGS = $(PROD_HTTPS_CURL_FLAGS)
+wait-prod smoke-prod: CURL_CMD = curl $(PROD_HTTPS_CURL_FLAGS) -fsS
 down-ephemeral logs-ephemeral ps-ephemeral: COMPOSE = $(COMPOSE_EPHEMERAL)
 
 .PHONY: down logs ps wait restart restart-dev restart-prod ps-prod ps-ephemeral wait-dev wait-prod
@@ -477,10 +477,10 @@ logs logs-dev logs-prod logs-ephemeral:
 ps ps-dev ps-prod ps-ephemeral:
 	$(COMPOSE) ps
 
-wait wait-dev wait-prod:
+wait:
 	@echo "Waiting for backend on $(URL_ROOT)/api/healthz ..."
 	@for i in $$(seq 1 60); do \
-		if curl -fsS $(CHECK_CURL_FLAGS) "$(URL_ROOT)/api/healthz" >/dev/null; then \
+		if $(CURL_CMD) "$(URL_ROOT)/api/healthz" >/dev/null; then \
 			echo "Backend is up"; exit 0; \
 		fi; \
 		sleep 1; \
@@ -489,14 +489,12 @@ wait wait-dev wait-prod:
 	$(COMPOSE) logs || true; \
 	exit 1
 
-wait-dev: ## Wait for development health
-wait-prod: ## Wait for production health
+wait-dev: wait ## Wait for development health
+wait-prod: wait ## Wait for production health
 
 .PHONY: smoke smoke-prod
-smoke-prod: wait-prod ## Check production health, static delivery, and homepage over HTTPS
+smoke-prod: smoke ## Check production health, static delivery, and homepage over HTTPS
 smoke: wait ## Check application health, static delivery, and homepage
-smoke smoke-prod: CURL_CMD = curl $(CHECK_CURL_FLAGS) -fsS
-smoke smoke-prod:
 	$(CURL_CMD) "$(URL_ROOT)/api/healthz" >/dev/null
 	$(CURL_CMD) "$(URL_ROOT)/static/smoketest.txt" >/dev/null
 	$(CURL_CMD) "$(URL_ROOT)/" | grep -qi '$(SMOKE_HOME_PATTERN)'

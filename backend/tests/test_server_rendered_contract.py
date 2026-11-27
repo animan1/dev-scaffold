@@ -102,7 +102,7 @@ def test_server_rendered_precommit_is_a_recipe() -> None:
 def test_prod_and_ephemeral_use_the_same_recorded_release_workflow() -> None:
     project_name = _repository_root().name
     production = _make("--dry-run", "up-prod").stdout
-    ephemeral = _make("--dry-run", "up-ephemeral").stdout
+    ephemeral = _make("--dry-run", "up-ephemeral", "HOST_INGRESS=0").stdout
     for suffix, output in (("prod", production), ("ephemeral", ephemeral)):
         assert f"COMPOSE_PROJECT_NAME={project_name}-{suffix}" in output
         assert "profiles/server-rendered-django/backend.Dockerfile" not in output
@@ -149,6 +149,7 @@ def test_server_rendered_ephemeral_uses_local_tls_ingress() -> None:
         "verify-ephemeral",
         "HOST_INGRESS_HOST=tenant.example",
         "SCAFFOLD_BACKUP_PROFILE=none",
+        "HOST_INGRESS=0",
     ).stdout
     assert "-subj '/CN=tenant.example'" in custom
     assert "docker build" not in custom

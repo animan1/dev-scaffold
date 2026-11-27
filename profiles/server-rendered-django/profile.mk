@@ -11,17 +11,15 @@ RELEASE_PULL ?= $(COMPOSE_PROD) pull app web
 EPHEMERAL_HTTP_PORT ?= 18081
 EPHEMERAL_HTTPS_PORT ?= 18444
 RELEASE_COMPOSE_FILE := profiles/server-rendered-django/release.compose.yml
-EPHEMERAL_HOST_INGRESS := 0
-# A caller can select the ingress mode independently of the production setting.
 PROD_COMPOSE_FILES = -f $(RELEASE_COMPOSE_FILE) \
-	$(if $(filter 0,$(if $(1),$(1),$(HOST_INGRESS))),-f profiles/server-rendered-django/standalone.compose.yml)
+	$(if $(filter 0,$(HOST_INGRESS)),-f profiles/server-rendered-django/standalone.compose.yml)
 COMPOSE_PROD = COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(PROD_ENV_FILE) docker compose --project-directory . \
 	$(PROD_COMPOSE_FILES) --env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
 COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) HOST_INGRESS_PORT=$(EPHEMERAL_HTTP_PORT) \
 	PROD_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) INGRESS_CERTS_PATH="$(EPHEMERAL_CERTS_PATH)" \
-	docker compose --project-directory . $(call PROD_COMPOSE_FILES,$(EPHEMERAL_HOST_INGRESS)) \
+	docker compose --project-directory . $(PROD_COMPOSE_FILES) \
 	--env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
 RUN_PROD = $(COMPOSE_PROD) run --rm --no-deps app
 RUN_EPHEMERAL = $(COMPOSE_EPHEMERAL) run --rm --no-deps app
@@ -86,7 +84,7 @@ verify-release-images: up-ephemeral ## Smoke-test the exact production image set
 		| grep -q 'MEDIA_OK'
 
 .PHONY: verify-host-ingress
-verify-host-ingress: EPHEMERAL_HOST_INGRESS := 1
+verify-host-ingress: HOST_INGRESS := 1
 verify-host-ingress: prepare-ephemeral ## Verify the loopback-only application origin boundary
 	@$(COMPOSE_EPHEMERAL) config \
 		| grep -q 'host_ip: 127.0.0.1'

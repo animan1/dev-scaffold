@@ -45,15 +45,15 @@ jobs:
         run: make verify migrate
 
       - name: Exercise ephemeral deployment and local ingress
-        run: make build-release-images up-ephemeral verify-ephemeral
+        run: make build-release-images up-ephemeral verify-ephemeral HOST_INGRESS=0
 
       - name: Exercise the server-rendered immutable-release contract
         if: needs.profile-selection.outputs.selected-profile != 'server-rendered-django'
-        run: make build-release-images verify-release-images
+        run: make build-release-images verify-release-images HOST_INGRESS=0
 
       - name: Stop development and remove ephemeral test data
         if: always()
-        run: make down-dev rm-ephemeral
+        run: make down-dev rm-ephemeral HOST_INGRESS=0
 
   backend:
     needs: profile-selection

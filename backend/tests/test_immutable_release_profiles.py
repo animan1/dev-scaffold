@@ -164,6 +164,7 @@ def test_release_configuration_resolves_production_project_and_volumes(
                 f"RELEASE_FILE={manifest}",
                 "EPHEMERAL_HTTP_PORT=28081",
                 "EPHEMERAL_HTTPS_PORT=28044",
+                "HOST_INGRESS=0",
             )
         )
         assert not ephemeral["services"]["web"].get("ports")
@@ -322,7 +323,7 @@ def test_smoke_requires_static_delivery_in_both_profiles(
 
 def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> None:
     build = _make("server-rendered-django", "--dry-run", "build-release-images")
-    verify = _make("server-rendered-django", "--dry-run", "verify-release-images")
+    verify = _make("server-rendered-django", "--dry-run", "verify-release-images", "HOST_INGRESS=0")
     logs = _make("server-rendered-django", "--dry-run", "logs-ephemeral")
 
     assert "profiles/server-rendered-django/backend.Dockerfile" in build
