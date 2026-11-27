@@ -56,6 +56,7 @@ def test_build_checks_revision_and_uses_committed_context(
         ".scaffold-profile",
         ".gitignore",
         "backend/Dockerfile",
+        "profiles/react-vite/profile.mk",
         "profiles/release-transport.mk",
     )
     for name in files:

@@ -161,7 +161,7 @@ def test_host_ingress_routes_django_admin_without_capturing_frontend_routes() ->
 
 
 def test_production_bootstrap_uses_the_shared_startup_workflow() -> None:
-    makefile = (_repo_root() / "Makefile").read_text()
+    makefile = (_repo_root() / "profiles/react-vite/profile.mk").read_text()
 
     bootstrap = makefile.split("bootstrap-prod: prepare-prod", 1)[1].split(".PHONY:", 1)[0]
     assert "$(MAKE) up-prod" in bootstrap
