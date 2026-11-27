@@ -20,6 +20,8 @@ SCAFFOLD_BACKUP_PROFILE ?= immutable-backup
 CI_BACKUP_PROFILES ?= immutable-backup
 PROD_ENV_FILE ?= deploy/.env.prod
 PROD_APPLICATION_SERVICE ?= backend
+RELEASE_PULL ?= $(COMPOSE_PROD) pull $(PROD_APPLICATION_SERVICE) $(PROD_WEB_SERVICE)
+RUN_PROD = $(COMPOSE_PROD) run --rm --no-deps $(PROD_APPLICATION_SERVICE)
 PROD_CONFIG = $(COMPOSE_PROD)
 HOST_INGRESS ?= 1
 # Capture tenant/operator input before the smoke-test placeholder default.
@@ -79,11 +81,10 @@ PROD_CONFIG = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(R
 	COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) \
 	docker compose $(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file $(PROD_ENV_FILE)
 COMPOSE_MONITOR = $(COMPOSE_PROD) -f deploy/docker-compose.external-monitoring.yml --profile monitoring
-RELEASE_PULL ?= $(COMPOSE_PROD) pull backend nginx
+PROD_WEB_SERVICE := nginx
 COMPOSE_PROD = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) docker compose \
 	$(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) \
 	--env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
-RUN_PROD = $(COMPOSE_PROD) run --rm --no-deps backend
 COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) EPHEMERAL_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) docker compose \
 	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
@@ -247,7 +248,7 @@ verify-host-ingress: prepare-ephemeral ## Verify exact images through the loopba
 	$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build db backend
 	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage check
 	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage migrate
-	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage collectstatic --noinput
+	$(COMPOSE_EPHEMERAL_INGRESS) exec -T backend python -m app.manage collectstatic --noinput --clear
 	$(COMPOSE_EPHEMERAL_INGRESS) up -d --no-build
 	$(MAKE) smoke-host-ingress 'COMPOSE=$(COMPOSE_EPHEMERAL_INGRESS)'
 
@@ -266,16 +267,6 @@ push-release-images: ## Push verified images and record their immutable digests
 	printf 'RELEASE_REVISION=%s\nRELEASE_IMAGE_PREFIX=%s\nRELEASE_BACKEND_IMAGE=%s\nRELEASE_WEB_IMAGE=%s\n' \
 		'$(RELEASE_REVISION)' '$(RELEASE_IMAGE_PREFIX)' "$$backend" "$$web" > $(RELEASE_FILE); \
 	echo "Recorded $(RELEASE_FILE)"
-
-.PHONY: initialize-release
-initialize-release: ## Initialize the database/static volume with the recorded backend image
-	@test -f $(RELEASE_FILE) || { echo 'Set RELEASE_FILE to a recorded release manifest'; exit 1; }
-	$(COMPOSE_PROD) config --quiet
-	$(RELEASE_PULL)
-	$(COMPOSE_PROD) up -d --no-build db
-	$(RUN_PROD) python -m app.manage check --deploy
-	$(RUN_PROD) python -m app.manage migrate
-	$(RUN_PROD) python -m app.manage collectstatic --noinput
 
 .PHONY: deploy-release
 deploy-release: initialize-release ## Deploy the recorded images through normal production initialization
@@ -387,7 +378,7 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release
 
 .PHONY: precommit
 precommit: ## Run repository pre-commit hooks in the Docker toolchain
@@ -398,6 +389,16 @@ precommit: ## Run repository pre-commit hooks in the Docker toolchain
 		$(DEV_APPLICATION_SERVICE) $(UV_RUN) --no-sync pre-commit run \
 		--config "$(PRECOMMIT_CONFIG)" --all-files
 	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.lint fe.fmt-check
+
+.PHONY: initialize-release
+initialize-release: ## Initialize the database and static volume with the recorded backend image
+	@test -f "$(RELEASE_FILE)" || { echo 'Set RELEASE_FILE to a recorded release manifest'; exit 1; }
+	$(COMPOSE_PROD) config --quiet
+	$(RELEASE_PULL)
+	$(COMPOSE_PROD) up -d --no-build db
+	$(RUN_PROD) python -m app.manage check --deploy
+	$(RUN_PROD) python -m app.manage migrate
+	$(RUN_PROD) python -m app.manage collectstatic --noinput --clear
 
 .PHONY: coverage coverage-in-container
 coverage: ## Run backend tests and enforce total and changed-line coverage in Docker

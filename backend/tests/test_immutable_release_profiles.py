@@ -33,6 +33,7 @@ def test_react_release_path_remains_selected_by_the_react_profile() -> None:
     build = _make("react-vite", "--dry-run", "build-release-images")
     verify = _make("react-vite", "--dry-run", "verify-release-images")
     logs = _make("react-vite", "--dry-run", "logs-ephemeral")
+    initialize = _make("react-vite", "--dry-run", "initialize-release")
 
     assert "docker build --target prod" in build
     assert "docker build -f deploy/nginx/Dockerfile" in build
@@ -41,6 +42,9 @@ def test_react_release_path_remains_selected_by_the_react_profile() -> None:
     assert "--env-file deploy/releases/" in verify
     assert "docker-compose.ephemeral.yml" in logs
     assert "logs -f --tail=200" in logs
+    assert "pull backend nginx" in initialize
+    assert "run --rm --no-deps backend python -m app.manage migrate" in initialize
+    assert "collectstatic --noinput --clear" in initialize
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
@@ -325,7 +329,6 @@ def test_server_rendered_release_preserves_manifest_deploy_and_rollback_contract
     assert "RELEASE_BACKEND_IMAGE=%s" in makefile
     assert "RELEASE_WEB_IMAGE=%s" in makefile
     assert "docker image inspect" in makefile
-    assert "pull app web" in makefile
     assert "deploy-release: initialize-release" in makefile
     assert "rollback-release: deploy-release" in makefile
 
