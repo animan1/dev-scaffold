@@ -29,7 +29,7 @@ def test_server_rendered_production_image_is_multistage_and_non_root() -> None:
     ).read_text()
 
     assert "AS development" in dockerfile
-    assert "AS production" in dockerfile
+    assert "FROM base AS prod\n" in dockerfile
     assert "uv sync --frozen --no-dev" in dockerfile
     assert "USER app" in dockerfile
 

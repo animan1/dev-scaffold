@@ -35,7 +35,7 @@ COPY --chown=app:app backend/ .
 
 CMD ["uv", "run", "python", "-m", "app.manage", "runserver", "0.0.0.0:8000"]
 
-FROM base AS production
+FROM base AS prod
 
 ENV DJANGO_SETTINGS_MODULE=app.project.settings.prod \
     DATABASE_URL=postgresql://app:app@db:5432/app

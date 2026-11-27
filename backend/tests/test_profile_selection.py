@@ -36,7 +36,11 @@ def _committed_profiles() -> tuple[str, list[str]]:
     return selected_match.group(1), ci_match.group(1).split()
 
 
-def test_committed_profile_selects_its_make_and_ci_contracts() -> None:
+def test_committed_profile_selects_its_make_and_ci_contracts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SCAFFOLD_PROFILE", raising=False)
+    monkeypatch.delenv("MAKEFLAGS", raising=False)
     selected_profile, ci_profiles = _committed_profiles()
     expected_compose = {
         "react-vite": "deploy/docker-compose.dev.yml",

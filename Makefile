@@ -82,7 +82,6 @@ CONTAINER_PYTHON_PROJECT_DIR := /app
 FRONTEND_DIR := frontend
 RELEASE_BACKEND_CONTEXT := backend
 RELEASE_BACKEND_DOCKERFILE := backend/Dockerfile
-RELEASE_BACKEND_STAGE := prod
 RELEASE_WEB_DOCKERFILE := deploy/nginx/Dockerfile
 MONITORING ?= 0
 EPHEMERAL_HTTP_PORT ?= $(RELEASE_HTTP_PORT)
@@ -332,7 +331,7 @@ build: ## Build and record production images from a clean checkout
 		test "$$head" = '$(RELEASE_REVISION)' || { echo 'RELEASE_REVISION must match HEAD.' >&2; exit 1; }; \
 		context="$$(mktemp -d)"; trap 'rm -rf -- "$$context"' EXIT; \
 		git archive "$$head" | tar -xf - -C "$$context"; \
-		docker build -f "$$context/$(RELEASE_BACKEND_DOCKERFILE)" --target $(RELEASE_BACKEND_STAGE) \
+		docker build -f "$$context/$(RELEASE_BACKEND_DOCKERFILE)" --target prod \
 			-t $(RELEASE_BACKEND_TAG) $(if $(RELEASE_PLATFORM),--platform $(RELEASE_PLATFORM)) \
 			--label org.opencontainers.image.revision="$$head" "$$context/$(RELEASE_BACKEND_CONTEXT)"; \
 		docker build -f "$$context/$(RELEASE_WEB_DOCKERFILE)" \

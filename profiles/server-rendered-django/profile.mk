@@ -16,7 +16,6 @@ EPHEMERAL_COMPOSE_FILES = $(PROD_COMPOSE_FILES)
 
 RELEASE_BACKEND_CONTEXT := .
 RELEASE_BACKEND_DOCKERFILE := profiles/server-rendered-django/backend.Dockerfile
-RELEASE_BACKEND_STAGE := production
 RELEASE_WEB_DOCKERFILE := profiles/server-rendered-django/release-nginx.Dockerfile
 RELEASE_BACKEND_USER := app
 RELEASE_WEB_USER := nginx
