@@ -258,6 +258,13 @@ def test_shared_lifecycle_commands_select_each_requested_environment(profile: st
     assert "X-Forwarded-Proto" not in direct
     assert "curl -k" not in direct
     assert "X-Forwarded-Proto" not in smoke
+    standalone = _make(
+        profile, "--dry-run", "verify-ephemeral", "HOST_INGRESS=0", "EPHEMERAL_HTTP_PORT=28081"
+    )
+    assert "http://127.0.0.1:28081/" in standalone
+    assert "location: https://127.0.0.1:" in standalone
+    assert "/admin/login/\\?next=/admin/" in standalone
+    assert "set-cookie: csrftoken=.*; secure" in standalone
     origin = _make(
         profile, "--dry-run", "verify-ephemeral", "HOST_INGRESS=1", "EPHEMERAL_HTTP_PORT=28081"
     )
