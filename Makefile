@@ -139,15 +139,6 @@ ops.check-external-prod: ## Run checks once through the external monitoring prof
 ops.monitor-prod: ## Follow the unattended production monitor
 	$(COMPOSE_MONITOR) logs -f monitor
 
-.PHONY: deploy-release
-deploy-release: initialize-release ## Deploy the recorded images through normal production initialization
-	$(COMPOSE_PROD) up -d --no-build
-	$(COMPOSE_PROD) up -d --no-deps --force-recreate nginx
-
-.PHONY: rollback-release
-rollback-release: ## Deploy a previously recorded RELEASE_FILE
-rollback-release: deploy-release
-
 # ---- Django dev helpers ----
 
 .PHONY: be.run
@@ -292,7 +283,7 @@ ci-ephemeral: ## Check source and exercise the recorded release in disposable Co
 		$(MAKE) up-ephemeral HOST_INGRESS=1 && \
 		$(MAKE) verify-ephemeral HOST_INGRESS=1
 
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|build|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|verify-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release|push-release-images|verify-monitoring-config
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|build|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|verify-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release|push-release-images|verify-monitoring-config|deploy-release|rollback-release
 
 .PHONY: push-release-images
 push-release-images: ## Push verified images and record their immutable digests
@@ -325,6 +316,12 @@ initialize-release: ## Initialize the database and static volume with the record
 	$(RUN_PROD) python -m app.manage check --deploy
 	$(RUN_PROD) python -m app.manage migrate
 	$(RUN_PROD) python -m app.manage collectstatic --noinput --clear
+
+.PHONY: deploy-release rollback-release
+deploy-release: initialize-release ## Deploy the recorded images through normal production initialization
+	$(COMPOSE_PROD) up -d --no-build
+
+rollback-release: deploy-release ## Deploy a previously recorded release manifest
 
 .PHONY: coverage be.coverage coverage-in-container
 # Source checks use Django's fallback settings without the Compose dev database.

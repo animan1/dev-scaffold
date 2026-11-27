@@ -27,10 +27,6 @@ seed-ephemeral-media:
 	$(COMPOSE_EPHEMERAL) exec -T $(APPLICATION_SERVICE) \
 		sh -c "printf 'MEDIA_OK\\n' > $(EPHEMERAL_MEDIA_SMOKE)"
 
-.PHONY: deploy-release
-deploy-release: initialize-release ## Deploy the digest-pinned server-rendered image set
-	$(COMPOSE_PROD) up -d --no-build
-
 ifneq ($(HOST_INGRESS),1)
 verify-ephemeral:
 	@curl -fsSI -H 'Host: $(HOST_INGRESS_HOST)' \
@@ -43,7 +39,3 @@ verify-ephemeral:
 		'$(EPHEMERAL_HTTPS_URL)/admin/login/' \
 		| grep -Eiq '^set-cookie: csrftoken=.*; secure(;|[[:space:]]*$$)'
 endif
-
-.PHONY: rollback-release
-rollback-release: ## Deploy a previously recorded release manifest
-rollback-release: deploy-release

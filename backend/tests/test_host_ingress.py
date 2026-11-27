@@ -160,14 +160,11 @@ def test_host_ingress_routes_django_admin_without_capturing_frontend_routes() ->
     assert "location / {" in nginx
 
 
-def test_production_workflows_refresh_nginx_after_backend_replacement() -> None:
+def test_production_bootstrap_uses_the_shared_startup_workflow() -> None:
     makefile = (_repo_root() / "Makefile").read_text()
 
-    refresh = "$(COMPOSE_PROD) up -d --no-deps --force-recreate nginx"
-    assert makefile.count(refresh) == 1
     bootstrap = makefile.split("bootstrap-prod: prepare-prod", 1)[1].split(".PHONY:", 1)[0]
     assert "$(MAKE) up-prod" in bootstrap
-    assert "$(COMPOSE_PROD) up -d --no-deps --force-recreate nginx" in makefile
 
 
 def test_host_ingress_normalizes_forwarding_headers_at_the_proxy_boundary() -> None:

@@ -111,6 +111,7 @@ def test_release_configuration_resolves_production_project_and_volumes(
         assert config["services"][application]["image"] == "local/backend:test"
         assert config["services"]["db"]["environment"]["POSTGRES_PASSWORD"] == "test-only"
         web = "web" if profile == "server-rendered-django" else "nginx"
+        assert config["services"][web]["depends_on"][application]["restart"] is True
         if profile == "server-rendered-django" and host_ingress == "0":
             assert not config["services"][web].get("ports")
             ingress = config["services"]["ingress"]
@@ -163,6 +164,7 @@ def test_release_configuration_resolves_production_project_and_volumes(
     )
     assert ephemeral["name"] == "tenant-ephemeral"
     assert ephemeral["services"]["db"]["environment"]["POSTGRES_PASSWORD"] == "test-only"
+    assert ephemeral["services"][web]["depends_on"][application]["restart"] is True
     if host_ingress == "1":
         assert "ingress" not in ephemeral["services"]
         origin = ephemeral["services"]["web" if profile == "server-rendered-django" else "nginx"]
