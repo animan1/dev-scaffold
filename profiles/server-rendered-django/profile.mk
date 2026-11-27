@@ -34,17 +34,10 @@ PROD_CONFIG = $(LOCAL_RELEASE_IMAGES) COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJEC
 	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory . \
 	$(PROD_COMPOSE_FILES) --env-file $(PROD_ENV_FILE)
 
-.PHONY: build
-build: ## Build the deterministic development application image
-	$(COMPOSE_DEV) build app
-
-.PHONY: setup
-setup: build ## Prepare Docker development dependencies from the committed lockfile
-
-.PHONY: fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check
+.PHONY: fe.setup fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check
 fe.lint: ## No frontend lint checks for this profile
 fe.typecheck: ## No frontend type checks for this profile
-fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check:
+fe.setup fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check:
 	@:
 
 .PHONY: build-production
@@ -175,7 +168,7 @@ rollback-release: deploy-release
 
 .PHONY: verify
 verify: ## Run the identical aggregate contract used by developers and CI
-	$(MAKE) build
+	$(MAKE) setup
 	$(MAKE) up-dev
 	$(MAKE) check
 	$(MAKE) build-production

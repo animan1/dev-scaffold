@@ -198,6 +198,26 @@ def test_typecheck_runs_frontend_only_when_applicable_and_python_passes(
     assert log.read_text().splitlines() == expected
 
 
+@pytest.mark.parametrize(
+    ("profile", "service"), [("react-vite", "backend"), ("server-rendered-django", "app")]
+)
+def test_setup_builds_development_dependencies(profile: str, service: str) -> None:
+    output = _make(f"SCAFFOLD_PROFILE={profile}", "--dry-run", "setup").stdout
+
+    assert f"build {service}\n" in output
+    assert " up " not in output
+    assert ("fe.setup-in-container" in output) == (profile == "react-vite")
+
+
+def test_react_setup_and_ci_share_the_container_install() -> None:
+    selectors = ("SCAFFOLD_PROFILE=react-vite", "--dry-run")
+    ci = _make(*selectors, "fe.ci").stdout
+    install = _make(*selectors, "fe.setup-in-container").stdout
+
+    assert "fe.setup-in-container fe.verify" in ci
+    assert install.strip() == "corepack pnpm install --frozen-lockfile"
+
+
 def test_help_lists_commands_when_optional_makefiles_are_loaded() -> None:
     for profile in ("react-vite", "server-rendered-django"):
         for backup in ("immutable-backup", "none"):
@@ -205,6 +225,7 @@ def test_help_lists_commands_when_optional_makefiles_are_loaded() -> None:
             help_output = _make(*selectors, "help").stdout
             assert "up-prod" in help_output
             assert "prepare-prod" in help_output
+            assert "\x1b[36msetup " in help_output
             assert ("verify-backup-image" in help_output) == (backup != "none")
             assert help_output == _make(*selectors, "help-verbose").stdout
             assert help_output == _make(*selectors).stdout

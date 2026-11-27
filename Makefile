@@ -118,7 +118,7 @@ be.verify: ## Run backend verification in the development container
 fe.ci: ## (Docker) Run frontend verify inside dev container
 	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
 		--volume "$(CURDIR)/frontend/node_modules:/app/node_modules" \
-		frontend sh -lc 'apk add --no-cache make >/dev/null 2>&1 || true; corepack enable; git config --global --add safe.directory /workspace; make -f /workspace/Makefile FRONTEND_DIR=/workspace/frontend fe.setup fe.verify'
+		frontend sh -lc 'apk add --no-cache make >/dev/null 2>&1 || true; corepack enable; git config --global --add safe.directory /workspace; make -f /workspace/Makefile SCAFFOLD_PROFILE=react-vite FRONTEND_DIR=/workspace/frontend fe.setup-in-container fe.verify'
 	$(COMPOSE_DEV) run --rm --no-deps --workdir /workspace/frontend \
 		backend $(CONTAINER_PYTHON_PROJECT_DIR)/.venv/bin/diff-cover coverage/lcov.info \
 		--config-file /workspace/backend/pyproject.toml $(if $(DIFF_BASE),--compare-branch=$(DIFF_BASE))
@@ -284,15 +284,6 @@ be.run: ## Run Django dev server (app.settings.dev)
 	cd $(PY_DIR)/src && DJANGO_SETTINGS_MODULE=app.project.settings.dev uv run python -m app.manage runserver 0.0.0.0:8000
 
 # ---- Setup / Hooks ----
-.PHONY: setup
-setup: ## Prepare Docker development dependencies from committed lockfiles
-	$(COMPOSE_DEV) build backend
-	@mkdir -p frontend/node_modules
-	$(COMPOSE_DEV) run --rm --no-deps --user "$$(id -u):$$(id -g)" \
-		--env HOME=/tmp --env COREPACK_HOME=/tmp/corepack \
-		--volume "$(CURDIR)/frontend/node_modules:/app/node_modules" \
-		frontend corepack pnpm install --frozen-lockfile
-
 .PHONY: hooks
 hooks: ## Install pre-commit hooks
 	cd $(PY_DIR) && uv run pre-commit install
@@ -321,10 +312,16 @@ clean: ## Remove caches and build artifacts
 	rm -rf $(PY_DIR)/.pytest_cache $(PY_DIR)/.mypy_cache
 
 # ---- Frontend (Vite/React/TS) ----
-.PHONY: fe.setup
-fe.setup: ## Install frontend deps (pnpm)
-	@corepack enable || true
-	cd $(FRONTEND_DIR) && pnpm install
+.PHONY: fe.setup fe.setup-in-container
+fe.setup: ## Install locked frontend dependencies in Docker
+	@mkdir -p "$(FRONTEND_DIR)/node_modules"
+	$(COMPOSE_DEV) run --rm --no-deps --user "$$(id -u):$$(id -g)" \
+		--env HOME=/tmp --env COREPACK_HOME=/tmp/corepack \
+		--volume "$(abspath $(FRONTEND_DIR))/node_modules:/app/node_modules" \
+		frontend make -f /workspace/Makefile SCAFFOLD_PROFILE=react-vite fe.setup-in-container
+
+fe.setup-in-container:
+	corepack pnpm install --frozen-lockfile
 
 .PHONY: fe.run
 fe.run: ## Run Vite dev server
@@ -378,7 +375,12 @@ include $(SCAFFOLD_ROOT)profiles/$(SCAFFOLD_PROFILE)/profile.mk
 endif
 
 .DEFAULT_GOAL := help
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release
+.PHONY: setup
+setup: ## Prepare Docker development dependencies from committed lockfiles
+	$(COMPOSE_DEV) build $(DEV_APPLICATION_SERVICE)
+	$(MAKE) -f $(SCAFFOLD_ROOT)Makefile fe.setup
+
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release
 
 .PHONY: precommit
 precommit: ## Run repository pre-commit hooks in the Docker toolchain
