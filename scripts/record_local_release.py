@@ -19,6 +19,9 @@ def record(options):
                 ["docker", "image", "inspect", getattr(options, role)], text=True
             )
         )[0]
+        user = getattr(options, role + "_user")
+        if user and info["Config"].get("User") != user:
+            raise ValueError(f"{role} image must run as {user}")
         if (info["Config"].get("Labels") or {}).get(
             "org.opencontainers.image.revision"
         ) != options.revision:
@@ -59,6 +62,8 @@ def main():
     for name in ("revision", "profile", "prefix", "backend", "web", "output"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--platform")
+    parser.add_argument("--backend-user")
+    parser.add_argument("--web-user")
     record(parser.parse_args())
 
 

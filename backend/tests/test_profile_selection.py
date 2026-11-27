@@ -175,7 +175,7 @@ def test_ci_cleans_up_release_validation_and_reports_failure(
 
     expected = ["setup", "check"]
     if failure != "check":
-        expected += ["build-release-images", "up-ephemeral"]
+        expected += ["build", "up-ephemeral"]
         if failure != "up-ephemeral":
             expected.append("verify-ephemeral")
             if failure != "verify-ephemeral":
@@ -277,10 +277,8 @@ def test_ci_routes_profiles_without_duplicate_pr_push_runs() -> None:
         in workflow
     )
     server_job = workflow.split("  server-rendered-profile:", 1)[1].split("\n  backend:", 1)[0]
-    assert "SCAFFOLD_PROFILE ?= server-rendered-django" in server_job
-    assert "CI_PROFILES ?= server-rendered-django" in server_job
-    assert "make --no-print-directory profiles | jq -r '.selected.application'" in server_job
-    assert "run: make ci-ephemeral" in server_job
+    assert "run: make ci-ephemeral SCAFFOLD_PROFILE=server-rendered-django" in server_job
+    assert "> .scaffold-profile" not in server_job
     assert "run: make ci-ephemeral SCAFFOLD_PROFILE=react-vite" in workflow
     assert "run: make up-dev" not in workflow
     assert "SCAFFOLD_PROFILE:" not in server_job

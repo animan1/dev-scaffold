@@ -86,7 +86,7 @@ ingress is configured; otherwise the next startup changes the exposed ports.
 
 ```bash
 make prepare-prod HOST_INGRESS=0 LOCAL_TLS=1
-make build-release-images     # build once and record this commit's images
+make build     # build once and record this commit's images
 HOST_INGRESS=0 make up-prod RELEASE_PULL=true  # start the locally built release
 HOST_INGRESS=0 make smoke-prod                 # verify TLS, health, static, and homepage
 make down-prod HOST_INGRESS=0   # stop stack
@@ -151,14 +151,14 @@ make deploy-release RELEASE_FILE=/path/to/release-<sha>.env
 ```
 
 The same workflow can run on a development laptop using production images.
-`make build-release-images RELEASE_PLATFORM=linux/arm64` builds both images and
+`make build RELEASE_PLATFORM=linux/arm64` builds both images and
 records their verified content IDs in `RELEASE_FILE`, without publishing them.
 Use the machine's destination platform. For this repository's existing laptop
 dummy, use the actual production workflow without a second Compose project:
 
 ```bash
 make prepare-prod HOST_INGRESS=0 LOCAL_TLS=1 PROD_COMPOSE_PROJECT=dev-scaffold
-make build-release-images RELEASE_PLATFORM=linux/arm64
+make build RELEASE_PLATFORM=linux/arm64
 make release-bundle-config HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 PROD_HTTPS_PORT=18443 RELEASE_CONFIG_FILE=.tmp/private-release-compose.json
 make deploy-release HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold RELEASE_BIND_ADDRESS=127.0.0.1 RELEASE_HTTP_PORT=18080 PROD_HTTPS_PORT=18443 RELEASE_PULL=true
 make smoke-prod HOST_INGRESS=0 PROD_COMPOSE_PROJECT=dev-scaffold

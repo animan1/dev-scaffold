@@ -30,14 +30,14 @@ def _make(profile: str, *arguments: str) -> str:
 
 
 def test_react_release_path_remains_selected_by_the_react_profile() -> None:
-    build = _make("react-vite", "--dry-run", "build-release-images")
+    build = _make("react-vite", "--dry-run", "build")
     verify = _make("react-vite", "--dry-run", "up-ephemeral", "verify-ephemeral")
     integration = _make("react-vite", "--dry-run", "integration-test-ephemeral")
     logs = _make("react-vite", "--dry-run", "logs-ephemeral")
     initialize = _make("react-vite", "--dry-run", "initialize-release")
 
-    assert "docker build --target prod" in build
-    assert "docker build -f deploy/nginx/Dockerfile" in build
+    assert 'backend/Dockerfile" --target prod' in build
+    assert 'docker build -f "$context/deploy/nginx/Dockerfile"' in build
     assert "profiles/server-rendered-django" not in build
     assert "deploy/docker-compose.release.yml" in verify
     assert "--env-file deploy/releases/" in verify
@@ -329,7 +329,7 @@ def test_smoke_requires_static_delivery_in_both_profiles(
 
 
 def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> None:
-    build = _make("server-rendered-django", "--dry-run", "build-release-images")
+    build = _make("server-rendered-django", "--dry-run", "build")
     verify = _make("server-rendered-django", "--dry-run", "up-ephemeral", "HOST_INGRESS=0")
     smoke = _make("server-rendered-django", "--dry-run", "verify-ephemeral", "HOST_INGRESS=0")
     integration = _make(
@@ -340,9 +340,8 @@ def test_server_rendered_release_path_builds_and_tests_its_exact_images() -> Non
     assert "profiles/server-rendered-django/backend.Dockerfile" in build
     assert "profiles/server-rendered-django/release-nginx.Dockerfile" in build
     assert "deploy/nginx/Dockerfile" not in build
-    assert "{{.Config.User}}" in build
-    assert '= "app"' in build
-    assert '= "nginx"' in build
+    assert "--backend-user app" in build
+    assert "--web-user nginx" in build
     assert "profiles/server-rendered-django/release.compose.yml" in verify
     db_start = verify.index("up -d --no-build db")
     production_check = verify.index("python -m app.manage check --deploy")
@@ -370,7 +369,7 @@ def test_server_rendered_release_preserves_manifest_deploy_and_rollback_contract
     makefile += (_repository_root() / "Makefile").read_text()
 
     for target in (
-        "build-release-images",
+        "build",
         "initialize-ephemeral",
         "initialize-release",
         "verify-ephemeral",
@@ -489,7 +488,7 @@ def test_server_rendered_only_selector_runs_the_shared_release_publication() -> 
     assert "needs: [profile-selection, immutable-release-gate]" in release_job
     assert "always()" in release_job
     assert "needs.immutable-release-gate.result == 'success'" in release_job
-    assert "make build-release-images" not in release_job
+    assert "make build" not in release_job
     assert "make up-ephemeral" not in release_job
     assert "make verify-ephemeral" not in release_job
     assert "make integration-test-ephemeral" not in release_job

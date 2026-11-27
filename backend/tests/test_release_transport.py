@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -34,18 +35,86 @@ def test_release_build_targets_platform_and_labels_exact_revision(profile: str) 
     revision = "a" * 40
     output = dry_run(
         profile,
-        "build-release-images",
+        "build",
         "RELEASE_PLATFORM=linux/arm64",
         f"RELEASE_REVISION={revision}",
     )
     build_commands = output.split("python3 scripts/record_local_release.py", 1)[0]
     assert build_commands.count("--platform linux/arm64") == 2
-    assert output.count(f"--label org.opencontainers.image.revision={revision}") == 2
+    assert f"test \"$head\" = '{revision}'" in output
+    assert output.count('--label org.opencontainers.image.revision="$head"') == 2
+
+
+@pytest.mark.parametrize("change", ["clean", "tracked", "staged", "untracked", "wrong-revision"])
+def test_build_checks_revision_and_uses_committed_context(
+    change: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    files = (
+        "Makefile",
+        ".scaffold-profile",
+        ".gitignore",
+        "backend/Dockerfile",
+        "profiles/release-transport.mk",
+    )
+    for name in files:
+        target = checkout / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / name, target)
+    subprocess.run(["git", "init", "-q"], cwd=checkout, check=True)
+    subprocess.run(["git", "add", "--", *files], cwd=checkout, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.test",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=checkout,
+        check=True,
+    )
+    (checkout / "backend/.env.private").write_text("ignored\n")
+    if change in {"tracked", "staged"}:
+        (checkout / "backend/Dockerfile").write_text("modified\n")
+    if change == "staged":
+        subprocess.run(["git", "add", "--", "backend/Dockerfile"], cwd=checkout, check=True)
+    if change == "untracked":
+        (checkout / "backend/untracked.txt").write_text("untracked\n")
+
+    docker = tmp_path / "docker"
+    docker.write_text(
+        "#!/bin/sh\n"
+        "for context; do :; done\n"
+        'test -f "$context/Dockerfile" && test ! -e "$context/.env.private" || exit 1\n'
+        'touch "$DOCKER_LOG"\n'
+        "exit 23\n"
+    )
+    docker.chmod(0o755)
+    log = tmp_path / "docker.log"
+    monkeypatch.setenv("DOCKER_LOG", str(log))
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    command = ["make", "build", "SCAFFOLD_PROFILE=react-vite", "SCAFFOLD_BACKUP_PROFILE=none"]
+    if change == "wrong-revision":
+        command.append(f"RELEASE_REVISION={'0' * 40}")
+    result = subprocess.run(command, cwd=checkout, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert log.exists() == (change == "clean"), result.stderr
+    if change == "clean":
+        assert "Error 23" in result.stderr
+    elif change == "wrong-revision":
+        assert "RELEASE_REVISION must match HEAD" in result.stderr
+    else:
+        assert "Commit changes before building" in result.stderr
 
 
 @pytest.mark.parametrize("profile", ["react-vite", "server-rendered-django"])
 def test_normal_release_keeps_native_build_and_pull_behavior(profile: str) -> None:
-    assert "--platform" not in dry_run(profile, "build-release-images", "RELEASE_PLATFORM=")
+    assert "--platform" not in dry_run(profile, "build", "RELEASE_PLATFORM=")
     output = dry_run(profile, "deploy-release")
     assert "pull " in output
     assert output.index("pull ") < output.index("up -d")
@@ -70,7 +139,7 @@ def test_runtime_inventory_includes_optional_services(profile: str) -> None:
     assert "PROD_ENV_FILE=/tmp/private-production.env" in output
 
 
-@pytest.mark.parametrize("failure", [None, "revision", "platform"])
+@pytest.mark.parametrize("failure", [None, "revision", "platform", "user"])
 def test_local_manifest_pins_verified_images_or_preserves_previous_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None
 ) -> None:
@@ -86,7 +155,7 @@ def test_local_manifest_pins_verified_images_or_preserves_previous_manifest(
         "Id": "sha256:" + "b" * 64,
         "Os": "linux",
         "Architecture": "arm64",
-        "Config": {"Labels": labels},
+        "Config": {"Labels": labels, "User": "root" if failure == "user" else "app"},
     }
     if failure == "revision":
         labels["org.opencontainers.image.revision"] = "c" * 40
@@ -103,6 +172,8 @@ def test_local_manifest_pins_verified_images_or_preserves_previous_manifest(
         prefix="local/dev-scaffold",
         backend="backend:commit",
         web="web:commit",
+        backend_user="app",
+        web_user=None,
         platform="linux/arm64",
         output=str(output),
     )
