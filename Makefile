@@ -142,18 +142,6 @@ ops.monitor-prod: ## Follow the unattended production monitor
 verify-monitoring-config: prepare-ephemeral ## Validate the optional monitoring Compose profile
 	$(COMPOSE_EPHEMERAL) -f deploy/docker-compose.external-monitoring.yml --profile monitoring config --quiet
 
-.PHONY: push-release-images
-push-release-images: ## Push verified images and record their immutable digests
-	docker push $(RELEASE_BACKEND_TAG)
-	docker push $(RELEASE_WEB_TAG)
-	@mkdir -p $(dir $(RELEASE_FILE))
-	@backend="$$(docker image inspect --format='{{index .RepoDigests 0}}' $(RELEASE_BACKEND_TAG))"; \
-	web="$$(docker image inspect --format='{{index .RepoDigests 0}}' $(RELEASE_WEB_TAG))"; \
-	test -n "$$backend"; test -n "$$web"; \
-	printf 'RELEASE_REVISION=%s\nRELEASE_IMAGE_PREFIX=%s\nRELEASE_BACKEND_IMAGE=%s\nRELEASE_WEB_IMAGE=%s\n' \
-		'$(RELEASE_REVISION)' '$(RELEASE_IMAGE_PREFIX)' "$$backend" "$$web" > $(RELEASE_FILE); \
-	echo "Recorded $(RELEASE_FILE)"
-
 .PHONY: deploy-release
 deploy-release: initialize-release ## Deploy the recorded images through normal production initialization
 	$(COMPOSE_PROD) up -d --no-build
@@ -307,7 +295,19 @@ ci-ephemeral: ## Check source and exercise the recorded release in disposable Co
 		$(MAKE) up-ephemeral HOST_INGRESS=1 && \
 		$(MAKE) verify-ephemeral HOST_INGRESS=1
 
-HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|build|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|verify-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release
+HELP_SHARED_COMMANDS := help|help-verbose|deps\.lock|setup|build|ci-ephemeral|prepare-prod|migrations|migrate|superuser|shell|up-dev|down-dev|reset-dev|logs-dev|ps-dev|down-prod|logs-prod|initialize-ephemeral|up-ephemeral|verify-ephemeral|down-ephemeral|rm-ephemeral|logs-ephemeral|up-prod|ps-prod|ps-ephemeral|wait-dev|wait-prod|restart-dev|restart-prod|format|format-check|smoke|smoke-prod|lint|typecheck|test|migrations-check|coverage|check|django-check|precommit|initialize-release|push-release-images
+
+.PHONY: push-release-images
+push-release-images: ## Push verified images and record their immutable digests
+	docker push $(RELEASE_BACKEND_TAG)
+	docker push $(RELEASE_WEB_TAG)
+	@mkdir -p $(dir $(RELEASE_FILE))
+	@set -e; backend="$$(docker image inspect --format='{{index .RepoDigests 0}}' $(RELEASE_BACKEND_TAG))"; \
+	web="$$(docker image inspect --format='{{index .RepoDigests 0}}' $(RELEASE_WEB_TAG))"; \
+	test -n "$$backend"; test -n "$$web"; \
+	printf 'SCAFFOLD_PROFILE=%s\nRELEASE_REVISION=%s\nRELEASE_IMAGE_PREFIX=%s\nRELEASE_BACKEND_IMAGE=%s\nRELEASE_WEB_IMAGE=%s\n' \
+		'$(SCAFFOLD_PROFILE)' '$(RELEASE_REVISION)' '$(RELEASE_IMAGE_PREFIX)' "$$backend" "$$web" > $(RELEASE_FILE); \
+	echo "Recorded $(RELEASE_FILE)"
 
 .PHONY: precommit be.precommit
 precommit: be.precommit ## Run repository pre-commit hooks in the Docker toolchain
