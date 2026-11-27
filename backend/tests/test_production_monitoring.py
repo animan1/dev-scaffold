@@ -25,7 +25,7 @@ def _make(*arguments: str) -> str:
 
 def test_production_operational_check_runs_once() -> None:
     output = _make("ops.check-prod")
-    assert "docker compose -f deploy/docker-compose.prod.yml" in output
+    assert "docker compose --project-directory deploy -f deploy/docker-compose.prod.yml" in output
     assert "run --rm backend python -m app.manage monitor_operational_integrity" in output
     assert "--watch" not in output
 

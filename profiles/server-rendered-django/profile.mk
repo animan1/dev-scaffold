@@ -4,8 +4,7 @@ PYTHON_PROJECT_DIR := profiles/server-rendered-django
 SMOKE_HOME_PATTERN := <main
 PRODUCTION_IMAGE ?= local/$(PROJECT_NAME):production
 DEV_COMPOSE_FILE := profiles/server-rendered-django/compose.yml
-DEV_COMPOSE_PROJECT_DIR := .
-PROD_COMPOSE_PROJECT_DIR := .
+COMPOSE_PROJECT_DIR := .
 CONTAINER_PYTHON_PROJECT_DIR := /workspace/profiles/server-rendered-django
 DEV_APPLICATION_SERVICE := app
 PROD_WEB_SERVICE := web
@@ -17,7 +16,7 @@ PROD_COMPOSE_FILES = -f $(RELEASE_COMPOSE_FILE) \
 COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) HOST_INGRESS_PORT=$(EPHEMERAL_HTTP_PORT) \
 	PROD_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) INGRESS_CERTS_PATH="$(EPHEMERAL_CERTS_PATH)" \
-	docker compose --project-directory . $(PROD_COMPOSE_FILES) \
+	docker compose --project-directory $(COMPOSE_PROJECT_DIR) $(PROD_COMPOSE_FILES) \
 	--env-file $(EPHEMERAL_ENV_FILE) --env-file $(RELEASE_FILE)
 RUN_EPHEMERAL = $(COMPOSE_EPHEMERAL) run --rm --no-deps app
 LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
@@ -26,7 +25,7 @@ LOCAL_RELEASE_IMAGES = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) \
 PROD_APPLICATION_SERVICE := app
 # Resolve configuration before a release manifest or its images exist.
 PROD_CONFIG = $(LOCAL_RELEASE_IMAGES) COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) \
-	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory . \
+	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory $(COMPOSE_PROJECT_DIR) \
 	$(PROD_COMPOSE_FILES) --env-file $(PROD_ENV_FILE)
 
 .PHONY: fe.setup fe.lint fe.typecheck fe.test fe.test-in-container fe.fmt-check fe.coverage
