@@ -20,6 +20,9 @@ SCAFFOLD_BACKUP_PROFILE ?= immutable-backup
 CI_BACKUP_PROFILES ?= immutable-backup
 PROD_ENV_FILE ?= deploy/.env.prod
 PROD_APPLICATION_SERVICE ?= backend
+COMPOSE_PROD = COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) \
+	PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) docker compose --project-directory $(COMPOSE_PROJECT_DIR) \
+	$(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
 RELEASE_PULL ?= $(COMPOSE_PROD) pull $(PROD_APPLICATION_SERVICE) $(PROD_WEB_SERVICE)
 RUN_PROD = $(COMPOSE_PROD) run --rm --no-deps $(PROD_APPLICATION_SERVICE)
 PROD_CONFIG = $(COMPOSE_PROD)
@@ -57,7 +60,7 @@ HOST_UID ?= $(shell id -u)
 HOST_GID ?= $(shell id -g)
 COMPOSE_DEV = COMPOSE_PROJECT_NAME=$(DEV_COMPOSE_PROJECT) APP_HOST=$(APP_HOST) DEV_HTTP_PORT=$(DEV_HTTP_PORT) \
 	GIT_COMMON_DIR="$(GIT_COMMON_DIR)" HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
-	docker compose --project-directory $(DEV_COMPOSE_PROJECT_DIR) -f $(DEV_COMPOSE_FILE)
+	docker compose --project-directory $(COMPOSE_PROJECT_DIR) -f $(DEV_COMPOSE_FILE)
 DEV_RUN_BACKEND_MAKE = $(COMPOSE_DEV) run --rm --workdir /workspace/backend --env REPO_DIR=/workspace $(1) \
 	$(DEV_APPLICATION_SERVICE) make --no-print-directory -f /workspace/Makefile SCAFFOLD_PROFILE=$(SCAFFOLD_PROFILE)
 DJANGO_DEV_MANAGE = $(COMPOSE_DEV) run --rm$(if $(1), $(1)) --workdir $(CONTAINER_PYTHON_PROJECT_DIR) \
@@ -66,7 +69,7 @@ DJANGO_DEV_MANAGE = $(COMPOSE_DEV) run --rm$(if $(1), $(1)) --workdir $(CONTAINE
 ifeq ($(SCAFFOLD_PROFILE),react-vite)
 
 DEV_COMPOSE_FILE := deploy/docker-compose.dev.yml
-DEV_COMPOSE_PROJECT_DIR := deploy
+COMPOSE_PROJECT_DIR := deploy
 DEV_APPLICATION_SERVICE := backend
 CONTAINER_PYTHON_PROJECT_DIR := /app
 FRONTEND_DIR := frontend
@@ -87,9 +90,6 @@ PROD_CONFIG = RELEASE_BACKEND_IMAGE=$(RELEASE_BACKEND_TAG) RELEASE_WEB_IMAGE=$(R
 	docker compose $(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) --env-file $(PROD_ENV_FILE)
 COMPOSE_MONITOR = $(COMPOSE_PROD) -f deploy/docker-compose.external-monitoring.yml --profile monitoring
 PROD_WEB_SERVICE := nginx
-COMPOSE_PROD = PROD_ENV_FILE=$(abspath $(PROD_ENV_FILE)) COMPOSE_PROJECT_NAME=$(PROD_COMPOSE_PROJECT) docker compose \
-	$(PROD_COMPOSE_FILES) $(PROD_COMPOSE_PROFILES) \
-	--env-file $(PROD_ENV_FILE) --env-file $(RELEASE_FILE)
 COMPOSE_EPHEMERAL = COMPOSE_PROJECT_NAME=$(EPHEMERAL_COMPOSE_PROJECT) \
 	PROD_ENV_FILE=$(EPHEMERAL_ENV_FILE) EPHEMERAL_HTTPS_PORT=$(EPHEMERAL_HTTPS_PORT) docker compose \
 	-f deploy/docker-compose.prod.yml -f deploy/docker-compose.release.yml \
